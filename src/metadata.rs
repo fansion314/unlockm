@@ -18,11 +18,13 @@ pub fn enrich_staged(
     kind: Kind,
     hints: &MetadataHints,
     client: &MetadataClient,
-) -> std::result::Result<(), String> {
-    let existing = tags::read(audio).unwrap_or_else(|error| {
-        tracing::warn!(path=%audio.display(), %error, "could not read tags");
-        Metadata::default()
-    });
+) -> std::result::Result<Option<std::path::PathBuf>, String> {
+    let existing = tags::read(audio).map_err(|error| {
+        format!(
+            "read existing tags from staged {}: {error}",
+            audio.display()
+        )
+    })?;
     let incoming = match kind {
         Kind::Ncm => ncm::parse(source)?,
         Kind::QmcV2 => qmc_incoming(&existing, source, hints, client)?,
@@ -30,15 +32,16 @@ pub fn enrich_staged(
     };
     let merged = merge(existing, incoming);
     apply_merged(audio, merged, client)
+        .map_err(|error| format!("update staged metadata at {}: {error}", audio.display()))
 }
 
 fn apply_merged(
     audio: &Path,
     merged: Metadata,
     client: &MetadataClient,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<Option<std::path::PathBuf>, String> {
     if merged.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let cover = merged
         .cover
@@ -51,7 +54,7 @@ fn apply_merged(
             }
         })
         .transpose()?;
-    tags::write(audio, &merged, cover.as_deref())
+    tags::prepare_write(audio, &merged, cover.as_deref()).map(Some)
 }
 
 fn qmc_incoming(
@@ -153,12 +156,12 @@ mod tests {
     fn staged_audio() -> (tempfile::TempDir, std::path::PathBuf) {
         let temp = tempfile::tempdir().unwrap();
         let audio = temp.path().join("Artist - Song.mp3");
-        std::fs::copy(
+        let fixture = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../lib_um_crypto_rust/um_audio/src/__fixtures__/ffmpeg_silent.mp3"),
-            &audio,
+                .join("tests/fixtures/lofty-silent.mp3.b64"),
         )
         .unwrap();
+        std::fs::write(&audio, STANDARD.decode(fixture.trim()).unwrap()).unwrap();
         (temp, audio)
     }
     #[test]
@@ -166,7 +169,7 @@ mod tests {
         let (_temp, audio) = staged_audio();
         let (base, calls) = server(false, 2);
         let client = MetadataClient::with_test_base(1, base);
-        enrich_staged(
+        let candidate = enrich_staged(
             &audio,
             Path::new("unrelated.mflac"),
             Kind::QmcV2,
@@ -176,7 +179,9 @@ mod tests {
             },
             &client,
         )
+        .unwrap()
         .unwrap();
+        crate::io::atomic::AtomicOutput::publish_existing_temp(candidate, &audio, true).unwrap();
         client.exact("mid").unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         let result = tags::read(&audio).unwrap();

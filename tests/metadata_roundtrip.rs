@@ -4,6 +4,9 @@ use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 
 const COVER_PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLxmwAAAABJRU5ErkJggg==";
+fn silent_mp3() -> Vec<u8> {
+    fixture("lofty-silent.mp3.b64")
+}
 #[test]
 fn unsupported_tag_container_is_non_destructive() {
     let temp = tempfile::tempdir().unwrap();
@@ -25,11 +28,7 @@ fn unsupported_tag_container_is_non_destructive() {
 fn native_id3_write_round_trips_without_reencoding_the_mpeg_frame() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("fixture.mp3");
-    // MIT/Apache upstream's deterministic ffmpeg silent MP3 fixture avoids a
-    // copyrighted song while exercising Lofty's real MPEG/ID3 path.
-    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../lib_um_crypto_rust/um_audio/src/__fixtures__/ffmpeg_silent.mp3");
-    fs::copy(fixture, &path).unwrap();
+    fs::write(&path, silent_mp3()).unwrap();
     let before = fs::read(&path).unwrap();
     let metadata = unlockm::metadata::Metadata {
         title: Some(unlockm::metadata::MetadataValue::new(
@@ -72,7 +71,8 @@ fn fixture(name: &str) -> Vec<u8> {
         .unwrap()
 }
 fn properties(path: &Path) -> FileProperties {
-    lofty::read_from_path(path).unwrap().properties().clone()
+    let mut file = fs::File::open(path).unwrap();
+    lofty::read_from(&mut file).unwrap().properties().clone()
 }
 fn audio_signature(
     properties: &FileProperties,
@@ -160,9 +160,68 @@ fn audio_fingerprint(extension: &str, bytes: &[u8]) -> [u8; 32] {
         "flac" => flac_audio(bytes).to_vec(),
         "m4a" => m4a_audio(bytes).to_vec(),
         "ogg" => ogg_audio(bytes),
+        "mp3" => {
+            let start = bytes
+                .windows(2)
+                .position(|v| v[0] == 0xff && v[1] & 0xe0 == 0xe0)
+                .expect("MP3 fixture had no MPEG frame");
+            bytes[start..].to_vec()
+        }
         _ => unreachable!(),
     };
     Sha256::digest(payload).into()
+}
+
+#[test]
+fn lofty_real_media_round_trips_when_staged_without_an_extension() {
+    let mp3 = silent_mp3();
+    for (extension, bytes) in [
+        ("mp3", mp3),
+        ("flac", fixture("lofty-full_test.flac.b64")),
+        ("ogg", fixture("lofty-full_test.ogg.b64")),
+        ("m4a", fixture("lofty-m4a_codec_aac.m4a.b64")),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".unlockm-stage-extensionless");
+        fs::write(&path, &bytes).unwrap();
+        // This is the old production API and documents the regression: Lofty
+        // cannot infer the type from the owned extensionless staging name.
+        assert!(lofty::read_from_path(&path).is_err(), "{extension}");
+        let before_properties = properties(&path);
+        let before_payload = audio_fingerprint(extension, &bytes);
+        let metadata = unlockm::metadata::Metadata {
+            title: Some(unlockm::metadata::MetadataValue::new(
+                "Staged Title",
+                unlockm::metadata::Provenance::Container,
+            )),
+            album: Some(unlockm::metadata::MetadataValue::new(
+                "Staged Album",
+                unlockm::metadata::Provenance::Container,
+            )),
+            artists: Some(unlockm::metadata::MetadataValue::new(
+                "Staged Artist",
+                unlockm::metadata::Provenance::Container,
+            )),
+            ..Default::default()
+        };
+        let cover = STANDARD.decode(COVER_PNG).unwrap();
+        unlockm::metadata::tags::write(&path, &metadata, Some(&cover)).unwrap();
+        let reread = unlockm::metadata::tags::read(&path).unwrap();
+        assert_eq!(reread.title.unwrap().text, "Staged Title", "{extension}");
+        assert_eq!(reread.album.unwrap().text, "Staged Album", "{extension}");
+        assert_eq!(reread.artists.unwrap().text, "Staged Artist", "{extension}");
+        assert_eq!(reread.cover.unwrap().bytes.unwrap(), cover, "{extension}");
+        assert_eq!(
+            audio_signature(&properties(&path)),
+            audio_signature(&before_properties),
+            "{extension} audio properties"
+        );
+        assert_eq!(
+            audio_fingerprint(extension, &fs::read(&path).unwrap()),
+            before_payload,
+            "{extension}"
+        );
+    }
 }
 
 #[test]

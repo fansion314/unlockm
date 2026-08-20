@@ -68,7 +68,7 @@ The planned single-package layout keeps a reusable library surface in `src/lib.r
 4. `formats` first selects candidates by longest, case-insensitive suffix, then validates headers. Standard audio is passthrough; an invalid encrypted-looking file is an error unless standard-audio probing positively identifies it.
 5. `runner` admits at most `--jobs` blocking jobs. A decrypt adapter streams payload chunks through the pinned `umc_*` cipher into a temporary file in the destination directory. Copies use the platform's optimized filesystem copy where possible.
 6. The decrypted header is probed with `um_audio` to choose the real output extension. A mismatch with an early path prediction is resolved before destination reservation and publication.
-7. Without `--update-metadata`, decrypted audio bytes and any existing embedded tags are retained. With it, `metadata` reads existing tags, merges only verified source-specific data, validates cover bytes, and writes tags without re-encoding audio.
+7. Without `--update-metadata`, decrypted audio bytes and any existing embedded tags are retained. With it, `metadata` content-probes the private staged bytes rather than relying on the extensionless staging filename, merges only verified source-specific data, validates cover bytes, and writes tags without re-encoding audio.
 8. `atomic` publishes the completed temporary file. Existing outputs are skipped unless `--overwrite` is set. A failure leaves the source and any pre-existing output untouched.
 9. Batch mode continues after per-file failures and returns a non-zero status after printing a summary. Watch mode logs per-file failures and stays alive until cancellation or a fatal watcher/configuration error.
 
@@ -127,7 +127,7 @@ Metadata uses field-level provenance rather than a single untyped record:
 3. Filenames are query hints only. A search result is eligible only when normalized title and artist agree, duration is within tolerance, and the best result has a safe margin over the runner-up.
 4. For covers, existing embedded audio art is preferred, then container-embedded art, then exact-ID network art. Search-derived art follows the same strict identity gate.
 
-Image magic/MIME, byte limit, and decodability are checked before embedding. Native Rust tag writing preserves audio frames and avoids an FFmpeg runtime dependency. If a container/tag combination cannot be safely updated, conversion succeeds with existing tags and a warning.
+Image magic/MIME, byte limit, and decodability are checked before embedding. Native Rust tag loading and writing identifies content from opened staged bytes, never from a private staging filename extension; it preserves audio frames and avoids an FFmpeg runtime dependency. If a container/tag combination cannot be safely updated, conversion succeeds with existing tags and one source-oriented warning.
 
 ### Testing and release
 

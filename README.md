@@ -62,7 +62,8 @@ found.
 
 Without `--update-metadata`, conversion makes no metadata network request and
 retains embedded tags/artwork. With it, NCM container data and QMC footer
-identities may enrich a staged output. QMC uses an exact resource/media identity
+identities may enrich a content-probed staged output even though its private
+`.unlockm-stage-*` filename has no audio extension. QMC uses an exact resource/media identity
 request when available; only files without that identity may use a strict unique
 title/artist/duration search. Filename search is only a hint: ambiguous or
 offline results leave existing tags untouched. Artwork precedence is embedded
@@ -75,11 +76,13 @@ remote artwork is accepted only from the documented QQ and Netease music CDNs;
 URLs with local hosts, IP literals, userinfo, or other origins are rejected
 before a request is dispatched.
 
-The default log level is `warn`; use `--log-level debug` for per-file diagnosis
-or `--json-logs` for structured output. A batch with conflicts or file failures
-exits 3 after processing unaffected siblings. Check `--help` for all budgets and
-paths. If a key is absent, confirm its explicit source instead of attempting a
-raw key fallback.
+The default log level is `warn`. Use `error` for fatal/per-file errors only,
+`warn` for best-effort metadata skips, `info` for summaries, `debug` for
+per-file diagnosis, `trace` for maximal diagnostics, or `off` to suppress
+tracing output; `--json-logs` changes rendering only, not this filter. A batch
+with conflicts or file failures exits 3 after processing unaffected siblings.
+Check `--help` for all budgets and paths. If a key is absent, confirm its
+explicit source instead of attempting a raw key fallback.
 
 ## License and notices
 

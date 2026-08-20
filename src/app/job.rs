@@ -29,10 +29,20 @@ pub struct PlannedJob {
 #[derive(Debug)]
 pub struct StagedDecrypt {
     pub path: std::path::PathBuf,
+    cleanup: Vec<std::path::PathBuf>,
 }
 impl Drop for StagedDecrypt {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+        for path in &self.cleanup {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+impl StagedDecrypt {
+    fn replace_with(&mut self, candidate: std::path::PathBuf) {
+        self.cleanup
+            .push(std::mem::replace(&mut self.path, candidate));
     }
 }
 pub fn preflight(config: &RunConfig, source: &Path) -> Result<Option<PlannedJob>, String> {
@@ -100,7 +110,10 @@ fn stage_decrypt(
         .map_err(|e| e.to_string())?
         .keep()
         .map_err(|e| e.error.to_string())?;
-    let staged = StagedDecrypt { path };
+    let mut staged = StagedDecrypt {
+        path,
+        cleanup: Vec::new(),
+    };
     let kind = prepared.kind();
     match prepared.decrypt_to(
         &mut file,
@@ -112,14 +125,18 @@ fn stage_decrypt(
             file.flush().map_err(|e| e.to_string())?;
             drop(file);
             if config.update_metadata {
-                if let Err(error) = metadata::enrich_staged(
+                match metadata::enrich_staged(
                     &staged.path,
                     source,
                     kind,
                     prepared.metadata_hints(),
                     metadata,
                 ) {
-                    tracing::warn!(path=%source.display(), %error, "metadata update skipped");
+                    Ok(Some(candidate)) => staged.replace_with(candidate),
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::warn!(path=%source.display(), %error, "metadata update skipped")
+                    }
                 }
             }
             Ok((staged, extension))

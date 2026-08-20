@@ -5,10 +5,22 @@ use lofty::{
     picture::{Picture, PictureType},
     tag::{Accessor, ItemKey, Tag},
 };
-use std::{fs, path::Path};
+use std::{
+    fs::{self, OpenOptions},
+    path::Path,
+};
+
+fn probe(path: &Path) -> std::result::Result<lofty::file::TaggedFile, String> {
+    let mut source = OpenOptions::new()
+        .read(true)
+        .open(path)
+        .map_err(|error| format!("open {} for tag probing: {error}", path.display()))?;
+    lofty::read_from(&mut source)
+        .map_err(|error| format!("content-probe tags in {}: {error}", path.display()))
+}
 
 pub fn read(path: &Path) -> std::result::Result<Metadata, String> {
-    let file = lofty::read_from_path(path).map_err(|e| e.to_string())?;
+    let file = probe(path)?;
     let tag = file.primary_tag().or_else(|| file.first_tag());
     let Some(tag) = tag else {
         return Ok(Metadata::default());
@@ -41,9 +53,62 @@ pub fn write(
     path: &Path,
     metadata: &Metadata,
     cover: Option<&[u8]>,
+) -> std::result::Result<std::path::PathBuf, String> {
+    let candidate = prepare_write(path, metadata, cover)?;
+    crate::io::atomic::AtomicOutput::publish_existing_temp(candidate.clone(), path, true).map_err(
+        |error| {
+            let _ = fs::remove_file(&candidate);
+            format!("publish verified metadata candidate: {error}")
+        },
+    )?;
+    Ok(path.to_path_buf())
+}
+
+pub(crate) fn prepare_write(
+    path: &Path,
+    metadata: &Metadata,
+    cover: Option<&[u8]>,
+) -> std::result::Result<std::path::PathBuf, String> {
+    write_with_hook(path, metadata, cover, || Ok(()))
+}
+
+fn write_with_hook<F>(
+    path: &Path,
+    metadata: &Metadata,
+    cover: Option<&[u8]>,
+    after_save: F,
+) -> std::result::Result<std::path::PathBuf, String>
+where
+    F: FnOnce() -> std::result::Result<(), String>,
+{
+    let parent = path.parent().ok_or("staged audio has no parent")?;
+    let candidate = tempfile::Builder::new()
+        .prefix(".unlockm-metadata-")
+        .tempfile_in(parent)
+        .map_err(|error| format!("create metadata candidate: {error}"))?
+        .into_temp_path()
+        .keep()
+        .map_err(|error| format!("keep metadata candidate: {}", error.error))?;
+    if let Err(error) = fs::copy(path, &candidate) {
+        let _ = fs::remove_file(&candidate);
+        return Err(format!("copy staged audio to metadata candidate: {error}"));
+    }
+    let result = write_candidate(&candidate, metadata, cover, after_save);
+    if let Err(error) = result {
+        let _ = fs::remove_file(&candidate);
+        return Err(error);
+    }
+    Ok(candidate)
+}
+
+fn write_candidate(
+    path: &Path,
+    metadata: &Metadata,
+    cover: Option<&[u8]>,
+    after_save: impl FnOnce() -> std::result::Result<(), String>,
 ) -> std::result::Result<(), String> {
-    let before = fs::read(path).map_err(|e| e.to_string())?;
-    let mut file = lofty::read_from_path(path).map_err(|e| e.to_string())?;
+    let before_len = fs::metadata(path).map_err(|e| e.to_string())?.len();
+    let mut file = probe(path)?;
     let tag_type = file.primary_tag_type();
     if file.primary_tag_mut().is_none() {
         file.insert_tag(Tag::new(tag_type));
@@ -74,10 +139,16 @@ pub fn write(
             bytes.to_vec(),
         ));
     }
-    file.save_to_path(path, WriteOptions::default())
+    let mut output = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|error| format!("open {} for tag write: {error}", path.display()))?;
+    file.save_to(&mut output, WriteOptions::default())
         .map_err(|e| e.to_string())?;
-    let after = fs::read(path).map_err(|e| e.to_string())?;
-    if after.is_empty() || before.is_empty() {
+    after_save()?;
+    let after_len = fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if after_len == 0 || before_len == 0 {
         return Err("tag write produced empty audio".into());
     }
     let reread = read(path)?;
@@ -94,9 +165,78 @@ pub fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine};
     #[test]
     fn cover_validation_rejects_bad_or_large_bytes() {
         assert!(validate_cover(b"not-an-image").is_err());
         assert!(validate_cover(&vec![0; 10 * 1024 * 1024 + 1]).is_err());
+    }
+    #[test]
+    fn valid_tagless_audio_is_an_empty_metadata_value() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".unlockm-stage-tagless");
+        let fixture = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/lofty-silent.mp3.b64"),
+        )
+        .unwrap();
+        std::fs::write(&path, STANDARD.decode(fixture.trim()).unwrap()).unwrap();
+        let metadata = read(&path).unwrap();
+        assert!(metadata.title.is_none());
+        assert!(metadata.album.is_none());
+        assert!(metadata.artists.is_none());
+        assert!(metadata.cover.is_none());
+    }
+    #[test]
+    fn post_save_failure_preserves_original_stage_and_cleans_candidate() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".unlockm-stage-original");
+        let fixture = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/lofty-silent.mp3.b64"),
+        )
+        .unwrap();
+        std::fs::write(&path, STANDARD.decode(fixture.trim()).unwrap()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let metadata = Metadata {
+            title: Some(MetadataValue::new("mutated", Provenance::Container)),
+            ..Default::default()
+        };
+        assert!(write_with_hook(&path, &metadata, None, || {
+            Err("injected post-save verification failure".into())
+        })
+        .is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert!(probe(&path).is_ok());
+        assert_eq!(
+            std::fs::read_dir(temp.path())
+                .unwrap()
+                .filter_map(std::result::Result::ok)
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with(".unlockm-"))
+                .count(),
+            1
+        );
+    }
+    #[test]
+    fn copy_failure_cleans_candidate_immediately() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join(".unlockm-stage-directory");
+        std::fs::create_dir(&source).unwrap();
+        let metadata = Metadata {
+            title: Some(MetadataValue::new("mutated", Provenance::Container)),
+            ..Default::default()
+        };
+        assert!(prepare_write(&source, &metadata, None).is_err());
+        assert_eq!(
+            std::fs::read_dir(temp.path())
+                .unwrap()
+                .filter_map(std::result::Result::ok)
+                .filter(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".unlockm-metadata-"))
+                .count(),
+            0
+        );
     }
 }

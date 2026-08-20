@@ -102,6 +102,23 @@ fn publish_temp_with<F>(
 where
     F: FnMut(&Path, &Path) -> std::io::Result<()>,
 {
+    let cleanup = temp.clone();
+    let result = publish_temp_inner(temp, destination, overwrite, &mut rename);
+    if result.is_err() {
+        let _ = fs::remove_file(cleanup);
+    }
+    result
+}
+
+fn publish_temp_inner<F>(
+    temp: PathBuf,
+    destination: &Path,
+    overwrite: bool,
+    rename: &mut F,
+) -> Result<bool>
+where
+    F: FnMut(&Path, &Path) -> std::io::Result<()>,
+{
     if destination.exists() && !overwrite {
         let _ = fs::remove_file(&temp);
         return Ok(false);
@@ -138,7 +155,19 @@ where
     };
     if let Err(source) = rename(&temp, destination) {
         if let Some(backup) = &backup {
-            let _ = rename(backup, destination);
+            if let Err(restore_error) = rename(backup, destination) {
+                // A second rename failure must not silently strand the only
+                // good bytes. Copying is a recoverable fallback for this rare
+                // error path; successful copy restores the destination before
+                // cleanup, while a failed copy reports the backup location.
+                if let Err(copy_error) = fs::copy(backup, destination) {
+                    return Err(AppError::Internal(format!(
+                        "publish rename failed ({source}); restore rename failed ({restore_error}); backup retained at {} after copy fallback failed ({copy_error})",
+                        backup.display()
+                    )));
+                }
+                let _ = fs::remove_file(backup);
+            }
         }
         let _ = fs::remove_file(&temp);
         return Err(AppError::Io {
@@ -246,5 +275,66 @@ mod tests {
                 .count(),
             0
         );
+    }
+    #[test]
+    fn early_backup_rename_failure_cleans_candidate_and_preserves_stage() {
+        let d = tempdir().unwrap();
+        let stage = d.path().join(".unlockm-stage-original");
+        let candidate = d.path().join(".unlockm-metadata-candidate");
+        fs::write(&stage, b"original").unwrap();
+        fs::write(&candidate, b"candidate").unwrap();
+        let result = publish_temp_with(candidate.clone(), &stage, true, |from, to| {
+            if from == stage
+                && to
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(".unlockm-backup-")
+            {
+                return Err(std::io::Error::other("injected old-stage backup failure"));
+            }
+            fs::rename(from, to)
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&stage).unwrap(), b"original");
+        assert!(!candidate.exists());
+        assert_eq!(
+            fs::read_dir(d.path())
+                .unwrap()
+                .filter_map(std::result::Result::ok)
+                .filter(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".unlockm-backup-"))
+                .count(),
+            0
+        );
+    }
+    #[test]
+    fn double_rename_failure_stream_recovers_old_stage_and_cleans_owned_files() {
+        let d = tempdir().unwrap();
+        let destination = d.path().join("stage");
+        let candidate = d.path().join(".unlockm-metadata-candidate");
+        fs::write(&destination, b"old").unwrap();
+        fs::write(&candidate, b"new").unwrap();
+        let result = publish_temp_with(candidate.clone(), &destination, true, |from, to| {
+            if from == candidate && to == destination {
+                return Err(std::io::Error::other("injected candidate rename failure"));
+            }
+            if from
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".unlockm-backup-")
+                && to == destination
+            {
+                return Err(std::io::Error::other("injected restore rename failure"));
+            }
+            fs::rename(from, to)
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&destination).unwrap(), b"old");
+        assert!(!candidate.exists());
+        assert_eq!(fs::read_dir(d.path()).unwrap().count(), 1);
     }
 }
