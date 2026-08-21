@@ -1,0 +1,12 @@
+# Keep formatter-managed source/configuration text invariant across macOS and
+# Windows checkouts. Git's automatic text detection still leaves binary assets
+# untouched; the explicit patterns document the desktop bundle asset boundary.
+* text=auto eol=lf
+
+*.png -text
+*.ico -text
+*.icns -text
+*.dmg -text
+*.exe -text
+*.p12 -text
+*.pfx -text

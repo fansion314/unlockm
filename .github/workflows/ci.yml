@@ -51,12 +51,31 @@ jobs:
         with:
           components: rustfmt, clippy
       # All frontend/package-manager/Tauri lifecycle work stays behind vp.
-      - run: vp -C desktop install --frozen-lockfile
-      - run: vp -C desktop check
-      - run: vp -C desktop test
-      - run: vp -C desktop build
-      - run: cargo clippy --locked -p unlockm-desktop --all-targets -- -D warnings
-      - run: cargo test --locked -p unlockm-desktop --all-targets
+      - id: desktop_dependencies
+        run: vp -C desktop install --frozen-lockfile
+      # Keep formatting a real failing quality gate, but do not hide native
+      # compilation diagnostics merely because an earlier source gate failed.
+      - name: Check desktop formatting
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: vp -C desktop fmt . --check
+      - name: Check desktop lint and types
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: vp -C desktop check --no-fmt
+      - name: Test desktop source
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: vp -C desktop test
+      - name: Build desktop frontend
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: vp -C desktop build
+      - name: Lint desktop Rust
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: cargo clippy --locked -p unlockm-desktop --all-targets -- -D warnings
+      - name: Test desktop Rust
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: cargo test --locked -p unlockm-desktop --all-targets
       - name: Audit bundled Fontsource license resources
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
         run: cargo test --locked -p unlockm-desktop --test license_audit
-      - run: vp -C desktop exec tauri build --debug --no-bundle
+      - name: Compile desktop Tauri host without bundle
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: vp -C desktop exec tauri build --debug --no-bundle

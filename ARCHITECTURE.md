@@ -148,7 +148,7 @@ Image magic/MIME, byte limit, and decodability are checked before embedding. Nat
 
 ### Testing and release
 
-Unit tests cover path planning, suffix precedence, metadata merging, output reservations, key lookup, event coalescing, and one-terminal-report contracts. Integration tests use temporary trees and deterministic local HTTP fixtures. Watch tests wait on observable outputs rather than fixed sleeps. Desktop tests cover SQLite recovery/pagination/commit ordering, one-active-run/cancellation, IPC DTOs, React state, accessibility, i18n, bounded virtual rendering, and lazy artwork. Release checks include locked Vite+ frontend validation through `vp`, Rust checks, and no-bundle Tauri compilation on macOS/Windows.
+Unit tests cover path planning, suffix precedence, metadata merging, output reservations, key lookup, event coalescing, and one-terminal-report contracts. Integration tests use temporary trees and deterministic local HTTP fixtures. Watch tests wait on observable outputs rather than fixed sleeps. Desktop tests cover SQLite recovery/pagination/commit ordering, one-active-run/cancellation, IPC DTOs, React state, accessibility, i18n, bounded virtual rendering, and lazy artwork. Release checks include locked Vite+ frontend validation through `vp`, Rust checks, and no-bundle Tauri compilation on macOS/Windows. The tag channel has no signing-service or user-managed signing-credential cost and emits checksum-backed unsigned preview prereleases: macOS uses only an ad-hoc app signature, Windows artifacts are explicitly `NotSigned`, and neither channel contains a conversion sidecar. GitHub-hosted runner and artifact usage remains subject to the repository owner's plan and quota.
 
 ## 8. Extension Points
 

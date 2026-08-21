@@ -1,4 +1,4 @@
-name: Desktop release
+name: Desktop unsigned preview release
 
 on:
   push:
@@ -10,8 +10,7 @@ permissions:
 
 jobs:
   package:
-    name: Package ${{ matrix.name }}
-    environment: release
+    name: Package unsigned preview ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
@@ -27,7 +26,7 @@ jobs:
             os: windows-latest
             target: x86_64-pc-windows-msvc
             bundle_dir: target/x86_64-pc-windows-msvc/release/bundle/nsis
-            build_args: --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.windows-signing.json
+            build_args: --target x86_64-pc-windows-msvc --bundles nsis
     runs-on: ${{ matrix.os }}
     steps:
       # actions/checkout v7.0.1
@@ -75,72 +74,17 @@ jobs:
             echo "UnlockM must link the Rust engine and must not package a conversion sidecar."
             exit 1
           fi
-      - name: Require and import macOS release credentials
-        if: matrix.id == 'macos'
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          set -euo pipefail
-          for required in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID KEYCHAIN_PASSWORD; do
-            test -n "${!required:-}" || { echo "missing release secret: $required"; exit 1; }
-          done
-          certificate="$RUNNER_TEMP/unlockm-release.p12"
-          printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$certificate"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security set-keychain-settings -t 3600 -u build.keychain
-          security import "$certificate" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          identity=$(security find-identity -v -p codesigning build.keychain | awk -F '"' '/Developer ID Application/{print $2; exit}')
-          test -n "$identity" || { echo "Developer ID Application certificate is required"; exit 1; }
-          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
-      - name: Require and import Windows release certificate
-        if: matrix.id == 'windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
-            throw "WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD are required for a release."
-          }
-          $certificatePath = Join-Path $env:RUNNER_TEMP "unlockm-release.pfx"
-          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
-          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          if (-not $certificate.HasPrivateKey) { throw "release certificate has no private key" }
-          @"
-          {
-            "bundle": {
-              "windows": {
-                "certificateThumbprint": "$($certificate.Thumbprint)",
-                "digestAlgorithm": "sha256",
-                "timestampUrl": "http://timestamp.digicert.com"
-              }
-            }
-          }
-          "@ | Set-Content -Path "desktop/src-tauri/tauri.windows-signing.json" -Encoding utf8
       # tauri-apps/tauri-action action-v1.0.0; its command remains the vp-routed local CLI.
-      - name: Build signed installer
+      - name: Build unsigned preview installer
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          # Tauri's documented ad-hoc identity; no certificate or secret is used.
+          APPLE_SIGNING_IDENTITY: ${{ matrix.id == 'macos' && '-' || '' }}
         with:
           projectPath: desktop
           tauriScript: vp exec tauri
           args: ${{ matrix.build_args }}
-      - name: Verify macOS signing and notarization
+      - name: Verify macOS ad-hoc preview signature
         if: matrix.id == 'macos'
         shell: bash
         run: |
@@ -148,7 +92,8 @@ jobs:
           app=$(find target/universal-apple-darwin/release/bundle -type d -name 'UnlockM.app' -print -quit)
           test -n "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
-          xcrun stapler validate "$app"
+          codesign_details=$(codesign -dv --verbose=4 "$app" 2>&1)
+          printf '%s\n' "$codesign_details" | grep -F "Signature=adhoc"
           test -f "$app/Contents/Resources/licenses/SIL-OFL-1.1.txt"
           test -f "$app/Contents/Resources/licenses/THIRD_PARTY_NOTICES.md"
           executable_count=$(find "$app/Contents/MacOS" -type f -perm -111 | wc -l | tr -d ' ')
@@ -159,7 +104,7 @@ jobs:
             *x86_64*arm64*|*arm64*x86_64*) ;;
             *) echo "expected universal x86_64 + arm64 application, got: $architectures"; exit 1 ;;
           esac
-      - name: Verify Windows Tauri-signed app and NSIS installer
+      - name: Verify Windows unsigned preview app and NSIS installer
         if: matrix.id == 'windows'
         shell: pwsh
         run: |
@@ -169,8 +114,8 @@ jobs:
           $applications = @(Get-ChildItem "target/x86_64-pc-windows-msvc/release" -Filter "*.exe" -File)
           if ($applications.Count -ne 1) { throw "expected exactly one Tauri application executable" }
           foreach ($binary in @($applications[0], $installers[0])) {
-            if ((Get-AuthenticodeSignature -FilePath $binary.FullName).Status -ne "Valid") {
-              throw "signature is not valid: $($binary.FullName)"
+            if ((Get-AuthenticodeSignature -FilePath $binary.FullName).Status -ne "NotSigned") {
+              throw "preview artifact must be NotSigned: $($binary.FullName)"
             }
           }
       - name: Inspect Windows NSIS payload for engine and bundled notices
@@ -210,7 +155,7 @@ jobs:
           mkdir -p release-assets
           matches=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
           test "${#matches[@]}" -eq 1
-          asset="UnlockM-${version}-macos-universal.dmg"
+          asset="UnlockM-${version}-macos-universal-unsigned.dmg"
           cp "${matches[0]}" "release-assets/$asset"
           (
             cd release-assets
@@ -224,7 +169,7 @@ jobs:
           $version = $env:GITHUB_REF_NAME.Substring(1)
           $installers = @(Get-ChildItem "${{ matrix.bundle_dir }}" -Filter "*-setup.exe")
           if ($installers.Count -ne 1) { throw "expected exactly one NSIS setup executable" }
-          $asset = "UnlockM-$version-windows-x64-setup.exe"
+          $asset = "UnlockM-$version-windows-x64-unsigned-setup.exe"
           New-Item -ItemType Directory -Path release-assets -Force | Out-Null
           Copy-Item $installers[0].FullName "release-assets/$asset"
           $hash = (Get-FileHash "release-assets/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -237,10 +182,9 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish release
+    name: Publish unsigned preview prerelease
     needs: package
     runs-on: ubuntu-latest
-    environment: release
     permissions:
       contents: write
     steps:
@@ -258,26 +202,29 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           expected=(
-            "UnlockM-${version}-macos-universal.dmg"
-            "UnlockM-${version}-macos-universal.dmg.sha256"
-            "UnlockM-${version}-windows-x64-setup.exe"
-            "UnlockM-${version}-windows-x64-setup.exe.sha256"
+            "UnlockM-${version}-macos-universal-unsigned.dmg"
+            "UnlockM-${version}-macos-universal-unsigned.dmg.sha256"
+            "UnlockM-${version}-windows-x64-unsigned-setup.exe"
+            "UnlockM-${version}-windows-x64-unsigned-setup.exe.sha256"
           )
           mapfile -t actual < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
           diff -u <(printf '%s\n' "${expected[@]}" | sort) <(printf '%s\n' "${actual[@]}")
           for checksum in release-assets/*.sha256; do
             (cd release-assets && shasum -a 256 -c "$(basename "$checksum")")
           done
-      - name: Create the signed, installer-only release
+      - name: Create the unsigned preview prerelease
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" release-assets/* \
-            --title "UnlockM ${GITHUB_REF_NAME}" \
-            --generate-notes
-      - name: Assert published release contains only installers and checksums
+            --title "UnlockM ${GITHUB_REF_NAME} — Unsigned Preview" \
+            --verify-tag \
+            --prerelease \
+            --generate-notes \
+            --notes $'Unsigned preview: these artifacts are not notarized or Authenticode-signed. Verify the attached SHA-256 file before opening.\n\nmacOS: after verifying the checksum, use Finder’s per-app Control-click > Open flow if Gatekeeper asks. Do not disable Gatekeeper globally.\n\nWindows: after verifying the checksum, use the per-app SmartScreen prompt only if you trust the preview and its hash. Do not disable SmartScreen globally.\n\nA future signed channel may be added separately.'
+      - name: Assert published unsigned preview assets and prerelease state
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -285,9 +232,11 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           expected=$(printf '%s\n' \
-            "UnlockM-${version}-macos-universal.dmg" \
-            "UnlockM-${version}-macos-universal.dmg.sha256" \
-            "UnlockM-${version}-windows-x64-setup.exe" \
-            "UnlockM-${version}-windows-x64-setup.exe.sha256" | sort)
+            "UnlockM-${version}-macos-universal-unsigned.dmg" \
+            "UnlockM-${version}-macos-universal-unsigned.dmg.sha256" \
+            "UnlockM-${version}-windows-x64-unsigned-setup.exe" \
+            "UnlockM-${version}-windows-x64-unsigned-setup.exe.sha256" | sort)
+          test "$(gh release view "$GITHUB_REF_NAME" --json isPrerelease --jq .isPrerelease)" = "true"
+          test "$(gh release view "$GITHUB_REF_NAME" --json name --jq .name)" = "UnlockM ${GITHUB_REF_NAME} — Unsigned Preview"
           actual=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | sort)
           diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual")

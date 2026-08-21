@@ -42,13 +42,36 @@ manual key entry are not part of v1. Conversion is in-process: the app links
 this Rust library directly and does **not** launch the `unlockm` CLI, a
 sidecar, shell command, or daemon.
 
-### Desktop installers and local data
+### Desktop preview installers and local data
 
-A protected tagged release publishes one signed/notarized universal macOS DMG
-and one signed Windows x86_64 NSIS installer, plus SHA-256 checksum files, only
-after all required signing credentials and verification steps succeed. They are
-installers rather than portable command-line binaries. Unsigned pull-request
-builds are validation-only and must never be distributed as production releases.
+Every `v*` tag automatically publishes an **unsigned preview prerelease**: one
+universal macOS DMG and one Windows x86_64 NSIS installer, each with a SHA-256
+file. The workflow needs no GitHub environment, certificate, password, or
+signing secret. GitHub-hosted Actions minutes and artifact storage still count
+against the repository owner's GitHub plan and quota, so private-repository
+overages may be billable. The macOS app receives only Tauri's ad-hoc signature;
+it is not notarized. The Windows app and installer are intentionally
+Authenticode `NotSigned`. These are installers rather than portable command-line
+binaries.
+
+Before first opening a preview, download it only from the matching GitHub
+prerelease and verify its attached checksum:
+
+```sh
+# macOS
+shasum -a 256 UnlockM-*-macos-universal-unsigned.dmg
+
+# Windows PowerShell
+Get-FileHash .\UnlockM-*-windows-x64-unsigned-setup.exe -Algorithm SHA256
+```
+
+Compare the result with the corresponding `.sha256` release asset. On macOS,
+if Gatekeeper asks after verification, use Finder's per-app **Control-click →
+Open** flow and confirm Open. On Windows, if SmartScreen identifies the
+verified preview as unknown, use its per-app **More info → Run anyway** choice
+only when you trust the release and matching hash. Do not disable Gatekeeper,
+SmartScreen, or other system-wide protections. A signed/notarized channel may
+be added separately in the future.
 
 UnlockM stores its local `history.sqlite` database in Tauri's application-data
 directory (normally `~/Library/Application Support/world.fansion.unlockm/` on
@@ -78,14 +101,9 @@ For a local native compilation without creating an installer:
 vp -C desktop exec tauri build --debug --no-bundle
 ```
 
-Production packaging is performed by the protected tag workflow, not by
-publishing an unsigned local binary. The required release signing secrets are
-documented in [`.github/workflows/desktop-release.yml`](.github/workflows/desktop-release.yml):
-`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`,
-`APPLE_PASSWORD`, `APPLE_TEAM_ID`, `KEYCHAIN_PASSWORD`,
-`WINDOWS_CERTIFICATE`, and `WINDOWS_CERTIFICATE_PASSWORD`. Configure their
-values only in the protected `release` environment; never put certificates or
-passwords in the repository.
+Preview packaging is performed automatically by the tag workflow and has no
+release secrets. It is intentionally distinct from a future optional
+signed/notarized distribution channel.
 
 The application bundle also includes [third-party notices](THIRD_PARTY_NOTICES.md)
 and the complete [SIL Open Font License 1.1](third_party/licenses/SIL-OFL-1.1.txt)

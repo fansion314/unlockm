@@ -30,12 +30,29 @@
 转换完全在进程内完成：应用直接链接本仓库的 Rust 库，**不会**启动 `unlockm` 命令行、
 sidecar、shell 命令或守护进程。
 
-### 安装包与本地数据
+### 桌面预览安装包与本地数据
 
-受保护的标签发布只有在全部签名密钥与验证步骤成功后，才会提供一个已签名/已公证的通用
-macOS DMG、一个已签名的 Windows x86_64 NSIS 安装程序，以及 SHA-256 校验文件。它们是
-安装包，而不是可移植的命令行二进制文件。未签名的 Pull Request 构建只用于验证，绝不能
-作为正式发布物分发。
+每个 `v*` 标签会自动发布一个**未签名预览版 prerelease**：一个通用 macOS DMG 和一个
+Windows x86_64 NSIS 安装程序，并各自附带 SHA-256 文件。工作流不需要 GitHub environment、
+证书、密码或签名密钥。GitHub-hosted Actions 分钟数和 artifact 存储仍会计入仓库所有者的
+GitHub 套餐与配额；私有仓库超额使用可能产生费用。macOS 应用只有 Tauri 的 ad-hoc 签名，
+**没有公证**；Windows 应用和安装程序刻意保持 Authenticode `NotSigned`。它们是安装包，
+而不是可移植的命令行二进制文件。
+
+首次打开预览版前，只从对应的 GitHub prerelease 下载，并校验附带的哈希：
+
+```sh
+# macOS
+shasum -a 256 UnlockM-*-macos-universal-unsigned.dmg
+
+# Windows PowerShell
+Get-FileHash .\UnlockM-*-windows-x64-unsigned-setup.exe -Algorithm SHA256
+```
+
+将结果与对应的 `.sha256` 发布附件比较。macOS 若在校验后仍出现 Gatekeeper 提示，请在 Finder
+中对该应用使用**按住 Control 点击 → 打开**，再确认打开。Windows 若 SmartScreen 将已校验的
+预览版识别为未知应用，只在你信任该发布和匹配哈希时使用该应用的**更多信息 → 仍要运行**。
+不要关闭 Gatekeeper、SmartScreen 或其他系统级保护。未来可另行提供已签名/已公证的发布渠道。
 
 UnlockM 把本地 `history.sqlite` 存在 Tauri 的应用数据目录中（通常为 macOS 的
 `~/Library/Application Support/world.fansion.unlockm/`，Windows 的
@@ -62,12 +79,8 @@ vp -C desktop exec tauri dev
 vp -C desktop exec tauri build --debug --no-bundle
 ```
 
-正式打包由受保护的标签发布工作流完成，而不是发布未签名的本地二进制文件。所需发布签名
-密钥名称写在 [`.github/workflows/desktop-release.yml`](.github/workflows/desktop-release.yml) 中：
-`APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_PASSWORD`、
-`APPLE_TEAM_ID`、`KEYCHAIN_PASSWORD`、`WINDOWS_CERTIFICATE` 和
-`WINDOWS_CERTIFICATE_PASSWORD`。这些值只能配置在受保护的 `release` environment 中，
-绝不能提交证书或密码。
+预览安装包由标签工作流自动发布，且不使用任何发布密钥。它与未来可选的已签名/已公证发布
+渠道有意保持区分。
 
 应用安装包也会随本地捆绑的 Bricolage Grotesque 与 Manrope 字体附带
 [第三方声明](THIRD_PARTY_NOTICES.md) 和完整的
