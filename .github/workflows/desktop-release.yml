@@ -89,8 +89,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app=$(find target/universal-apple-darwin/release/bundle -type d -name 'UnlockM.app' -print -quit)
-          test -n "$app"
+          shopt -s nullglob
+          dmgs=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          test "${#dmgs[@]}" -eq 1
+          dmg="${dmgs[0]}"
+          hdiutil verify "$dmg"
+          mount_dir=$(mktemp -d "$RUNNER_TEMP/unlockm-preview-dmg.XXXXXX")
+          mounted=0
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if [ "$mounted" -eq 1 ]; then
+              hdiutil detach "$mount_dir" || true
+            fi
+            rmdir "$mount_dir" 2>/dev/null || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg"
+          mounted=1
+          app="$mount_dir/UnlockM.app"
+          test -d "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign_details=$(codesign -dv --verbose=4 "$app" 2>&1)
           printf '%s\n' "$codesign_details" | grep -F "Signature=adhoc"
@@ -104,6 +123,10 @@ jobs:
             *x86_64*arm64*|*arm64*x86_64*) ;;
             *) echo "expected universal x86_64 + arm64 application, got: $architectures"; exit 1 ;;
           esac
+          hdiutil detach "$mount_dir"
+          mounted=0
+          rmdir "$mount_dir"
+          trap - EXIT
       - name: Verify Windows unsigned preview app and NSIS installer
         if: matrix.id == 'windows'
         shell: pwsh
