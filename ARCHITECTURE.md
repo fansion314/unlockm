@@ -2,7 +2,7 @@
 
 ## 1. Project Overview
 
-`unlockm` is a cross-platform Rust CLI that turns encrypted files downloaded by music applications into standard audio files while preserving directory layout, companion files, metadata, and album art.
+`unlockm` is a cross-platform Rust conversion engine and CLI that turns encrypted files downloaded by music applications into standard audio files while preserving directory layout, companion files, metadata, and album art. `UnlockM` is its first desktop host: a Tauri application for macOS and Windows that links the same Rust engine directly.
 
 The first release supports one-shot file/directory conversion and a long-running recursive watch mode. It targets Windows, macOS, and Linux, favors high aggregate throughput, keeps memory bounded, and never requires audio transcoding.
 
@@ -11,22 +11,25 @@ The repository implements the layout and invariants below. Its pinned behavioral
 - Go CLI `../cli` at `d0d3647d615c8624abf27e30ade07d23da757041`, especially its resilient recursive processing and passthrough behavior.
 - Rust crypto workspace `../lib_um_crypto_rust` at `5dad838c33c3e4aab198d995160d3fbb9968470f` (`v0.1.12`) as the pinned source reference for the crate-private cipher and audio-sniffing primitives in `src/crypto/`.
 
-Non-goals for the first release are audio transcoding, a GUI, library-management features, automatic source deletion, and writing metadata obtained from an ambiguous network search.
+Non-goals are audio transcoding, library-management features, automatic source deletion, a desktop watch mode, and writing metadata obtained from an ambiguous network search. The desktop host is intentionally not a wrapper that starts the CLI: it never launches `unlockm`, a sidecar, a shell command, or a conversion daemon.
 
 ## 2. High-Level Architecture
 
-The CLI is a thin configuration boundary. A shared application pipeline serves initial scans, direct file conversion, and watch events.
+The CLI and desktop host are thin configuration/persistence boundaries. One shared application pipeline serves initial scans, direct file conversion, and watch events; desktop uses batch conversion only and observes the same bounded pipeline through a UI-neutral event seam.
 
 ```text
-CLI/config -> scan or watch -> path planner -> bounded job runner
-                                              |             |
-                                      format adapter    passthrough copy
-                                              |
-                                      streaming decrypt
-                                              |
-                                  conservative metadata merge
-                                              |
-                                    atomic output publish
+CLI/config ──┐
+             ├─> scan or watch -> path planner -> bounded job runner
+Tauri IPC ───┘                                      |             |
+                                              format adapter    passthrough copy
+                                                      |
+                                              streaming decrypt
+                                                      |
+                                          conservative metadata merge
+                                                      |
+                                            atomic output publish
+                                                      |
+                                BatchObserver -> bounded desktop coordinator -> SQLite history -> IPC Channel
 ```
 
 Tokio owns cancellation, filesystem events, network metadata requests, and task coordination. File scanning, decryption, copying, audio probing, and tag writes are blocking operations and run behind a concurrency semaphore on `spawn_blocking`. Each file is processed sequentially, while independent files run concurrently.
@@ -35,12 +38,13 @@ This hybrid model avoids blocking the async runtime without forcing synchronous 
 
 ## 3. Code Map
 
-The single-package layout keeps a reusable library surface in `src/lib.rs` and a small executable in `src/main.rs`.
+The workspace keeps a reusable library surface in `src/lib.rs`, a small CLI executable in `src/main.rs`, and a Tauri child package that depends on the root package by path.
 
 - `src/main.rs`: parse process-level errors into exit codes and install signal handling.
 - `src/cli.rs`: Clap arguments and conversion into validated `RunConfig`. Change user-facing flags here.
 - `src/config.rs`: normalized input/output roots, `OutputLayout`, copy/overwrite policy, concurrency limits, key-source settings, and timeouts.
 - `src/app/`: shared orchestration.
+  - `events.rs`: UI-neutral batch lifecycle/report types and the opt-in `BatchObserver` seam. A disabled observer keeps CLI/watch paths free of desktop-only metadata/report allocation.
   - `scan.rs`: recursive initial enumeration, empty-directory mirroring, and output-subtree pruning.
   - `watch.rs`: recursive notifications, debouncing, file-stability checks, per-path deduplication, and requeue-on-change.
   - `runner.rs`: bounded scheduling, cancellation, summaries, and batch/watch error policy.
@@ -60,6 +64,11 @@ The single-package layout keeps a reusable library surface in `src/lib.rs` and a
 - `tests/fixtures/`: small legal/synthetic encrypted fixtures and expected outputs.
 - `tests/`: CLI, directory-layout, watch, metadata, failure-isolation, and end-to-end tests.
 - `benches/`: streaming and multi-file throughput benchmarks used to tune buffers and default concurrency.
+- `desktop/`: Vite + React frontend and its `src-tauri/` Rust package.
+  - `src-tauri/src/commands/`: narrow Tauri commands, DTOs, bounded persistence coordinator, and ordered IPC `Channel` forwarding.
+  - `src-tauri/src/history/`: Rust-owned SQLite migrations, run/item/artwork/preferences store, keyset reads, and record-only deletion.
+  - `src-tauri/src/state.rs`: one-active-run ownership and cancellation state.
+  - `src/`: bilingual composer/history/detail UI. The webview receives typed DTOs and raw artwork bytes only; it has no SQL, generic filesystem, process, or shell capability.
 
 ## 4. Main Execution Flow
 
@@ -72,6 +81,7 @@ The single-package layout keeps a reusable library surface in `src/lib.rs` and a
 7. Without `--update-metadata`, decrypted audio bytes and any existing embedded tags are retained. With it, `metadata` resolves and validates all evidence before mutating the unpublished stage. FLAC metadata blocks are rewritten with bounded memory and 1 MiB audio-frame shifting; other containers use Lofty. A post-mutation failure discards the stage and regenerates clean audio only if the source fingerprint is unchanged and the job is not cancelled.
 8. `atomic` publishes the completed temporary file. Existing outputs are skipped unless `--overwrite` is set. A failure leaves the source and any pre-existing output untouched.
 9. Batch mode continues after per-file failures and returns a non-zero status after printing a summary. Watch mode logs per-file failures and stays alive until cancellation or a fatal watcher/configuration error.
+10. The desktop command reserves a persistent `planning` run before scanning, then streams ordered lifecycle events through a bounded coordinator. Each terminal item commits to SQLite before the matching IPC event. A run can be cancelled but sources and incomplete private stages are never published. On startup, stale planning/running rows become `interrupted`; the webview reads paginated history and lazily obtains artwork bytes.
 
 Watch mode performs the same initial scan, then converts normalized create, modify, and rename-to events through steps 3-8. Events are debounced and a file must have stable size and modification time across consecutive checks before it enters the runner. Rename-from/remove cancels queued work (and prevents a running job from publishing); a low-frequency reconciliation resubmits visible sources to cover notification loss without creating a second processing pipeline.
 
@@ -84,6 +94,8 @@ Watch mode performs the same initial scan, then converts normalized create, modi
 - `metadata` cannot decrypt files or publish outputs. Providers return typed candidates with identity evidence and never write tags themselves.
 - `pathing` is pure apart from filesystem normalization. It does not probe file content.
 - Only `io::atomic` may replace a destination. Adapters must write to the provided temporary sink and must not create final paths.
+- `desktop/src-tauri` links `unlockm` directly and owns local history/IPC. It may construct validated desktop defaults but cannot duplicate format logic, the path planner, metadata rules, or publication.
+- The desktop webview cannot access generic filesystem, database, shell, process, sidecar, or plugin capabilities. Its only core grants are event `listen`/`unlisten` for native drag/drop plus dialog open for choosing roots; Rust revalidates every selected path. It cannot emit arbitrary events or use broad core event/path/menu/tray/webview defaults.
 - Production modules must not import test fixtures or benchmark helpers.
 
 ## 6. Architectural Invariants
@@ -97,6 +109,9 @@ Watch mode performs the same initial scan, then converts normalized create, modi
 - The destination becomes visible only after decryption, optional metadata updates, and validation succeed.
 - Sources are never removed in the first release.
 - Network failure cannot make decryption fail. It can only leave metadata unchanged and produce a warning.
+- Desktop history is local-only SQLite data: it stores conversion facts, paths, bounded metadata snapshots, and deduplicated artwork—not audio payloads—and record deletion never touches source/output paths.
+- Desktop event persistence is commit-before-IPC and one-active-run. A coordinator/database failure requests cancellation and releases active ownership; it cannot make an already published output unsafe.
+- No conversion host may spawn the CLI, invoke a process/shell, or package an `unlockm` sidecar. Tauri/webview implementation processes are outside this conversion-process boundary.
 - Ambiguous metadata is never committed. Existing tags and covers win over guesses.
 - Watch events for a path are coalesced; if a file changes during processing, exactly one follow-up run is scheduled. Watch jobs share the batch runner's job semaphore, key indexes, metadata cache, and output reservations.
 
@@ -133,7 +148,7 @@ Image magic/MIME, byte limit, and decodability are checked before embedding. Nat
 
 ### Testing and release
 
-Unit tests cover path planning, suffix precedence, metadata merging, output reservations, key lookup, and event coalescing. Integration tests use temporary trees and deterministic local HTTP fixtures. Watch tests wait on observable outputs rather than fixed sleeps. Release checks include format fixtures, `cargo fmt`, Clippy with warnings denied, tests, and optimized builds on Windows, macOS, and Linux.
+Unit tests cover path planning, suffix precedence, metadata merging, output reservations, key lookup, event coalescing, and one-terminal-report contracts. Integration tests use temporary trees and deterministic local HTTP fixtures. Watch tests wait on observable outputs rather than fixed sleeps. Desktop tests cover SQLite recovery/pagination/commit ordering, one-active-run/cancellation, IPC DTOs, React state, accessibility, i18n, bounded virtual rendering, and lazy artwork. Release checks include locked Vite+ frontend validation through `vp`, Rust checks, and no-bundle Tauri compilation on macOS/Windows.
 
 ## 8. Extension Points
 
@@ -159,6 +174,9 @@ Unit tests cover path planning, suffix precedence, metadata merging, output rese
 ## 10. External Dependencies
 
 - `src/crypto/` owns the cipher primitives, footer/header parsing, and audio type detection selectively ported from pinned `lib_um_crypto_rust` revision `5dad838...`. `Cargo.toml` and `Cargo.lock` contain no dependency on that repository; provenance is retained in source headers and `THIRD_PARTY_NOTICES.md`.
+- Tauri v2 owns the desktop window/runtime and dialog bridge. The child crate depends on the root `unlockm` library rather than any `unlockm` executable.
+- The desktop `rusqlite` store owns local history. It is separate from KGM key extraction and is never exposed to JavaScript as a database connection or path.
+- Vite+, React, i18next, Motion, TanStack Virtual, and locally bundled Fontsource fonts belong only to the desktop UI; frontend setup/install/check/test/build/Tauri invocation use the `vp` entry point with the locked pnpm backend. `bundle.resources` ships `THIRD_PARTY_NOTICES.md` and the complete SIL OFL-1.1 text alongside Fontsource's Bricolage Grotesque and Manrope assets.
 - Tokio owns async orchestration, cancellation, and HTTP/watch integration; it does not run blocking decrypt loops directly.
 - Clap owns the public CLI grammar.
 - `notify` (with a debouncer layer) owns platform filesystem notifications. Application code supplies stability and deduplication semantics.
@@ -197,12 +215,19 @@ unlockm/
 │   └── pathing.rs
 ├── tests/
 │   └── fixtures/
+├── desktop/
+│   ├── src/
+│   ├── src-tauri/
+│   └── pnpm-lock.yaml
+├── .github/workflows/
+│   ├── ci.yml
+│   └── desktop-release.yml
 └── benches/
 ```
 
 ## 12. Design Decisions
 
-- **One modular package, not a multi-crate workspace.** This keeps initialization and releases simple while `src/lib.rs` preserves testability. Split crates only if a real second consumer appears.
+- **One reusable engine plus thin hosts.** The root package remains the CLI and library; `desktop/src-tauri` is a workspace child because the desktop app is a real second consumer. It links the library by path so CLI, batch, and desktop share scanning, path safety, format adapters, metadata, and publication invariants.
 - **Own a selective, pinned crypto snapshot behind a crate-private boundary.** Only primitives exercised by `unlockm` are retained from revision `5dad838...`; deterministic vectors guard byte parity and notices retain MIT/Apache-2.0 provenance. This removes upstream availability from the build while making future upstream synchronization an explicit reviewed migration.
 - **Hybrid Tokio plus blocking workers.** Directory/watch/network concurrency benefits from async coordination; cipher and tag APIs remain efficient synchronous code. The tradeoff is two execution domains and explicit admission control.
 - **In-place output is the compatibility default.** Omitting `--output` writes standard audio beside the source, as the Go CLI does. A separate output root activates useful passthrough copying and mirrored trees.

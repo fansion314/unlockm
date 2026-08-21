@@ -1,13 +1,21 @@
+pub mod events;
 pub mod job;
 pub mod runner;
 pub mod scan;
 pub mod watch;
 
-use crate::{PARTIAL_FAILURE_EXIT, config::RunConfig, error::Result};
+use crate::{
+    PARTIAL_FAILURE_EXIT,
+    config::RunConfig,
+    error::{AppError, Result},
+};
+use events::{BatchObserver, ItemAction, ItemKind, MusicSnapshot, ReportError, ReportWarning};
+use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::info;
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Summary {
     pub converted: usize,
     pub copied: usize,
@@ -19,18 +27,21 @@ pub struct Summary {
 pub struct JobSpec {
     pub source: std::path::PathBuf,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum JobOutcome {
     Converted,
     Copied,
     Skipped,
     Conflict,
     Failed,
+    Cancelled,
 }
 
 /// Per-file timings kept for internal diagnostics. They intentionally do not
 /// change `Summary`, which remains the stable application/CLI count contract.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JobTimings {
     pub preflight: Duration,
     pub decrypt: Duration,
@@ -42,11 +53,20 @@ pub struct JobTimings {
 }
 
 /// The terminal report for one path accepted by a runner invocation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JobReport {
+    pub ordinal: u64,
+    pub source: PathBuf,
     pub relative_path: PathBuf,
+    pub destination: Option<PathBuf>,
+    pub item_kind: ItemKind,
+    pub action: Option<ItemAction>,
     pub logical_bytes: u64,
     pub outcome: JobOutcome,
+    pub error: Option<ReportError>,
+    pub warnings: Vec<ReportWarning>,
+    pub music: Option<MusicSnapshot>,
     pub timings: JobTimings,
 }
 impl Summary {
@@ -88,6 +108,7 @@ impl From<JobOutcome> for Summary {
                 failed: 1,
                 ..Self::default()
             },
+            JobOutcome::Cancelled => Self::default(),
         }
     }
 }
@@ -95,7 +116,11 @@ pub async fn run(config: RunConfig) -> Result<Summary> {
     let config = Arc::new(config);
     let paths = scan::enumerate(&config)?;
     config.presentation.begin_batch(paths.len());
-    let initial = runner::run_paths(config.clone(), paths).await?;
+    // The CLI deliberately keeps the observer disabled; desktop hosts opt in
+    // through `run_batch_with_observer_and_cancel` without changing this
+    // scanner/runner pipeline or the subsequent watch scheduler.
+    let initial =
+        runner::run_paths_with_observer(config.clone(), paths, BatchObserver::default()).await?;
     info!(
         converted = initial.converted,
         copied = initial.copied,
@@ -109,6 +134,26 @@ pub async fn run(config: RunConfig) -> Result<Summary> {
     } else {
         Ok(initial)
     }
+}
+
+/// Run a single non-watch batch through the same scanner and runner used by
+/// the CLI, forwarding only UI-neutral events to the supplied observer.
+pub async fn run_batch_with_observer_and_cancel(
+    config: RunConfig,
+    cancellation: runner::Cancellation,
+    observer: BatchObserver,
+) -> Result<Summary> {
+    if config.watch {
+        return Err(AppError::Config(
+            "batch observer does not support watch mode".into(),
+        ));
+    }
+    let config = Arc::new(config);
+    let paths = scan::enumerate(&config)?;
+    config.presentation.begin_batch(paths.len());
+    let summary =
+        runner::run_paths_with_observer_and_cancel(config, paths, cancellation, observer).await?;
+    Ok(summary)
 }
 
 #[cfg(test)]
@@ -129,5 +174,10 @@ mod tests {
                 1
             )
         }
+    }
+
+    #[test]
+    fn cancelled_outcome_does_not_change_summary_counters() {
+        assert_eq!(Summary::from(JobOutcome::Cancelled), Summary::default());
     }
 }

@@ -20,9 +20,80 @@ output folder.
   program lives in this repository; there is no runtime dependency on an
   external crypto service or FFmpeg.
 
+## UnlockM desktop app (macOS and Windows)
+
+`UnlockM` is the native desktop host for the same Rust engine. It is currently
+supported on macOS and Windows; the command-line `unlockm` program remains the
+cross-platform option, including Linux and watch mode.
+
+The first desktop release deliberately stays focused:
+
+- choose or drop exactly one file or directory, then optionally choose an
+  output directory;
+- adjust metadata refresh, companion-file copy, and atomic overwrite before
+  converting;
+- follow one active conversion, cancel it safely, and reopen its persisted
+  history/detail view after restarting the app;
+- use English or Simplified Chinese; inspect captured metadata, outcomes, and
+  lazy album artwork in a virtualized detail list.
+
+Desktop watch mode, playlists, playback, cloud sync, accounts, telemetry, and
+manual key entry are not part of v1. Conversion is in-process: the app links
+this Rust library directly and does **not** launch the `unlockm` CLI, a
+sidecar, shell command, or daemon.
+
+### Desktop installers and local data
+
+A protected tagged release publishes one signed/notarized universal macOS DMG
+and one signed Windows x86_64 NSIS installer, plus SHA-256 checksum files, only
+after all required signing credentials and verification steps succeed. They are
+installers rather than portable command-line binaries. Unsigned pull-request
+builds are validation-only and must never be distributed as production releases.
+
+UnlockM stores its local `history.sqlite` database in Tauri's application-data
+directory (normally `~/Library/Application Support/world.fansion.unlockm/` on
+macOS and `%APPDATA%/world.fansion.unlockm/` on Windows). It contains local
+conversion records, absolute source/output paths, settings snapshots, outcome
+details, captured metadata, and deduplicated album artwork (up to 10 MiB per
+image). It never stores audio payloads, sends telemetry, or deletes recorded
+music files. The app's clear/remove controls delete database records only.
+
+### Desktop development
+
+Use Vite+ as the only frontend lifecycle entry point. The project locks its
+pnpm backend through `desktop/pnpm-lock.yaml`; do not run npm, pnpm, yarn, or
+bun directly.
+
+```sh
+vp -C desktop install --frozen-lockfile
+vp -C desktop check
+vp -C desktop test
+vp -C desktop build
+vp -C desktop exec tauri dev
+```
+
+For a local native compilation without creating an installer:
+
+```sh
+vp -C desktop exec tauri build --debug --no-bundle
+```
+
+Production packaging is performed by the protected tag workflow, not by
+publishing an unsigned local binary. The required release signing secrets are
+documented in [`.github/workflows/desktop-release.yml`](.github/workflows/desktop-release.yml):
+`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`,
+`APPLE_PASSWORD`, `APPLE_TEAM_ID`, `KEYCHAIN_PASSWORD`,
+`WINDOWS_CERTIFICATE`, and `WINDOWS_CERTIFICATE_PASSWORD`. Configure their
+values only in the protected `release` environment; never put certificates or
+passwords in the repository.
+
+The application bundle also includes [third-party notices](THIRD_PARTY_NOTICES.md)
+and the complete [SIL Open Font License 1.1](third_party/licenses/SIL-OFL-1.1.txt)
+for its locally bundled Bricolage Grotesque and Manrope fonts.
+
 ## Install
 
-Rust 1.75 or newer is required. The lockfile is part of the release contract.
+Rust 1.89 or newer is required. The lockfile is part of the release contract.
 
 ```sh
 cd unlockm

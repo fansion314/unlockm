@@ -1,4 +1,10 @@
 /target/
+/desktop/node_modules/
+/desktop/dist/
+/desktop/.vite/
+/desktop/coverage/
+/desktop/src-tauri/gen/
+/desktop/src-tauri/tauri.windows-signing.json
 *.swp
 .DS_Store
 coverage/

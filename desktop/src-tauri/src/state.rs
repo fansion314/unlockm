@@ -1,0 +1,311 @@
+use crate::history::{CreateRun, HistoryError, HistoryStore, RunStatus, RunSummary};
+use std::{
+    sync::{Arc, Mutex},
+    time::SystemTime,
+};
+use thiserror::Error;
+use unlockm::app::runner::Cancellation;
+
+#[derive(Debug, Error)]
+pub enum StateError {
+    #[error("a conversion is already active (run {active_run_id})")]
+    Busy { active_run_id: i64 },
+    #[error("run {run_id} is not the active conversion")]
+    NotActive { run_id: i64 },
+    #[error(transparent)]
+    History(#[from] HistoryError),
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    history: Arc<HistoryStore>,
+    active: Arc<Mutex<Option<ActiveRun>>>,
+}
+
+#[derive(Clone)]
+pub struct ActiveRun {
+    pub run_id: i64,
+    pub cancellation: Cancellation,
+    pub started_at: SystemTime,
+}
+
+impl AppState {
+    pub fn new(history: HistoryStore) -> Result<Self, HistoryError> {
+        history.recover_interrupted()?;
+        Ok(Self {
+            history: Arc::new(history),
+            active: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    pub fn history(&self) -> &Arc<HistoryStore> {
+        &self.history
+    }
+
+    pub fn begin_run(&self, request: CreateRun) -> Result<ActiveRun, StateError> {
+        let mut active = self.active.lock().expect("active run lock");
+        if let Some(existing) = active.as_ref() {
+            return Err(StateError::Busy {
+                active_run_id: existing.run_id,
+            });
+        }
+        let run = self.history.create_run(request)?;
+        let active_run = ActiveRun {
+            run_id: run.id,
+            cancellation: Cancellation::default(),
+            started_at: SystemTime::now(),
+        };
+        *active = Some(active_run.clone());
+        Ok(active_run)
+    }
+
+    pub fn mark_run_running(&self, run_id: i64, total_items: usize) -> Result<(), StateError> {
+        let active = self.active.lock().expect("active run lock");
+        match active.as_ref() {
+            Some(current) if current.run_id == run_id => {}
+            _ => return Err(StateError::NotActive { run_id }),
+        }
+        self.history.set_total_items(run_id, total_items)?;
+        self.history.mark_running(run_id)?;
+        Ok(())
+    }
+
+    pub fn active_run(&self) -> Option<ActiveRun> {
+        self.active.lock().expect("active run lock").clone()
+    }
+
+    /// Returns false for an inactive/stale id, making repeated cancellation
+    /// requests safe for the webview and window-lifecycle races.
+    pub fn cancel_run(&self, run_id: i64) -> bool {
+        let active = self.active.lock().expect("active run lock");
+        let Some(active) = active.as_ref().filter(|active| active.run_id == run_id) else {
+            return false;
+        };
+        active.cancellation.cancel();
+        true
+    }
+
+    pub fn finish_run(
+        &self,
+        run_id: i64,
+        status: RunStatus,
+        error_code: Option<&str>,
+        error_detail: Option<&str>,
+    ) -> Result<RunSummary, StateError> {
+        let mut active = self.active.lock().expect("active run lock");
+        match active.as_ref() {
+            Some(current) if current.run_id == run_id => {}
+            _ => return Err(StateError::NotActive { run_id }),
+        }
+        let write_result = self
+            .history
+            .finish_run(run_id, status, error_code, error_detail);
+        // Never leave the process permanently busy if SQLite's terminal write
+        // fails. The next startup recovery will retain the active row as
+        // interrupted rather than pretending that it completed.
+        *active = None;
+        write_result?;
+        self.history
+            .run(run_id)?
+            .ok_or(StateError::NotActive { run_id })
+    }
+
+    /// Clears a stale active slot after an application-level coordinator
+    /// error. The terminal history row is written before the slot is released.
+    pub fn fail_active_run(&self, run_id: i64, detail: &str) -> Result<RunSummary, StateError> {
+        self.finish_run(
+            run_id,
+            RunStatus::Failed,
+            Some("desktop_coordinator_failed"),
+            Some(detail),
+        )
+    }
+
+    pub fn delete_history_run(&self, run_id: i64) -> Result<bool, StateError> {
+        let active = self.active.lock().expect("active run lock");
+        if active
+            .as_ref()
+            .is_some_and(|current| current.run_id == run_id)
+        {
+            return Err(StateError::Busy {
+                active_run_id: run_id,
+            });
+        }
+        wait_for_history_mutation_barrier();
+        self.history.delete_run(run_id).map_err(Into::into)
+    }
+
+    pub fn clear_history(&self) -> Result<(), StateError> {
+        let active = self.active.lock().expect("active run lock");
+        if let Some(active) = active.as_ref() {
+            return Err(StateError::Busy {
+                active_run_id: active.run_id,
+            });
+        }
+        wait_for_history_mutation_barrier();
+        self.history.clear_history().map_err(Into::into)
+    }
+}
+
+#[cfg(test)]
+static HISTORY_MUTATION_BARRIER: std::sync::OnceLock<Mutex<Option<Arc<std::sync::Barrier>>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(test)]
+fn set_history_mutation_barrier(barrier: Option<Arc<std::sync::Barrier>>) {
+    *HISTORY_MUTATION_BARRIER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("history mutation barrier lock") = barrier;
+}
+
+#[cfg(test)]
+fn wait_for_history_mutation_barrier() {
+    if let Some(barrier) = HISTORY_MUTATION_BARRIER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("history mutation barrier lock")
+        .clone()
+    {
+        barrier.wait();
+        barrier.wait();
+    }
+}
+
+#[cfg(not(test))]
+fn wait_for_history_mutation_barrier() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::history::{InputKind, RunSettings};
+
+    fn request() -> CreateRun {
+        CreateRun {
+            input_kind: InputKind::File,
+            input_path: "/input/track.ncm".into(),
+            output_path: "/output".into(),
+            settings: RunSettings {
+                update_metadata: false,
+                copy_passthrough: true,
+                overwrite: false,
+            },
+            total_items: 1,
+        }
+    }
+
+    #[test]
+    fn state_enforces_one_active_run_and_idempotent_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+        let active = state.begin_run(request()).unwrap();
+        assert!(matches!(
+            state.begin_run(request()),
+            Err(StateError::Busy { active_run_id }) if active_run_id == active.run_id
+        ));
+        assert!(!state.cancel_run(active.run_id + 1));
+        assert!(state.cancel_run(active.run_id));
+        assert!(state.cancel_run(active.run_id));
+        assert!(active.cancellation.is_cancelled());
+        let terminal = state
+            .finish_run(active.run_id, RunStatus::Cancelled, None, None)
+            .unwrap();
+        assert_eq!(terminal.status, RunStatus::Cancelled);
+        assert!(state.begin_run(request()).is_ok());
+    }
+
+    #[test]
+    fn terminal_write_failure_still_releases_the_active_slot() {
+        let directory = tempfile::tempdir().unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+        let active = state.begin_run(request()).unwrap();
+        state
+            .history()
+            .execute_test_sql(
+                "CREATE TRIGGER fail_terminal_update BEFORE UPDATE ON runs
+                 BEGIN SELECT RAISE(ABORT, 'injected terminal failure'); END;",
+            )
+            .unwrap();
+        assert!(
+            state
+                .finish_run(active.run_id, RunStatus::Failed, None, None)
+                .is_err()
+        );
+        assert!(state.active_run().is_none());
+        state
+            .history()
+            .execute_test_sql("DROP TRIGGER fail_terminal_update")
+            .unwrap();
+        assert!(state.begin_run(request()).is_ok());
+    }
+
+    #[test]
+    fn active_history_rows_cannot_be_deleted_or_cleared() {
+        let directory = tempfile::tempdir().unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+        let active = state.begin_run(request()).unwrap();
+        assert!(matches!(
+            state.delete_history_run(active.run_id),
+            Err(StateError::Busy { .. })
+        ));
+        assert!(matches!(
+            state.clear_history(),
+            Err(StateError::Busy { .. })
+        ));
+        assert!(state.history().run(active.run_id).unwrap().is_some());
+        assert!(state.cancel_run(active.run_id));
+    }
+
+    #[test]
+    fn history_mutation_gate_prevents_begin_run_from_interleaving_delete_or_clear() {
+        for delete_only in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let state =
+                AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                    .unwrap();
+            let old = state.begin_run(request()).unwrap();
+            state
+                .finish_run(old.run_id, RunStatus::Completed, None, None)
+                .unwrap();
+
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            set_history_mutation_barrier(Some(barrier.clone()));
+            let mutation_state = state.clone();
+            let mutation = std::thread::spawn(move || {
+                if delete_only {
+                    mutation_state.delete_history_run(old.run_id).map(|_| ())
+                } else {
+                    mutation_state.clear_history()
+                }
+            });
+            // The mutator now owns the active lock and is paused immediately
+            // before the database mutation.
+            barrier.wait();
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let begin_state = state.clone();
+            let begin = std::thread::spawn(move || {
+                sender.send(begin_state.begin_run(request())).unwrap();
+            });
+            assert!(
+                receiver
+                    .recv_timeout(std::time::Duration::from_millis(30))
+                    .is_err()
+            );
+            barrier.wait();
+            mutation.join().unwrap().unwrap();
+            let fresh = receiver
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap()
+                .unwrap();
+            begin.join().unwrap();
+            set_history_mutation_barrier(None);
+            assert!(state.history().run(fresh.run_id).unwrap().is_some());
+        }
+    }
+}

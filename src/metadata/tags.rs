@@ -10,6 +10,16 @@ use std::{
     path::Path,
 };
 
+pub const MAX_COVER_BYTES: usize = 10 * 1024 * 1024;
+
+/// A local final-output snapshot that keeps useful tag text even when the
+/// artwork is malformed or exceeds the bounded history payload limit.
+#[derive(Debug, Default)]
+pub struct BoundedTagSnapshot {
+    pub metadata: Metadata,
+    pub artwork_warning: Option<String>,
+}
+
 fn probe(path: &Path) -> std::result::Result<lofty::file::TaggedFile, String> {
     let mut source = OpenOptions::new()
         .read(true)
@@ -28,27 +38,90 @@ pub fn read(path: &Path) -> std::result::Result<Metadata, String> {
     let text = |value: Option<std::borrow::Cow<'_, str>>| {
         value.map(|v| MetadataValue::new(v.into_owned(), Provenance::ExistingTag))
     };
+    let cover = tag
+        .pictures()
+        .first()
+        .map(copy_bounded_cover)
+        .transpose()?
+        .map(|bytes| Cover {
+            bytes: Some(bytes),
+            url: None,
+            source: Provenance::ExistingTag,
+        });
     Ok(Metadata {
         title: text(tag.title()),
         album: text(tag.album()),
         artists: text(tag.artist()),
-        cover: tag.pictures().first().map(|p| Cover {
-            bytes: Some(p.data().to_vec()),
-            url: None,
-            source: Provenance::ExistingTag,
-        }),
+        cover,
         duration_ms: u32::try_from(file.properties().duration().as_millis()).ok(),
         ..Default::default()
+    })
+}
+
+/// Read a final audio file for history without making bad artwork invalidate
+/// otherwise useful text and duration fields. The embedded picture length is
+/// checked before any owned history copy is made.
+pub fn read_bounded_snapshot(path: &Path) -> std::result::Result<BoundedTagSnapshot, String> {
+    let file = probe(path)?;
+    let mut metadata = Metadata {
+        duration_ms: u32::try_from(file.properties().duration().as_millis()).ok(),
+        ..Default::default()
+    };
+    let Some(tag) = file.primary_tag().or_else(|| file.first_tag()) else {
+        return Ok(BoundedTagSnapshot {
+            metadata,
+            artwork_warning: None,
+        });
+    };
+    let text = |value: Option<std::borrow::Cow<'_, str>>| {
+        value.map(|v| MetadataValue::new(v.into_owned(), Provenance::ExistingTag))
+    };
+    metadata.title = text(tag.title());
+    metadata.album = text(tag.album());
+    metadata.artists = text(tag.artist());
+    let (cover, artwork_warning) = match tag.pictures().first() {
+        None => (None, None),
+        Some(picture) => match copy_bounded_cover(picture) {
+            Ok(bytes) => (
+                Some(Cover {
+                    bytes: Some(bytes),
+                    url: None,
+                    source: Provenance::ExistingTag,
+                }),
+                None,
+            ),
+            Err(error) => (None, Some(error)),
+        },
+    };
+    metadata.cover = cover;
+    Ok(BoundedTagSnapshot {
+        metadata,
+        artwork_warning,
     })
 }
 pub fn validate_cover(bytes: &[u8]) -> std::result::Result<(), String> {
     parse_cover(bytes).map(|_| ())
 }
 
-fn parse_cover(bytes: &[u8]) -> std::result::Result<Picture, String> {
-    if bytes.len() > 10 * 1024 * 1024 {
-        return Err("cover exceeds 10 MiB".into());
+fn check_cover_size(length: usize) -> std::result::Result<(), String> {
+    if length > MAX_COVER_BYTES {
+        Err("cover exceeds 10 MiB".into())
+    } else {
+        Ok(())
     }
+}
+
+fn copy_bounded_cover(picture: &Picture) -> std::result::Result<Vec<u8>, String> {
+    // Check the borrowed tag slice before cloning so an oversized embedded
+    // picture never becomes a second unbounded allocation in a history/event
+    // payload. `Picture::from_reader` below validates only accepted content.
+    check_cover_size(picture.data().len())?;
+    validate_cover(picture.data())?;
+    Ok(picture.data().to_vec())
+}
+
+fn parse_cover(bytes: &[u8]) -> std::result::Result<Picture, String> {
+    check_cover_size(bytes.len())?;
     Picture::from_reader(&mut std::io::Cursor::new(bytes))
         .map_err(|_| "cover is not a supported decodable image".into())
 }
@@ -365,6 +438,72 @@ mod tests {
                     .starts_with(".unlockm-metadata-"))
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn oversized_cover_is_rejected_before_any_owned_snapshot_copy() {
+        assert_eq!(check_cover_size(MAX_COVER_BYTES), Ok(()));
+        assert_eq!(
+            check_cover_size(MAX_COVER_BYTES + 1).unwrap_err(),
+            "cover exceeds 10 MiB"
+        );
+        let picture = Picture::unchecked(vec![0_u8; MAX_COVER_BYTES + 1]).build();
+        assert_eq!(
+            copy_bounded_cover(&picture).unwrap_err(),
+            "cover exceeds 10 MiB"
+        );
+    }
+
+    #[test]
+    fn oversized_embedded_cover_is_not_copied_into_metadata_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("oversized-cover.mp3");
+        let fixture = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/lofty-silent.mp3.b64"),
+        )
+        .unwrap();
+        std::fs::write(&path, STANDARD.decode(fixture.trim()).unwrap()).unwrap();
+
+        let width = 2048_u32;
+        let height = 2048_u32;
+        let image_bytes = usize::try_from(width * height * 3).unwrap();
+        assert!(image_bytes > MAX_COVER_BYTES);
+        let file_size = 54 + image_bytes;
+        let mut bmp = vec![0_u8; file_size];
+        bmp[..2].copy_from_slice(b"BM");
+        bmp[2..6].copy_from_slice(&(file_size as u32).to_le_bytes());
+        bmp[10..14].copy_from_slice(&54_u32.to_le_bytes());
+        bmp[14..18].copy_from_slice(&40_u32.to_le_bytes());
+        bmp[18..22].copy_from_slice(&width.to_le_bytes());
+        bmp[22..26].copy_from_slice(&height.to_le_bytes());
+        bmp[26..28].copy_from_slice(&1_u16.to_le_bytes());
+        bmp[28..30].copy_from_slice(&24_u16.to_le_bytes());
+        bmp[34..38].copy_from_slice(&(image_bytes as u32).to_le_bytes());
+
+        let mut file = probe(&path).unwrap();
+        let tag_type = file.primary_tag_type();
+        if file.primary_tag_mut().is_none() {
+            file.insert_tag(Tag::new(tag_type));
+        }
+        let tag = file.primary_tag_mut().unwrap();
+        tag.insert_text(ItemKey::TrackTitle, "retained title".into());
+        tag.push_picture(Picture::from_reader(&mut std::io::Cursor::new(bmp)).unwrap());
+        let mut output = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        file.save_to(&mut output, WriteOptions::default()).unwrap();
+
+        assert_eq!(read(&path).unwrap_err(), "cover exceeds 10 MiB");
+        let snapshot = read_bounded_snapshot(&path).unwrap();
+        assert_eq!(snapshot.metadata.title.unwrap().text, "retained title");
+        assert!(snapshot.metadata.cover.is_none());
+        assert_eq!(
+            snapshot.artwork_warning.as_deref(),
+            Some("cover exceeds 10 MiB")
         );
     }
 }

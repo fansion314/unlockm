@@ -14,9 +14,68 @@
 - **加密实现自包含：** 程序使用的格式解密代码都在本仓库内；运行时不依赖外部
   加密服务，也不依赖 FFmpeg。
 
+## UnlockM 桌面应用（macOS 与 Windows）
+
+`UnlockM` 是同一套 Rust 引擎的原生桌面宿主。目前支持 macOS 和 Windows；命令行
+`unlockm` 仍是跨平台方案，并继续支持 Linux 与 watch 模式。
+
+首版桌面应用刻意保持精炼：
+
+- 选择或拖入**一个**文件或目录，并可选择输出目录；
+- 转换前设置元数据更新、附属文件复制和原子覆盖；
+- 观察一个活跃转换、随时安全取消，并在重启后继续查看本地历史与详情；
+- 使用简体中文或英文，在虚拟化详情列表中查看捕获的元数据、结果和按需加载的专辑封面。
+
+桌面版 v1 不包含 watch 监听、播放列表、音频播放、云同步、账户、遥测或手动密钥输入。
+转换完全在进程内完成：应用直接链接本仓库的 Rust 库，**不会**启动 `unlockm` 命令行、
+sidecar、shell 命令或守护进程。
+
+### 安装包与本地数据
+
+受保护的标签发布只有在全部签名密钥与验证步骤成功后，才会提供一个已签名/已公证的通用
+macOS DMG、一个已签名的 Windows x86_64 NSIS 安装程序，以及 SHA-256 校验文件。它们是
+安装包，而不是可移植的命令行二进制文件。未签名的 Pull Request 构建只用于验证，绝不能
+作为正式发布物分发。
+
+UnlockM 把本地 `history.sqlite` 存在 Tauri 的应用数据目录中（通常为 macOS 的
+`~/Library/Application Support/world.fansion.unlockm/`，Windows 的
+`%APPDATA%/world.fansion.unlockm/`）。它只保存本地转换记录、绝对源/输出路径、设置快照、
+结果详情、捕获的元数据及按 SHA-256 去重的专辑封面（每张最多 10 MiB）；不保存音频负载，
+不发送遥测，也不会删除记录中的音乐文件。应用内的清空/移除只删除数据库记录。
+
+### 桌面开发
+
+前端生命周期只能通过 Vite+ 入口执行。项目通过 `desktop/pnpm-lock.yaml` 锁定 pnpm
+后端；不要直接运行 npm、pnpm、yarn 或 bun。
+
+```sh
+vp -C desktop install --frozen-lockfile
+vp -C desktop check
+vp -C desktop test
+vp -C desktop build
+vp -C desktop exec tauri dev
+```
+
+若只需本地原生编译、不生成安装包：
+
+```sh
+vp -C desktop exec tauri build --debug --no-bundle
+```
+
+正式打包由受保护的标签发布工作流完成，而不是发布未签名的本地二进制文件。所需发布签名
+密钥名称写在 [`.github/workflows/desktop-release.yml`](.github/workflows/desktop-release.yml) 中：
+`APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_PASSWORD`、
+`APPLE_TEAM_ID`、`KEYCHAIN_PASSWORD`、`WINDOWS_CERTIFICATE` 和
+`WINDOWS_CERTIFICATE_PASSWORD`。这些值只能配置在受保护的 `release` environment 中，
+绝不能提交证书或密码。
+
+应用安装包也会随本地捆绑的 Bricolage Grotesque 与 Manrope 字体附带
+[第三方声明](THIRD_PARTY_NOTICES.md) 和完整的
+[SIL Open Font License 1.1](third_party/licenses/SIL-OFL-1.1.txt)。
+
 ## 安装
 
-需要 Rust 1.75 或更高版本。锁文件是发布约定的一部分。
+需要 Rust 1.89 或更高版本。锁文件是发布约定的一部分。
 
 ```sh
 cd unlockm

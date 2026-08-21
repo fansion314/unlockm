@@ -1,5 +1,5 @@
 use crate::{
-    config::RunConfig,
+    config::{RunConfig, RunOptions, default_jobs},
     error::{AppError, Result},
     presentation::{ProgressMode, ProgressReporter},
 };
@@ -7,11 +7,6 @@ use clap::Parser;
 use std::{path::PathBuf, sync::OnceLock};
 use tracing_subscriber::{EnvFilter, fmt};
 
-fn default_jobs() -> usize {
-    std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .min(2)
-}
 #[derive(Debug, Parser)]
 #[command(
     name = "unlockm",
@@ -87,24 +82,30 @@ impl Cli {
                 "--json-logs conflicts with --progress always".into(),
             ));
         }
-        let mut config = RunConfig::new(
-            self.input
+        let mut config = RunOptions {
+            input: self
+                .input
                 .expect("clap requires INPUT unless --supported-ext"),
-            self.output,
-            self.flat,
-            self.no_copy,
-            self.overwrite,
-            self.watch,
-            self.update_metadata,
-            self.jobs,
-            self.buffer_size,
-            self.metadata_jobs,
-            self.qmc_mmkv,
-            self.qmc_mmkv_key,
-            self.qmc_key_map,
-            self.qmc_ekey,
-            self.kgg_db,
-        )?;
+            output: self.output,
+            layout: if self.flat {
+                crate::config::OutputLayout::Flat
+            } else {
+                crate::config::OutputLayout::Mirror
+            },
+            copy_passthrough: !self.no_copy,
+            overwrite: self.overwrite,
+            watch: self.watch,
+            update_metadata: self.update_metadata,
+            jobs: self.jobs,
+            buffer_size: self.buffer_size,
+            metadata_jobs: self.metadata_jobs,
+            qmc_mmkv: self.qmc_mmkv,
+            qmc_mmkv_key: self.qmc_mmkv_key,
+            qmc_key_map: self.qmc_key_map,
+            qmc_ekey: self.qmc_ekey,
+            kgg_db: self.kgg_db,
+        }
+        .build()?;
         config.presentation = reporter;
         Ok(config)
     }
@@ -147,5 +148,28 @@ mod tests {
     #[test]
     fn supported_ext_does_not_require_input() {
         assert!(Cli::try_parse_from(["unlockm", "--supported-ext"]).is_ok());
+    }
+
+    #[test]
+    fn typed_default_options_match_clap_defaults() {
+        let temp = tempfile::tempdir().unwrap();
+        let input = temp.path().join("track.ncm");
+        std::fs::write(&input, b"x").unwrap();
+        let input_string = input.to_string_lossy().into_owned();
+
+        let cli = Cli::try_parse_from(["unlockm", &input_string]).unwrap();
+        let from_cli = cli.into_config(ProgressReporter::disabled()).unwrap();
+        let from_options = RunOptions::new(input).build().unwrap();
+
+        assert_eq!(from_cli.input, from_options.input);
+        assert_eq!(from_cli.output, from_options.output);
+        assert_eq!(from_cli.layout, from_options.layout);
+        assert_eq!(from_cli.copy_passthrough, from_options.copy_passthrough);
+        assert_eq!(from_cli.overwrite, from_options.overwrite);
+        assert_eq!(from_cli.watch, from_options.watch);
+        assert_eq!(from_cli.update_metadata, from_options.update_metadata);
+        assert_eq!(from_cli.jobs, from_options.jobs);
+        assert_eq!(from_cli.buffer_size, from_options.buffer_size);
+        assert_eq!(from_cli.metadata_jobs, from_options.metadata_jobs);
     }
 }

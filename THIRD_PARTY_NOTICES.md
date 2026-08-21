@@ -49,5 +49,38 @@ from Project Unlock Music's `um_audio/src/__fixtures__/ffmpeg_silent.mp3` at
 the pinned revision, licensed MIT OR Apache-2.0. It is stored as base64 text so
 the test suite does not require a sibling checkout.
 
-The remaining dependencies are recorded in `Cargo.lock`; release packaging
-must run a license audit before distribution.
+## Desktop application dependencies
+
+The `desktop/` application is a separately locked, in-process host. Its
+frontend dependencies are recorded in `desktop/pnpm-lock.yaml`; Rust desktop
+dependencies are recorded in `Cargo.lock`. The desktop host uses Tauri v2,
+React, i18next/react-i18next, Motion, TanStack Virtual, and Vite+. These are
+used for windowing, UI, localization, motion, virtual rendering, and the
+frontend toolchain; none is a conversion sidecar or an audio-processing
+dependency.
+
+### Fontsource bundled fonts (SIL OFL-1.1)
+
+The desktop frontend imports these exact Fontsource variable-font packages at
+version `5.3.0`:
+
+- `@fontsource-variable/bricolage-grotesque` — Bricolage Grotesque,
+  Copyright 2022 The Bricolage Grotesque Project Authors
+  (<https://github.com/ateliertriay/bricolage>).
+- `@fontsource-variable/manrope` — Manrope, Copyright 2019 The Manrope
+  Project Authors (<https://github.com/sharanda/manrope>).
+
+Both fonts are licensed under SIL Open Font License 1.1. The complete license
+text is committed at `third_party/licenses/SIL-OFL-1.1.txt`. Tauri maps both
+that text and this notice into every desktop app bundle as
+`licenses/SIL-OFL-1.1.txt` and `licenses/THIRD_PARTY_NOTICES.md`, respectively.
+The fonts are bundled locally; the release makes no remote font request.
+
+The sole application-icon source is the user-supplied
+`desktop/src-tauri/icons/source/UnlockM Icon.png`. It is preserved unmodified;
+the Tauri PNG, ICNS, and ICO assets are derivatives of that artwork, not a
+replacement logo or third-party asset.
+
+The remaining dependencies are recorded in `Cargo.lock` and
+`desktop/pnpm-lock.yaml`; release packaging must run a license audit before
+distribution.

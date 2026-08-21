@@ -1,20 +1,62 @@
-name: ci
-on: [push, pull_request]
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
 jobs:
-  test:
+  cli:
+    name: CLI and core (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: rustfmt, clippy
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: cargo test --all-targets --all-features
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --all-targets --all-features
       # notify backends are timing-sensitive; keep the real recursive suites
       # serialized and separate so their failure is attributable in CI logs.
-      - run: cargo test --test watch_recursive -- --test-threads=1
-      - run: cargo test --test watch_stability -- --test-threads=1
+      - run: cargo test --locked --test watch_recursive -- --test-threads=1
+      - run: cargo test --locked --test watch_stability -- --test-threads=1
       - run: cargo build --release --locked
+
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # voidzero-dev/setup-vp v1.17.0: installs vp, Node 24, locked-pnpm cache.
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca
+        with:
+          working-directory: desktop
+          node-version: "24"
+          cache: true
+          run-install: false
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: rustfmt, clippy
+      # All frontend/package-manager/Tauri lifecycle work stays behind vp.
+      - run: vp -C desktop install --frozen-lockfile
+      - run: vp -C desktop check
+      - run: vp -C desktop test
+      - run: vp -C desktop build
+      - run: cargo clippy --locked -p unlockm-desktop --all-targets -- -D warnings
+      - run: cargo test --locked -p unlockm-desktop --all-targets
+      - name: Audit bundled Fontsource license resources
+        run: cargo test --locked -p unlockm-desktop --test license_audit
+      - run: vp -C desktop exec tauri build --debug --no-bundle

@@ -1,0 +1,17 @@
+{
+  "productName": "UnlockM",
+  "supportedLocales": ["zh-CN", "en-US"],
+  "preferences": {
+    "locale": "en-US",
+    "defaultSettings": {
+      "updateMetadata": false,
+      "copyPassthrough": true,
+      "overwrite": false
+    }
+  },
+  "history": {
+    "runs": [],
+    "nextCursor": null
+  },
+  "activeRun": null
+}

@@ -1,4 +1,7 @@
-use super::{JobTimings, Summary};
+use super::{
+    JobTimings, Summary,
+    events::{ArtworkSnapshot, MusicSnapshot, ReportWarning},
+};
 use crate::app::runner::Cancellation;
 use crate::{
     config::RunConfig,
@@ -33,6 +36,96 @@ pub struct PlannedJob {
 #[derive(Debug)]
 pub struct StagedDecrypt {
     pub path: std::path::PathBuf,
+}
+
+/// The execution result stays separate from [`Summary`] so host observers can
+/// retain non-fatal metadata diagnostics without scraping tracing output.
+#[derive(Debug, Default)]
+pub struct ExecutionReport {
+    pub summary: Summary,
+    pub warnings: Vec<ReportWarning>,
+    pub music: Option<MusicSnapshot>,
+}
+
+fn fallback_music_snapshot(source: &Path) -> MusicSnapshot {
+    MusicSnapshot {
+        title: source
+            .file_stem()
+            .map(|value| value.to_string_lossy().into_owned())
+            .filter(|value| !value.trim().is_empty()),
+        ..Default::default()
+    }
+}
+
+fn artwork_mime_type(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+fn snapshot_music(
+    source: &Path,
+    destination: &Path,
+    warnings: &mut Vec<ReportWarning>,
+) -> MusicSnapshot {
+    let mut snapshot = fallback_music_snapshot(source);
+    let bounded = match crate::metadata::tags::read_bounded_snapshot(destination) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            warnings.push(ReportWarning {
+                code: "metadata_snapshot_unavailable".into(),
+                detail: error,
+            });
+            return snapshot;
+        }
+    };
+    if let Some(detail) = bounded.artwork_warning {
+        warnings.push(ReportWarning {
+            code: "artwork_snapshot_unavailable".into(),
+            detail,
+        });
+    }
+    let metadata = bounded.metadata;
+    snapshot.title = metadata.title.map(|value| value.text).or(snapshot.title);
+    snapshot.artist = metadata.artists.map(|value| value.text);
+    snapshot.album = metadata.album.map(|value| value.text);
+    snapshot.duration_ms = metadata.duration_ms;
+    if let Some(bytes) = metadata.cover.and_then(|cover| cover.bytes) {
+        if let Some(mime_type) = artwork_mime_type(&bytes) {
+            snapshot.artwork = Some(ArtworkSnapshot {
+                mime_type: mime_type.into(),
+                bytes,
+            });
+        } else {
+            warnings.push(ReportWarning {
+                code: "artwork_snapshot_unavailable".into(),
+                detail: "embedded cover has an unsupported image format".into(),
+            });
+        }
+    }
+    snapshot
+}
+
+fn music_execution_report(
+    summary: Summary,
+    source: &Path,
+    destination: &Path,
+    mut warnings: Vec<ReportWarning>,
+) -> ExecutionReport {
+    let music = snapshot_music(source, destination, &mut warnings);
+    ExecutionReport {
+        summary,
+        warnings,
+        music: Some(music),
+    }
 }
 impl Drop for StagedDecrypt {
     fn drop(&mut self) {
@@ -103,7 +196,7 @@ fn stage_decrypt(
     source_before: &SourceFingerprint,
     cancellation: &Cancellation,
     timings: &mut JobTimings,
-) -> Result<StagedDecrypt, String> {
+) -> Result<(StagedDecrypt, Vec<ReportWarning>), String> {
     let parent = destination.parent().ok_or("destination has no parent")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let ncm_evidence = if config.update_metadata && prepared.kind() == formats::Kind::Ncm {
@@ -133,8 +226,9 @@ fn stage_decrypt(
     timings.decrypt += decrypt_started.elapsed();
 
     if !config.update_metadata {
-        return Ok(staged);
+        return Ok((staged, Vec::new()));
     }
+    let mut warnings = Vec::new();
     let resolve_started = Instant::now();
     let resolved = match metadata::resolve_staged(
         &staged.path,
@@ -148,17 +242,25 @@ fn stage_decrypt(
         Err(error) => {
             timings.metadata_resolve += resolve_started.elapsed();
             tracing::warn!(path=%source.display(), %error, "metadata update skipped");
-            return Ok(staged);
+            warnings.push(ReportWarning {
+                code: "metadata_update_skipped".into(),
+                detail: error,
+            });
+            return Ok((staged, warnings));
         }
     };
     timings.metadata_resolve += resolve_started.elapsed();
     let Some(resolved) = resolved else {
-        return Ok(staged);
+        return Ok((staged, warnings));
     };
     let tag_started = Instant::now();
     if let Err(error) = metadata::apply_resolved_in_place(&staged.path, &resolved) {
         timings.tag_write += tag_started.elapsed();
         tracing::warn!(path=%source.display(), %error, "metadata update skipped; regenerating clean audio");
+        warnings.push(ReportWarning {
+            code: "metadata_update_recovered".into(),
+            detail: error,
+        });
         let fallback_started = Instant::now();
         let clean_stage = regenerate_clean_stage(
             config,
@@ -176,7 +278,7 @@ fn stage_decrypt(
     } else {
         timings.tag_write += tag_started.elapsed();
     }
-    Ok(staged)
+    Ok((staged, warnings))
 }
 
 #[derive(PartialEq, Eq)]
@@ -349,20 +451,71 @@ pub fn execute_cancellable_with_resources(
     cancellation: &Cancellation,
     timings: &mut JobTimings,
 ) -> Result<Summary, String> {
+    execute_cancellable_with_resources_report(
+        config,
+        keys,
+        metadata,
+        reservations,
+        planned,
+        cancellation,
+        timings,
+        false,
+    )
+    .map(|report| report.summary)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn execute_cancellable_with_resources_report(
+    config: &RunConfig,
+    keys: &KeySources,
+    metadata: &MetadataClient,
+    reservations: &Arc<Mutex<Reservations>>,
+    planned: PlannedJob,
+    cancellation: &Cancellation,
+    timings: &mut JobTimings,
+    capture_music_snapshot: bool,
+) -> Result<ExecutionReport, String> {
     if cancellation.is_cancelled() {
-        return Ok(Summary::default());
+        return Ok(ExecutionReport::default());
     }
-    if planned.destination == planned.source {
-        return Ok(Summary {
+    let is_music = matches!(&planned.action, PlannedAction::Decrypt { .. });
+    let source = planned.source.clone();
+    let destination = planned.destination.clone();
+    if destination == source {
+        let summary = Summary {
             skipped: 1,
+            ..Default::default()
+        };
+        if is_music && capture_music_snapshot {
+            return Ok(music_execution_report(
+                summary,
+                &source,
+                &destination,
+                Vec::new(),
+            ));
+        }
+        return Ok(ExecutionReport {
+            summary,
             ..Default::default()
         });
     }
     reserve(reservations, &planned.source, &planned.destination)
         .map_err(|_| format!("collision at {}", planned.destination.display()))?;
-    if !config.overwrite && planned.destination.exists() {
-        return Ok(Summary {
+    if !config.overwrite && destination.exists() {
+        let summary = Summary {
             skipped: 1,
+            ..Default::default()
+        };
+        if is_music && capture_music_snapshot {
+            return Ok(music_execution_report(
+                summary,
+                &source,
+                &destination,
+                Vec::new(),
+            ));
+        }
+        return Ok(ExecutionReport {
+            summary,
             ..Default::default()
         });
     }
@@ -373,16 +526,20 @@ pub fn execute_cancellable_with_resources(
             config.overwrite,
             cancellation,
             timings,
-        ),
+        )
+        .map(|summary| ExecutionReport {
+            summary,
+            ..Default::default()
+        }),
         PlannedAction::Decrypt {
             prepared,
             extension,
         } => {
             if cancellation.is_cancelled() {
-                return Ok(Summary::default());
+                return Ok(ExecutionReport::default());
             }
             let source_before = source_fingerprint(&planned.source)?;
-            let staged = stage_decrypt(
+            let (staged, warnings) = stage_decrypt(
                 config,
                 keys,
                 metadata,
@@ -395,7 +552,11 @@ pub fn execute_cancellable_with_resources(
                 timings,
             )?;
             if !publish_source_is_current(&planned.source, &source_before, cancellation)? {
-                return Ok(Summary::default());
+                return Ok(ExecutionReport {
+                    summary: Summary::default(),
+                    warnings,
+                    ..Default::default()
+                });
             }
             let publish_started = Instant::now();
             let result = AtomicOutput::publish_existing_temp(
@@ -412,11 +573,25 @@ pub fn execute_cancellable_with_resources(
                     filetime::FileTime::from_last_modification_time(&metadata),
                 );
             }
-            Ok(Summary {
+            let summary = Summary {
                 converted: usize::from(result),
                 skipped: usize::from(!result),
                 ..Default::default()
-            })
+            };
+            if capture_music_snapshot {
+                Ok(music_execution_report(
+                    summary,
+                    &source,
+                    &destination,
+                    warnings,
+                ))
+            } else {
+                Ok(ExecutionReport {
+                    summary,
+                    warnings,
+                    ..Default::default()
+                })
+            }
         }
     }
 }
@@ -467,6 +642,7 @@ fn copy_atomic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{Engine, engine::general_purpose::STANDARD};
 
     fn qmc_recovery_fixture() -> (
         tempfile::TempDir,
@@ -601,7 +777,7 @@ mod tests {
             fs::write(&destination, b"old destination").unwrap();
             let fingerprint = source_fingerprint(&source).unwrap();
             let cancellation = Cancellation::default();
-            let stage = stage_decrypt(
+            let (stage, warnings) = stage_decrypt(
                 &config,
                 &KeySources::default(),
                 &MetadataClient::new(1),
@@ -614,6 +790,7 @@ mod tests {
                 &mut JobTimings::default(),
             )
             .unwrap();
+            assert!(warnings.is_empty());
             assert!(stage.path.is_file());
 
             if change_source {
@@ -641,5 +818,62 @@ mod tests {
                         .starts_with(".unlockm-stage-"))
             );
         }
+    }
+
+    #[test]
+    fn local_music_snapshot_uses_only_the_published_destination() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("encrypted-track.ncm");
+        let destination = directory.path().join("track.mp3");
+        std::fs::write(&source, b"encrypted source is never parsed for history").unwrap();
+        let bytes = STANDARD
+            .decode(include_str!("../../tests/fixtures/lofty-silent.mp3.b64").trim())
+            .unwrap();
+        std::fs::write(&destination, bytes).unwrap();
+
+        let mut warnings = Vec::new();
+        let snapshot = snapshot_music(&source, &destination, &mut warnings);
+        assert_eq!(snapshot.title.as_deref(), Some("encrypted-track"));
+        assert!(snapshot.duration_ms.is_some());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn artwork_mime_detection_accepts_supported_local_images() {
+        assert_eq!(
+            artwork_mime_type(b"\x89PNG\r\n\x1a\nbody"),
+            Some("image/png")
+        );
+        assert_eq!(artwork_mime_type(b"\xff\xd8\xffbody"), Some("image/jpeg"));
+        assert_eq!(artwork_mime_type(b"not an image"), None);
+    }
+
+    #[test]
+    fn execution_reads_final_tags_only_when_snapshot_capability_is_requested() {
+        let (directory, config, source, prepared) = qmc_recovery_fixture();
+        let destination = directory.path().join("out/recovery.flac");
+        let mut timings = JobTimings::default();
+        let report = execute_cancellable_with_resources_report(
+            &config,
+            &KeySources::default(),
+            &MetadataClient::new(1),
+            &Arc::new(Mutex::new(Reservations::default())),
+            PlannedJob {
+                source,
+                destination: destination.clone(),
+                action: PlannedAction::Decrypt {
+                    prepared,
+                    extension: "flac".into(),
+                },
+            },
+            &Cancellation::default(),
+            &mut timings,
+            false,
+        )
+        .unwrap();
+        assert_eq!(report.summary.converted, 1);
+        assert!(report.music.is_none());
+        assert!(report.warnings.is_empty());
+        assert!(destination.is_file());
     }
 }

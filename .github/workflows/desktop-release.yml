@@ -1,0 +1,293 @@
+name: Desktop release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.name }}
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal
+            id: macos
+            os: macos-latest
+            target: universal-apple-darwin
+            bundle_dir: target/universal-apple-darwin/release/bundle/dmg
+            build_args: --target universal-apple-darwin --bundles dmg
+          - name: Windows x86_64
+            id: windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundle_dir: target/x86_64-pc-windows-msvc/release/bundle/nsis
+            build_args: --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.windows-signing.json
+    runs-on: ${{ matrix.os }}
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Validate version tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' desktop/src-tauri/tauri.conf.json | head -n 1)
+          test -n "$version"
+          test "v$version" = "$GITHUB_REF_NAME"
+          cargo_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' desktop/src-tauri/Cargo.toml | head -n 1)
+          test "$cargo_version" = "$version"
+      # voidzero-dev/setup-vp v1.17.0: installs vp, Node 24, locked-pnpm cache.
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca
+        with:
+          working-directory: desktop
+          node-version: "24"
+          cache: true
+          run-install: false
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: rustfmt, clippy
+          targets: ${{ matrix.id == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Verify formatted Rust source
+        run: cargo fmt --all -- --check
+      - name: Run strict Rust workspace lint
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Run complete Rust workspace tests
+        run: cargo test --locked --workspace --all-targets --all-features
+      - name: Audit bundled Fontsource license resources
+        run: cargo test --locked -p unlockm-desktop --test license_audit
+      - name: Install locked frontend dependencies
+        run: vp -C desktop install --frozen-lockfile
+      - name: Validate desktop source
+        run: vp -C desktop check
+      - name: Test desktop source
+        run: vp -C desktop test
+      - name: Assert no conversion sidecar or process boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -nE 'std::process::Command|Command::new|externalBin|tauri-plugin-shell|sidecar' -- \
+            desktop/src-tauri/src desktop/src-tauri/tauri.conf.json desktop/src-tauri/capabilities; then
+            echo "UnlockM must link the Rust engine and must not package a conversion sidecar."
+            exit 1
+          fi
+      - name: Require and import macOS release credentials
+        if: matrix.id == 'macos'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for required in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID KEYCHAIN_PASSWORD; do
+            test -n "${!required:-}" || { echo "missing release secret: $required"; exit 1; }
+          done
+          certificate="$RUNNER_TEMP/unlockm-release.p12"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$certificate"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import "$certificate" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          identity=$(security find-identity -v -p codesigning build.keychain | awk -F '"' '/Developer ID Application/{print $2; exit}')
+          test -n "$identity" || { echo "Developer ID Application certificate is required"; exit 1; }
+          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+      - name: Require and import Windows release certificate
+        if: matrix.id == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw "WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD are required for a release."
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP "unlockm-release.pfx"
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          if (-not $certificate.HasPrivateKey) { throw "release certificate has no private key" }
+          @"
+          {
+            "bundle": {
+              "windows": {
+                "certificateThumbprint": "$($certificate.Thumbprint)",
+                "digestAlgorithm": "sha256",
+                "timestampUrl": "http://timestamp.digicert.com"
+              }
+            }
+          }
+          "@ | Set-Content -Path "desktop/src-tauri/tauri.windows-signing.json" -Encoding utf8
+      # tauri-apps/tauri-action action-v1.0.0; its command remains the vp-routed local CLI.
+      - name: Build signed installer
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+        with:
+          projectPath: desktop
+          tauriScript: vp exec tauri
+          args: ${{ matrix.build_args }}
+      - name: Verify macOS signing and notarization
+        if: matrix.id == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=$(find target/universal-apple-darwin/release/bundle -type d -name 'UnlockM.app' -print -quit)
+          test -n "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          test -f "$app/Contents/Resources/licenses/SIL-OFL-1.1.txt"
+          test -f "$app/Contents/Resources/licenses/THIRD_PARTY_NOTICES.md"
+          executable_count=$(find "$app/Contents/MacOS" -type f -perm -111 | wc -l | tr -d ' ')
+          test "$executable_count" -eq 1
+          executable=$(find "$app/Contents/MacOS" -type f -perm -111 -print -quit)
+          architectures=$(lipo -archs "$executable")
+          case "$architectures" in
+            *x86_64*arm64*|*arm64*x86_64*) ;;
+            *) echo "expected universal x86_64 + arm64 application, got: $architectures"; exit 1 ;;
+          esac
+      - name: Verify Windows Tauri-signed app and NSIS installer
+        if: matrix.id == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installers = @(Get-ChildItem "${{ matrix.bundle_dir }}" -Filter "*-setup.exe")
+          if ($installers.Count -ne 1) { throw "expected exactly one NSIS setup executable" }
+          $applications = @(Get-ChildItem "target/x86_64-pc-windows-msvc/release" -Filter "*.exe" -File)
+          if ($applications.Count -ne 1) { throw "expected exactly one Tauri application executable" }
+          foreach ($binary in @($applications[0], $installers[0])) {
+            if ((Get-AuthenticodeSignature -FilePath $binary.FullName).Status -ne "Valid") {
+              throw "signature is not valid: $($binary.FullName)"
+            }
+          }
+      - name: Inspect Windows NSIS payload for engine and bundled notices
+        if: matrix.id == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installers = @(Get-ChildItem "${{ matrix.bundle_dir }}" -Filter "*-setup.exe")
+          if ($installers.Count -ne 1) { throw "expected exactly one NSIS setup executable" }
+          & 7z l $installers[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw "7z could not list the NSIS installer" }
+          $payload = Join-Path $env:RUNNER_TEMP "unlockm-nsis-payload"
+          New-Item -ItemType Directory -Path $payload -Force | Out-Null
+          & 7z x $installers[0].FullName "-o$payload" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7z could not unpack the NSIS installer" }
+          $files = @(Get-ChildItem $payload -Recurse -File)
+          if (@($files | Where-Object Name -ieq "unlockm-desktop.exe").Count -ne 1) {
+            throw "NSIS payload must contain exactly one unlockm-desktop.exe"
+          }
+          foreach ($notice in "SIL-OFL-1.1.txt", "THIRD_PARTY_NOTICES.md") {
+            if (@($files | Where-Object Name -ieq $notice).Count -ne 1) {
+              throw "NSIS payload must contain $notice"
+            }
+          }
+          $forbidden = @($files | Where-Object {
+            $_.Name -ieq "unlockm.exe" -or $_.Name -match "(?i)^(ffmpeg|ffprobe|.*sidecar.*|.*helper.*)\.exe$"
+          })
+          if ($forbidden.Count -ne 0) {
+            throw "NSIS payload contains a forbidden conversion helper: $($forbidden.FullName -join ', ')"
+          }
+      - name: Stage macOS universal installer and checksum
+        if: matrix.id == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p release-assets
+          matches=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          test "${#matches[@]}" -eq 1
+          asset="UnlockM-${version}-macos-universal.dmg"
+          cp "${matches[0]}" "release-assets/$asset"
+          (
+            cd release-assets
+            shasum -a 256 "$asset" > "$asset.sha256"
+          )
+      - name: Stage Windows x86_64 installer and checksum
+        if: matrix.id == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $installers = @(Get-ChildItem "${{ matrix.bundle_dir }}" -Filter "*-setup.exe")
+          if ($installers.Count -ne 1) { throw "expected exactly one NSIS setup executable" }
+          $asset = "UnlockM-$version-windows-x64-setup.exe"
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+          Copy-Item $installers[0].FullName "release-assets/$asset"
+          $hash = (Get-FileHash "release-assets/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $asset" | Set-Content -Path "release-assets/$asset.sha256" -Encoding ascii
+      # actions/upload-artifact v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: UnlockM-${{ matrix.id }}-release-assets
+          path: release-assets/
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: package
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # actions/download-artifact v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          path: release-assets
+          pattern: UnlockM-*-release-assets
+          merge-multiple: true
+      - name: Verify checksums and exact release contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          expected=(
+            "UnlockM-${version}-macos-universal.dmg"
+            "UnlockM-${version}-macos-universal.dmg.sha256"
+            "UnlockM-${version}-windows-x64-setup.exe"
+            "UnlockM-${version}-windows-x64-setup.exe.sha256"
+          )
+          mapfile -t actual < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
+          diff -u <(printf '%s\n' "${expected[@]}" | sort) <(printf '%s\n' "${actual[@]}")
+          for checksum in release-assets/*.sha256; do
+            (cd release-assets && shasum -a 256 -c "$(basename "$checksum")")
+          done
+      - name: Create the signed, installer-only release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --title "UnlockM ${GITHUB_REF_NAME}" \
+            --generate-notes
+      - name: Assert published release contains only installers and checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          expected=$(printf '%s\n' \
+            "UnlockM-${version}-macos-universal.dmg" \
+            "UnlockM-${version}-macos-universal.dmg.sha256" \
+            "UnlockM-${version}-windows-x64-setup.exe" \
+            "UnlockM-${version}-windows-x64-setup.exe.sha256" | sort)
+          actual=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | sort)
+          diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual")

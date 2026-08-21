@@ -1,7 +1,12 @@
-use super::{JobOutcome, JobReport, JobTimings, Summary, job};
+use super::{
+    JobOutcome, JobReport, JobTimings, Summary,
+    events::{BatchEvent, BatchObserver, ItemAction, ItemKind, MusicSnapshot, ReportError},
+    job,
+};
 use crate::{
     config::RunConfig,
     error::Result,
+    formats,
     keys::KeySources,
     metadata::provider::qq::MetadataClient,
     pathing::{Reservations, collision_key},
@@ -14,7 +19,10 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
-use tokio::{sync::Semaphore, task::JoinSet};
+use tokio::{
+    sync::Semaphore,
+    task::{Id, JoinSet},
+};
 
 #[derive(Clone, Default)]
 pub struct Cancellation(Arc<AtomicBool>);
@@ -56,7 +64,18 @@ struct ReportCollector {
 }
 
 struct MeasuredPlannedJob {
+    ordinal: u64,
     planned: job::PlannedJob,
+    logical_bytes: u64,
+    preflight: std::time::Duration,
+}
+
+struct InFlightJob {
+    ordinal: u64,
+    source: PathBuf,
+    destination: PathBuf,
+    item_kind: ItemKind,
+    action: ItemAction,
     logical_bytes: u64,
     preflight: std::time::Duration,
 }
@@ -98,7 +117,7 @@ impl RunnerMetrics {
             self.max_open_files.load(Ordering::SeqCst),
         )
     }
-    fn record(&self, report: JobReport) {
+    fn record(&self, report: &JobReport) {
         tracing::trace!(
             path = %report.relative_path.display(),
             logical_bytes = report.logical_bytes,
@@ -127,9 +146,12 @@ impl RunnerMetrics {
         if let Some(collector) = &self.collector {
             let mut collector = collector.lock().expect("report collector lock");
             if collector.reports.len() < collector.limit {
-                collector.reports.push(report);
+                collector.reports.push(report.clone());
             }
         }
+    }
+    fn collects_reports(&self) -> bool {
+        self.collector.is_some()
     }
     #[cfg(test)]
     fn collecting(limit: usize) -> Self {
@@ -155,20 +177,95 @@ impl RunnerMetrics {
 
 fn report_for(
     config: &RunConfig,
+    ordinal: u64,
     source: &std::path::Path,
     logical_bytes: u64,
     preflight: std::time::Duration,
 ) -> JobReport {
     JobReport {
+        ordinal,
+        source: source.to_path_buf(),
         relative_path: config
             .relative_input(source)
             .unwrap_or_else(|_| source.to_path_buf()),
+        destination: None,
+        item_kind: item_kind_for_source(source),
+        action: None,
         logical_bytes,
         outcome: JobOutcome::Failed,
+        error: None,
+        warnings: Vec::new(),
+        music: None,
         timings: JobTimings {
             preflight,
             ..Default::default()
         },
+    }
+}
+
+fn item_kind_for_source(source: &std::path::Path) -> ItemKind {
+    if formats::candidate(source).is_some() {
+        ItemKind::Music
+    } else {
+        ItemKind::Companion
+    }
+}
+
+fn planned_item_kind(planned: &job::PlannedJob) -> ItemKind {
+    match &planned.action {
+        job::PlannedAction::Copy => ItemKind::Companion,
+        job::PlannedAction::Decrypt { .. } => ItemKind::Music,
+    }
+}
+
+fn planned_action(planned: &job::PlannedJob) -> ItemAction {
+    match &planned.action {
+        job::PlannedAction::Copy => ItemAction::Copy,
+        job::PlannedAction::Decrypt { .. } => ItemAction::Convert,
+    }
+}
+
+fn report_for_planned(config: &RunConfig, measured: &MeasuredPlannedJob) -> JobReport {
+    let mut report = report_for(
+        config,
+        measured.ordinal,
+        &measured.planned.source,
+        measured.logical_bytes,
+        measured.preflight,
+    );
+    report.destination = Some(measured.planned.destination.clone());
+    report.item_kind = planned_item_kind(&measured.planned);
+    report.action = Some(planned_action(&measured.planned));
+    report
+}
+
+fn cancelled_report(config: &RunConfig, measured: &MeasuredPlannedJob) -> JobReport {
+    let mut report = report_for_planned(config, measured);
+    report.outcome = JobOutcome::Cancelled;
+    report.error = Some(ReportError {
+        code: "cancelled".into(),
+        detail: "conversion was cancelled before publication".into(),
+    });
+    report
+}
+
+fn record_report(metrics: &RunnerMetrics, observer: &BatchObserver, mut report: JobReport) {
+    let needs_desktop_report = observer.is_enabled() || metrics.collects_reports();
+    if needs_desktop_report && report.item_kind == ItemKind::Music && report.music.is_none() {
+        report.music = Some(MusicSnapshot {
+            title: report
+                .source
+                .file_stem()
+                .map(|value| value.to_string_lossy().into_owned())
+                .filter(|value| !value.trim().is_empty()),
+            ..Default::default()
+        });
+    }
+    metrics.record(&report);
+    if observer.is_enabled() {
+        observer.emit(BatchEvent::ItemTerminal {
+            report: Box::new(report),
+        });
     }
 }
 
@@ -207,13 +304,40 @@ fn emit_timing_reports(metrics: &RunnerMetrics) {
     );
 }
 pub async fn run_paths(config: Arc<RunConfig>, paths: Vec<PathBuf>) -> Result<Summary> {
+    run_paths_with_observer(config, paths, BatchObserver::default()).await
+}
+
+pub async fn run_paths_with_observer(
+    config: Arc<RunConfig>,
+    paths: Vec<PathBuf>,
+    observer: BatchObserver,
+) -> Result<Summary> {
     let resources = RunnerResources::new(&config);
-    run_paths_with_resources_and_cancel(
+    run_paths_with_resources_and_cancel_with_observer(
         config,
         paths,
         Arc::new(RunnerMetrics::default()),
         Cancellation::default(),
         resources,
+        observer,
+    )
+    .await
+}
+
+pub async fn run_paths_with_observer_and_cancel(
+    config: Arc<RunConfig>,
+    paths: Vec<PathBuf>,
+    cancellation: Cancellation,
+    observer: BatchObserver,
+) -> Result<Summary> {
+    let resources = RunnerResources::new(&config);
+    run_paths_with_resources_and_cancel_with_observer(
+        config,
+        paths,
+        Arc::new(RunnerMetrics::default()),
+        cancellation,
+        resources,
+        observer,
     )
     .await
 }
@@ -223,8 +347,15 @@ pub async fn run_paths_with_metrics(
     metrics: Arc<RunnerMetrics>,
 ) -> Result<Summary> {
     let resources = RunnerResources::new(&config);
-    run_paths_with_resources_and_cancel(config, paths, metrics, Cancellation::default(), resources)
-        .await
+    run_paths_with_resources_and_cancel_with_observer(
+        config,
+        paths,
+        metrics,
+        Cancellation::default(),
+        resources,
+        BatchObserver::default(),
+    )
+    .await
 }
 pub async fn run_paths_with_metrics_and_cancel(
     config: Arc<RunConfig>,
@@ -232,8 +363,33 @@ pub async fn run_paths_with_metrics_and_cancel(
     metrics: Arc<RunnerMetrics>,
     cancellation: Cancellation,
 ) -> Result<Summary> {
+    run_paths_with_metrics_and_cancel_and_observer(
+        config,
+        paths,
+        metrics,
+        cancellation,
+        BatchObserver::default(),
+    )
+    .await
+}
+
+pub async fn run_paths_with_metrics_and_cancel_and_observer(
+    config: Arc<RunConfig>,
+    paths: Vec<PathBuf>,
+    metrics: Arc<RunnerMetrics>,
+    cancellation: Cancellation,
+    observer: BatchObserver,
+) -> Result<Summary> {
     let resources = RunnerResources::new(&config);
-    run_paths_with_resources_and_cancel(config, paths, metrics, cancellation, resources).await
+    run_paths_with_resources_and_cancel_with_observer(
+        config,
+        paths,
+        metrics,
+        cancellation,
+        resources,
+        observer,
+    )
+    .await
 }
 
 pub async fn run_paths_with_resources_and_cancel(
@@ -243,22 +399,60 @@ pub async fn run_paths_with_resources_and_cancel(
     cancellation: Cancellation,
     resources: RunnerResources,
 ) -> Result<Summary> {
+    run_paths_with_resources_and_cancel_with_observer(
+        config,
+        paths,
+        metrics,
+        cancellation,
+        resources,
+        BatchObserver::default(),
+    )
+    .await
+}
+
+pub async fn run_paths_with_resources_and_cancel_with_observer(
+    config: Arc<RunConfig>,
+    paths: Vec<PathBuf>,
+    metrics: Arc<RunnerMetrics>,
+    cancellation: Cancellation,
+    resources: RunnerResources,
+    observer: BatchObserver,
+) -> Result<Summary> {
     let mut set = JoinSet::new();
     // Resolve every encrypted input through a bounded decrypted-prefix probe
     // before claiming destinations. Suffix-only reservations would let a copy
     // and conversion race to the same flat output, while full stages here would
     // retain corpus-sized temporary data behind the collision barrier.
     let mut seen = HashSet::new();
-    for path in paths {
-        if cancellation.is_cancelled() {
-            break;
-        }
-        if !seen.insert(path.clone()) {
-            continue;
-        }
+    let paths: Vec<_> = paths
+        .into_iter()
+        .filter(|path| seen.insert(path.clone()))
+        .collect();
+    observer.emit(BatchEvent::PlanningStarted { total: paths.len() });
+    let mut preflight_jobs: HashMap<Id, (u64, PathBuf)> = HashMap::new();
+    for (index, path) in paths.into_iter().enumerate() {
+        let ordinal = index as u64;
         let relative = config
             .relative_input(&path)
             .unwrap_or_else(|_| path.clone());
+        if cancellation.is_cancelled() {
+            let mut report = report_for(&config, ordinal, &path, 0, std::time::Duration::ZERO);
+            report.outcome = JobOutcome::Cancelled;
+            report.error = Some(ReportError {
+                code: "cancelled".into(),
+                detail: "conversion was cancelled before planning".into(),
+            });
+            record_report(&metrics, &observer, report);
+            continue;
+        }
+        if observer.is_enabled() {
+            observer.emit(BatchEvent::ItemPlanning {
+                ordinal,
+                source: path.clone(),
+                relative_path: relative.clone(),
+                item_kind: item_kind_for_source(&path),
+            });
+        }
         config.presentation.activity(&relative, "Planning");
         let permit = resources
             .semaphore
@@ -271,7 +465,8 @@ pub async fn run_paths_with_resources_and_cancel(
         let metadata = resources.metadata.clone();
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
         let metrics = metrics.clone();
-        set.spawn_blocking(move || {
+        let task_source = path.clone();
+        let handle = set.spawn_blocking(move || {
             let _permit = permit;
             metrics.enter();
             let started = Instant::now();
@@ -282,14 +477,16 @@ pub async fn run_paths_with_resources_and_cancel(
             }))
             .unwrap_or_else(|_| Err("preflight worker panicked".into()));
             metrics.leave();
-            (path, started.elapsed(), result)
+            (ordinal, path, started.elapsed(), result)
         });
+        preflight_jobs.insert(handle.id(), (ordinal, task_source));
     }
     let mut summary = Summary::default();
     let mut grouped: HashMap<PathBuf, Vec<MeasuredPlannedJob>> = HashMap::new();
-    while let Some(result) = set.join_next().await {
+    while let Some(result) = set.join_next_with_id().await {
         match result {
-            Ok((source, preflight, Ok(Some(planned)))) => {
+            Ok((task_id, (ordinal, source, preflight, Ok(Some(planned))))) => {
+                preflight_jobs.remove(&task_id);
                 let logical_bytes = std::fs::metadata(&source)
                     .map(|metadata| metadata.len())
                     .unwrap_or(0);
@@ -297,33 +494,57 @@ pub async fn run_paths_with_resources_and_cancel(
                     .entry(collision_key(&planned.destination))
                     .or_default()
                     .push(MeasuredPlannedJob {
+                        ordinal,
                         planned,
                         logical_bytes,
                         preflight,
                     });
             }
-            Ok((source, preflight, Ok(None))) => {
+            Ok((task_id, (ordinal, source, preflight, Ok(None)))) => {
+                preflight_jobs.remove(&task_id);
                 summary.skipped += 1;
                 let logical_bytes = std::fs::metadata(&source)
                     .map(|metadata| metadata.len())
                     .unwrap_or(0);
-                let mut report = report_for(&config, &source, logical_bytes, preflight);
+                let mut report = report_for(&config, ordinal, &source, logical_bytes, preflight);
                 report.outcome = JobOutcome::Skipped;
-                metrics.record(report);
+                record_report(&metrics, &observer, report);
                 config.presentation.finished();
             }
-            Ok((source, preflight, Err(error))) => {
+            Ok((task_id, (ordinal, source, preflight, Err(error)))) => {
+                preflight_jobs.remove(&task_id);
                 tracing::warn!(path=%source.display(), stage="preflight", %error, "file processing failed");
                 summary.failed += 1;
                 let logical_bytes = std::fs::metadata(&source)
                     .map(|metadata| metadata.len())
                     .unwrap_or(0);
-                metrics.record(report_for(&config, &source, logical_bytes, preflight));
+                let mut report = report_for(&config, ordinal, &source, logical_bytes, preflight);
+                report.error = Some(ReportError {
+                    code: "preflight_failed".into(),
+                    detail: error,
+                });
+                record_report(&metrics, &observer, report);
                 config.presentation.finished();
             }
             Err(e) => {
                 tracing::error!(error=%e, "preflight worker panicked");
                 summary.failed += 1;
+                if let Some((ordinal, source)) = preflight_jobs.remove(&e.id()) {
+                    let mut report = report_for(
+                        &config,
+                        ordinal,
+                        &source,
+                        std::fs::metadata(&source)
+                            .map(|metadata| metadata.len())
+                            .unwrap_or(0),
+                        std::time::Duration::ZERO,
+                    );
+                    report.error = Some(ReportError {
+                        code: "preflight_worker_join_failed".into(),
+                        detail: e.to_string(),
+                    });
+                    record_report(&metrics, &observer, report);
+                }
                 config.presentation.finished();
             }
         }
@@ -340,116 +561,239 @@ pub async fn run_paths_with_resources_and_cancel(
             tracing::warn!(destination=%key.display(), claims=jobs.len(), "flat output collision");
             summary.conflicted += jobs.len();
             for measured in jobs {
-                let mut report = report_for(
-                    &config,
-                    &measured.planned.source,
-                    measured.logical_bytes,
-                    measured.preflight,
-                );
+                let mut report = report_for_planned(&config, &measured);
                 report.outcome = JobOutcome::Conflict;
-                metrics.record(report);
+                report.error = Some(ReportError {
+                    code: "same_run_collision".into(),
+                    detail: format!(
+                        "multiple sources claim {}",
+                        measured.planned.destination.display()
+                    ),
+                });
+                record_report(&metrics, &observer, report);
                 config.presentation.finished();
             }
         }
     }
+    ready.sort_by_key(|measured| measured.ordinal);
     if cancellation.is_cancelled() {
-        for _ in &ready {
+        for measured in &ready {
+            record_report(&metrics, &observer, cancelled_report(&config, measured));
             config.presentation.finished();
         }
         emit_timing_reports(&metrics);
+        observer.emit(BatchEvent::Completed {
+            summary,
+            cancelled: true,
+        });
         return Ok(summary);
     }
 
     let mut publish = JoinSet::new();
-    for measured in ready {
-        if cancellation.is_cancelled() {
-            config.presentation.finished();
-            break;
-        }
-        let permit = resources
-            .semaphore
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|e| crate::error::AppError::Internal(e.to_string()))?;
-        let source = measured.planned.source.clone();
-        let relative = config
-            .relative_input(&source)
-            .unwrap_or_else(|_| source.clone());
-        let phase = match &measured.planned.action {
-            job::PlannedAction::Copy => "Copying",
-            job::PlannedAction::Decrypt { .. } => "Decrypting",
-        };
-        config.presentation.started(&relative, phase);
-        let logical_bytes = measured.logical_bytes;
-        let preflight = measured.preflight;
-        let c = config.clone();
-        let r = resources.reservations.clone();
-        let keys = resources.keys.clone();
-        let metadata = resources.metadata.clone();
-        let cancellation = cancellation.clone();
-        let dispatch = tracing::dispatcher::get_default(Clone::clone);
-        let metrics = metrics.clone();
-        publish.spawn_blocking(move || {
-            let _permit = permit;
-            metrics.enter();
-            let mut timings = JobTimings::default();
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                tracing::dispatcher::with_default(&dispatch, || {
-                    job::execute_cancellable_with_resources(
-                        &c,
-                        &keys,
-                        &metadata,
-                        &r,
-                        measured.planned,
-                        &cancellation,
-                        &mut timings,
-                    )
-                })
-            }))
-            .unwrap_or_else(|_| Err("publication worker panicked".into()));
-            metrics.leave();
-            // A completed worker releases its UI lifecycle immediately. The
-            // scheduler may still be admitting later files and therefore may
-            // not drain this JoinSet result until much later.
-            c.presentation.finished();
-            (source, logical_bytes, preflight, timings, result)
-        });
-    }
-    while let Some(result) = publish.join_next().await {
-        match result {
-            Ok((source, logical_bytes, preflight, mut timings, Ok(outcome))) => {
-                summary.merge(outcome);
-                let mut report = report_for(&config, &source, logical_bytes, preflight);
-                timings.preflight = preflight;
-                report.timings = timings;
-                report.outcome = outcome_from_summary(outcome);
-                metrics.record(report);
+    let mut in_flight: HashMap<Id, InFlightJob> = HashMap::new();
+    let mut pending = ready.into_iter();
+    let mut admissions_closed = false;
+    let max_in_flight = config.jobs.get();
+
+    loop {
+        if cancellation.is_cancelled() && !admissions_closed {
+            for remaining in pending.by_ref() {
+                record_report(&metrics, &observer, cancelled_report(&config, &remaining));
+                config.presentation.finished();
             }
-            Ok((source, logical_bytes, preflight, mut timings, Err(error))) => {
+            admissions_closed = true;
+        }
+
+        while !admissions_closed && publish.len() < max_in_flight {
+            let Some(measured) = pending.next() else {
+                admissions_closed = true;
+                break;
+            };
+            if cancellation.is_cancelled() {
+                record_report(&metrics, &observer, cancelled_report(&config, &measured));
+                config.presentation.finished();
+                for remaining in pending.by_ref() {
+                    record_report(&metrics, &observer, cancelled_report(&config, &remaining));
+                    config.presentation.finished();
+                }
+                admissions_closed = true;
+                break;
+            }
+            let permit = resources
+                .semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|e| crate::error::AppError::Internal(e.to_string()))?;
+            let source = measured.planned.source.clone();
+            let destination = measured.planned.destination.clone();
+            let ordinal = measured.ordinal;
+            let item_kind = planned_item_kind(&measured.planned);
+            let action = planned_action(&measured.planned);
+            let relative = config
+                .relative_input(&source)
+                .unwrap_or_else(|_| source.clone());
+            let phase = match &measured.planned.action {
+                job::PlannedAction::Copy => "Copying",
+                job::PlannedAction::Decrypt { .. } => "Decrypting",
+            };
+            if observer.is_enabled() {
+                observer.emit(BatchEvent::ItemProcessing {
+                    ordinal,
+                    source: source.clone(),
+                    relative_path: relative.clone(),
+                    destination: destination.clone(),
+                    item_kind,
+                    action,
+                });
+            }
+            config.presentation.started(&relative, phase);
+            let context = InFlightJob {
+                ordinal,
+                source: source.clone(),
+                destination: destination.clone(),
+                item_kind,
+                action,
+                logical_bytes: measured.logical_bytes,
+                preflight: measured.preflight,
+            };
+            let c = config.clone();
+            let r = resources.reservations.clone();
+            let keys = resources.keys.clone();
+            let metadata = resources.metadata.clone();
+            let cancellation = cancellation.clone();
+            let capture_music_snapshots = observer.captures_music_snapshots();
+            let dispatch = tracing::dispatcher::get_default(Clone::clone);
+            let metrics = metrics.clone();
+            let handle = publish.spawn_blocking(move || {
+                let _permit = permit;
+                metrics.enter();
+                let mut timings = JobTimings::default();
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    tracing::dispatcher::with_default(&dispatch, || {
+                        job::execute_cancellable_with_resources_report(
+                            &c,
+                            &keys,
+                            &metadata,
+                            &r,
+                            measured.planned,
+                            &cancellation,
+                            &mut timings,
+                            capture_music_snapshots,
+                        )
+                    })
+                }))
+                .unwrap_or_else(|_| Err("publication worker panicked".into()));
+                metrics.leave();
+                c.presentation.finished();
+                (timings, result)
+            });
+            in_flight.insert(handle.id(), context);
+        }
+
+        let Some(result) = publish.join_next_with_id().await else {
+            break;
+        };
+        match result {
+            Ok((task_id, (mut timings, Ok(execution)))) => {
+                let context = in_flight
+                    .remove(&task_id)
+                    .expect("published worker context must exist");
+                let outcome = execution.summary;
+                summary.merge(outcome);
+                let mut report = report_for(
+                    &config,
+                    context.ordinal,
+                    &context.source,
+                    context.logical_bytes,
+                    context.preflight,
+                );
+                timings.preflight = context.preflight;
+                report.timings = timings;
+                report.destination = Some(context.destination);
+                report.item_kind = context.item_kind;
+                report.action = Some(context.action);
+                report.warnings = execution.warnings;
+                report.music = execution.music;
+                report.outcome = if outcome == Summary::default() && cancellation.is_cancelled() {
+                    JobOutcome::Cancelled
+                } else {
+                    outcome_from_summary(outcome)
+                };
+                if report.outcome == JobOutcome::Cancelled {
+                    report.error = Some(ReportError {
+                        code: "cancelled".into(),
+                        detail: "conversion was cancelled before publication".into(),
+                    });
+                }
+                record_report(&metrics, &observer, report);
+            }
+            Ok((task_id, (mut timings, Err(error)))) => {
+                let context = in_flight
+                    .remove(&task_id)
+                    .expect("published worker context must exist");
                 tracing::warn!(stage="publication", %error, "file processing failed");
                 if error.starts_with("collision") {
                     summary.conflicted += 1;
                 } else {
                     summary.failed += 1;
                 }
-                let mut report = report_for(&config, &source, logical_bytes, preflight);
-                timings.preflight = preflight;
+                let mut report = report_for(
+                    &config,
+                    context.ordinal,
+                    &context.source,
+                    context.logical_bytes,
+                    context.preflight,
+                );
+                timings.preflight = context.preflight;
                 report.timings = timings;
+                report.destination = Some(context.destination);
+                report.item_kind = context.item_kind;
+                report.action = Some(context.action);
                 report.outcome = if error.starts_with("collision") {
                     JobOutcome::Conflict
                 } else {
                     JobOutcome::Failed
                 };
-                metrics.record(report);
+                report.error = Some(ReportError {
+                    code: if report.outcome == JobOutcome::Conflict {
+                        "destination_collision".into()
+                    } else {
+                        "publication_failed".into()
+                    },
+                    detail: error,
+                });
+                record_report(&metrics, &observer, report);
             }
             Err(error) => {
                 tracing::error!(%error, "publication worker panicked");
                 summary.failed += 1;
+                if let Some(context) = in_flight.remove(&error.id()) {
+                    let mut report = report_for(
+                        &config,
+                        context.ordinal,
+                        &context.source,
+                        context.logical_bytes,
+                        context.preflight,
+                    );
+                    report.destination = Some(context.destination);
+                    report.item_kind = context.item_kind;
+                    report.action = Some(context.action);
+                    report.error = Some(ReportError {
+                        code: "publication_worker_join_failed".into(),
+                        detail: error.to_string(),
+                    });
+                    record_report(&metrics, &observer, report);
+                    config.presentation.finished();
+                }
             }
         }
     }
     emit_timing_reports(&metrics);
+    observer.emit(BatchEvent::Completed {
+        summary,
+        cancelled: cancellation.is_cancelled(),
+    });
     Ok(summary)
 }
 
@@ -497,16 +841,113 @@ mod tests {
         );
         let cancel = Cancellation::default();
         cancel.cancel();
-        let summary = run_paths_with_metrics_and_cancel(
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let summary = run_paths_with_metrics_and_cancel_and_observer(
             c,
             vec![file],
             Arc::new(RunnerMetrics::default()),
             cancel,
+            BatchObserver::new(Arc::new(move |event| {
+                captured.lock().unwrap().push(event);
+            })),
         )
         .await
         .unwrap();
         assert_eq!(summary.copied, 0);
         assert!(!output.exists());
+        let events = events.lock().unwrap();
+        assert!(matches!(
+            events[0],
+            BatchEvent::PlanningStarted { total: 1 }
+        ));
+        assert!(matches!(
+            &events[1],
+            BatchEvent::ItemTerminal { report }
+                if report.ordinal == 0 && report.outcome == JobOutcome::Cancelled
+        ));
+        assert!(matches!(
+            events[2],
+            BatchEvent::Completed {
+                cancelled: true,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancellation_after_admission_emits_one_cancelled_terminal_report() {
+        let temp = tempfile::tempdir().unwrap();
+        let input = temp.path().join("in");
+        let output = temp.path().join("out");
+        std::fs::create_dir(&input).unwrap();
+        let file = input.join("large.lrc");
+        std::fs::write(&file, vec![b'x'; 16 * 1024 * 1024]).unwrap();
+        let config = Arc::new(
+            crate::config::RunConfig::new(
+                input,
+                Some(output.clone()),
+                false,
+                false,
+                false,
+                false,
+                false,
+                1,
+                64 * 1024,
+                1,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap(),
+        );
+        let cancellation = Cancellation::default();
+        let metrics = Arc::new(RunnerMetrics::default());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let task = tokio::spawn(run_paths_with_metrics_and_cancel_and_observer(
+            config,
+            vec![file.canonicalize().unwrap()],
+            metrics.clone(),
+            cancellation.clone(),
+            BatchObserver::new(Arc::new(move |event| {
+                captured.lock().unwrap().push(event);
+            })),
+        ));
+
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if metrics.active_jobs.load(Ordering::SeqCst) > 0
+                    && events
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .any(|event| matches!(event, BatchEvent::ItemProcessing { .. }))
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("runner should admit a worker");
+        cancellation.cancel();
+        let summary = task.await.unwrap().unwrap();
+
+        assert_eq!(summary, Summary::default());
+        assert!(!output.join("large.lrc").exists());
+        let events = events.lock().unwrap();
+        let terminals: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                BatchEvent::ItemTerminal { report } => Some(report),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(terminals.len(), 1);
+        assert_eq!(terminals[0].outcome, JobOutcome::Cancelled);
     }
     #[tokio::test]
     async fn runner_observes_bounded_real_parallel_jobs() {
@@ -601,9 +1042,20 @@ mod tests {
         assert_eq!(
             report,
             &JobReport {
+                ordinal: 0,
+                source: bad.canonicalize().unwrap(),
                 relative_path: std::path::PathBuf::from("bad.ncm"),
+                destination: None,
+                item_kind: ItemKind::Music,
+                action: None,
                 logical_bytes: 7,
                 outcome: JobOutcome::Failed,
+                error: report.error.clone(),
+                warnings: Vec::new(),
+                music: Some(MusicSnapshot {
+                    title: Some("bad".into()),
+                    ..Default::default()
+                }),
                 timings: JobTimings {
                     preflight: report.timings.preflight,
                     ..JobTimings::default()
@@ -646,9 +1098,19 @@ mod tests {
             .map(|path| path.canonicalize().unwrap())
             .collect();
         let metrics = Arc::new(RunnerMetrics::collecting(2));
-        let summary = run_paths_with_metrics(config, paths, metrics.clone())
-            .await
-            .unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let summary = run_paths_with_metrics_and_cancel_and_observer(
+            config,
+            paths,
+            metrics.clone(),
+            Cancellation::default(),
+            BatchObserver::new(Arc::new(move |event| {
+                captured.lock().unwrap().push(event);
+            })),
+        )
+        .await
+        .unwrap();
         assert_eq!(summary.conflicted, 2);
         assert!(!output.exists());
         let mut reports = metrics.reports();
@@ -672,5 +1134,231 @@ mod tests {
                 && report.timings.copy == std::time::Duration::ZERO
                 && report.timings.publish == std::time::Duration::ZERO
         }));
+        let terminal_outcomes: Vec<_> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(crate::app::events::terminal_outcome)
+            .collect();
+        assert_eq!(
+            terminal_outcomes,
+            vec![JobOutcome::Conflict, JobOutcome::Conflict]
+        );
+    }
+
+    #[tokio::test]
+    async fn observer_emits_one_terminal_report_per_admitted_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let input = temp.path().join("in");
+        let output = temp.path().join("out");
+        std::fs::create_dir(&input).unwrap();
+        let companion = input.join("notes.lrc");
+        let invalid = input.join("bad.ncm");
+        std::fs::write(&companion, b"notes").unwrap();
+        std::fs::write(&invalid, b"not ncm").unwrap();
+        let config = Arc::new(
+            crate::config::RunConfig::new(
+                input,
+                Some(output),
+                false,
+                false,
+                false,
+                false,
+                false,
+                2,
+                64,
+                1,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap(),
+        );
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let observer = BatchObserver::new(Arc::new(move |event| {
+            captured.lock().unwrap().push(event);
+        }));
+        let paths = vec![
+            companion.canonicalize().unwrap(),
+            invalid.canonicalize().unwrap(),
+        ];
+
+        let summary = run_paths_with_observer(config, paths, observer)
+            .await
+            .unwrap();
+        assert_eq!(summary.copied, 1);
+        assert_eq!(summary.failed, 1);
+
+        let events = events.lock().unwrap();
+        let terminals: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                BatchEvent::ItemTerminal { report } => Some(report.as_ref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(terminals.len(), 2);
+        let mut terminal_by_ordinal = terminals;
+        terminal_by_ordinal.sort_by_key(|report| report.ordinal);
+        assert_eq!(
+            terminal_by_ordinal
+                .iter()
+                .map(|report| report.ordinal)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert_eq!(terminal_by_ordinal[0].outcome, JobOutcome::Copied);
+        assert_eq!(terminal_by_ordinal[1].outcome, JobOutcome::Failed);
+        assert_eq!(
+            terminal_by_ordinal[1]
+                .error
+                .as_ref()
+                .map(|error| error.code.as_str()),
+            Some("preflight_failed")
+        );
+        assert!(matches!(
+            events.last(),
+            Some(BatchEvent::Completed {
+                summary: Summary {
+                    copied: 1,
+                    failed: 1,
+                    ..
+                },
+                cancelled: false,
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn terminal_skip_event_agrees_with_summary() {
+        let temp = tempfile::tempdir().unwrap();
+        let input = temp.path().join("in");
+        let output = temp.path().join("out");
+        std::fs::create_dir(&input).unwrap();
+        std::fs::create_dir(&output).unwrap();
+        let source = input.join("skip.lrc");
+        std::fs::write(&source, b"new source").unwrap();
+        std::fs::write(output.join("skip.lrc"), b"existing output").unwrap();
+        let config = Arc::new(
+            crate::config::RunConfig::new(
+                input,
+                Some(output),
+                false,
+                false,
+                false,
+                false,
+                false,
+                1,
+                64,
+                1,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap(),
+        );
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let summary = run_paths_with_observer(
+            config,
+            vec![source.canonicalize().unwrap()],
+            BatchObserver::new(Arc::new(move |event| {
+                captured.lock().unwrap().push(event);
+            })),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            summary,
+            Summary {
+                skipped: 1,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(crate::app::events::terminal_outcome)
+                .collect::<Vec<_>>(),
+            vec![JobOutcome::Skipped]
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_conversion_event_agrees_with_summary() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("track.qmc0");
+        let output = temp.path().join("out");
+        let mut encrypted = b"fLaC".to_vec();
+        encrypted.resize(4096, 0);
+        crate::crypto::qmc::v1::decrypt(&mut encrypted, 0);
+        std::fs::write(&source, encrypted).unwrap();
+        let config = Arc::new(
+            crate::config::RunConfig::new(
+                source.clone(),
+                Some(output.clone()),
+                false,
+                false,
+                false,
+                false,
+                false,
+                1,
+                64,
+                1,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap(),
+        );
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let summary = run_paths_with_observer(
+            config,
+            vec![source.canonicalize().unwrap()],
+            BatchObserver::new(Arc::new(move |event| {
+                captured.lock().unwrap().push(event);
+            })),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            summary,
+            Summary {
+                converted: 1,
+                ..Default::default()
+            }
+        );
+        let events = events.lock().unwrap();
+        let reports: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                BatchEvent::ItemTerminal { report } => Some(report),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].outcome, JobOutcome::Converted);
+        assert_eq!(reports[0].item_kind, ItemKind::Music);
+        assert_eq!(
+            reports[0]
+                .music
+                .as_ref()
+                .and_then(|music| music.title.as_deref()),
+            Some("track")
+        );
+        assert!(reports[0].warnings.is_empty());
+        assert!(output.join("track.flac").is_file());
     }
 }
