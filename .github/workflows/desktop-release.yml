@@ -196,7 +196,12 @@ jobs:
           New-Item -ItemType Directory -Path release-assets -Force | Out-Null
           Copy-Item $installers[0].FullName "release-assets/$asset"
           $hash = (Get-FileHash "release-assets/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $asset" | Set-Content -Path "release-assets/$asset.sha256" -Encoding ascii
+          $manifest = "$hash  $asset`n"
+          [IO.File]::WriteAllText(
+            (Join-Path $PWD "release-assets/$asset.sha256"),
+            $manifest,
+            [Text.Encoding]::ASCII
+          )
       # actions/upload-artifact v7.0.1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -233,6 +238,10 @@ jobs:
           mapfile -t actual < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
           diff -u <(printf '%s\n' "${expected[@]}" | sort) <(printf '%s\n' "${actual[@]}")
           for checksum in release-assets/*.sha256; do
+            if LC_ALL=C grep -q $'\r' "$checksum"; then
+              echo "checksum manifest must be ASCII/LF-only: $checksum" >&2
+              exit 1
+            fi
             (cd release-assets && shasum -a 256 -c "$(basename "$checksum")")
           done
       - name: Create the unsigned preview prerelease
