@@ -28,25 +28,23 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 walkdir = "2.5"
 aes = "0.8"
+base64 = "0.22"
+byteorder = "1.5"
+block-padding = "0.3"
+cbc = "0.1"
+cipher = { version = "0.4", features = ["block-padding"] }
+crc = "3.2"
+hex = "0.4"
+itertools = "0.14"
+lazy_static = "1.5"
 md-5 = "0.10"
+tc_tea = { version = "0.2.1", default-features = false }
 url = "2.5"
-
-# These are intentionally pinned to the author's published source revision.  No
-# sibling checkout is needed by consumers.
-um_audio = { git = "https://git.um-react.app/um/lib_um_crypto_rust", rev = "5dad838c33c3e4aab198d995160d3fbb9968470f" }
-umc_ncm = { git = "https://git.um-react.app/um/lib_um_crypto_rust", rev = "5dad838c33c3e4aab198d995160d3fbb9968470f" }
-umc_qmc = { git = "https://git.um-react.app/um/lib_um_crypto_rust", rev = "5dad838c33c3e4aab198d995160d3fbb9968470f" }
-umc_kgm = { git = "https://git.um-react.app/um/lib_um_crypto_rust", rev = "5dad838c33c3e4aab198d995160d3fbb9968470f" }
-umc_kuwo = { git = "https://git.um-react.app/um/lib_um_crypto_rust", rev = "5dad838c33c3e4aab198d995160d3fbb9968470f" }
-umc_xiami = { git = "https://git.um-react.app/um/lib_um_crypto_rust", rev = "5dad838c33c3e4aab198d995160d3fbb9968470f" }
-umc_xmly = { git = "https://git.um-react.app/um/lib_um_crypto_rust", rev = "5dad838c33c3e4aab198d995160d3fbb9968470f" }
-umc_qtfm = { git = "https://git.um-react.app/um/lib_um_crypto_rust", rev = "5dad838c33c3e4aab198d995160d3fbb9968470f" }
 
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"
 sha2 = "0.10"
-base64 = "0.22"
 
 [profile.release]
 lto = "thin"
@@ -55,4 +53,8 @@ strip = "symbols"
 
 [[bench]]
 name = "throughput"
+harness = false
+
+[[bench]]
+name = "metadata_pipeline"
 harness = false

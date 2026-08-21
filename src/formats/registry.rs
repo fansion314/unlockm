@@ -59,17 +59,17 @@ const QMC_V2: Adapter = Adapter {
 const KGM: Adapter = Adapter {
     kind: Kind::Kgm,
     suffixes: &[".kgm.flac", ".vpr.flac", ".kgg", ".kgm", ".kgma", ".vpr"],
-    validate: |_, h| umc_kgm::header::Header::from_buffer(h).is_ok(),
+    validate: |_, h| crate::crypto::kgm::header::Header::from_buffer(h).is_ok(),
 };
 const KWM: Adapter = Adapter {
     kind: Kind::Kwm,
     suffixes: &[".kwm"],
-    validate: |_, h| h.len() >= 0x40 && umc_kuwo::Header::from_bytes(&h[..0x40]).is_ok(),
+    validate: |_, h| h.len() >= 0x40 && crate::crypto::kuwo::Header::from_bytes(&h[..0x40]).is_ok(),
 };
 const XIAMI: Adapter = Adapter {
     kind: Kind::Xiami,
     suffixes: &[".xm"],
-    validate: |_, h| umc_xiami::XiamiFile::from_header(h).is_ok(),
+    validate: |_, h| crate::crypto::xiami::XiamiFile::from_header(h).is_ok(),
 };
 const XMLY: Adapter = Adapter {
     kind: Kind::Ximalaya,
@@ -83,7 +83,7 @@ const XMLY: Adapter = Adapter {
         (n.ends_with(".x2m") || n.ends_with(".x3m")) && h.len() >= 0x400
             || (!n.ends_with(".x2m")
                 && !n.ends_with(".x3m")
-                && umc_xmly::pc::Header::from_buffer(h).is_ok())
+                && crate::crypto::xmly::pc::Header::from_buffer(h).is_ok())
     },
 };
 const TM: Adapter = Adapter {

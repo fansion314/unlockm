@@ -112,6 +112,7 @@ fn queue(
             if state.fingerprint.as_ref() != Some(&fingerprint) {
                 state.fingerprint = Some(fingerprint);
                 state.dirty = true;
+                state.cancellation.cancel();
             }
         }
         Some(state) => {
@@ -355,6 +356,42 @@ mod tests {
             normalize(&event(EventKind::Remove(RemoveKind::Folder), &["dir"])),
             vec![Action::Remove("dir".into())]
         );
+    }
+    #[test]
+    fn running_source_change_cancels_stale_job_and_requeue_resets_token() {
+        let path = PathBuf::from("changed.ncm");
+        let now = Instant::now();
+        let mut states = HashMap::new();
+        states.insert(
+            path.clone(),
+            PathState {
+                phase: Phase::Running,
+                due: now,
+                deadline: now + STABLE_WINDOW,
+                observed: None,
+                fingerprint: Some(Fingerprint {
+                    len: 10,
+                    modified: None,
+                }),
+                dirty: false,
+                cancellation: runner::Cancellation::default(),
+            },
+        );
+        queue(
+            &mut states,
+            path.clone(),
+            Fingerprint {
+                len: 11,
+                modified: None,
+            },
+            now,
+        );
+        let state = states.get_mut(&path).unwrap();
+        assert!(state.dirty);
+        assert!(state.cancellation.is_cancelled());
+        requeue_after_dirty(state);
+        assert_eq!(state.phase, Phase::Queued);
+        assert!(!state.cancellation.is_cancelled());
     }
     #[test]
     fn remove_cancels_running_descendants() {

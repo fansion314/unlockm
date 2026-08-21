@@ -42,12 +42,15 @@ pub fn read(path: &Path) -> std::result::Result<Metadata, String> {
     })
 }
 pub fn validate_cover(bytes: &[u8]) -> std::result::Result<(), String> {
+    parse_cover(bytes).map(|_| ())
+}
+
+fn parse_cover(bytes: &[u8]) -> std::result::Result<Picture, String> {
     if bytes.len() > 10 * 1024 * 1024 {
         return Err("cover exceeds 10 MiB".into());
     }
     Picture::from_reader(&mut std::io::Cursor::new(bytes))
         .map_err(|_| "cover is not a supported decodable image".into())
-        .map(|_| ())
 }
 pub fn write(
     path: &Path,
@@ -70,6 +73,38 @@ pub(crate) fn prepare_write(
     cover: Option<&[u8]>,
 ) -> std::result::Result<std::path::PathBuf, String> {
     write_with_hook(path, metadata, cover, || Ok(()))
+}
+
+pub(crate) fn write_in_place(
+    path: &Path,
+    metadata: &Metadata,
+    cover: Option<&[u8]>,
+) -> std::result::Result<(), String> {
+    let mut input = OpenOptions::new()
+        .read(true)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    let mut magic = [0_u8; 4];
+    std::io::Read::read_exact(&mut input, &mut magic).map_err(|error| error.to_string())?;
+    drop(input);
+    if &magic == b"fLaC" {
+        if let Some(bytes) = cover {
+            validate_cover(bytes)?;
+        }
+        let before_len = fs::metadata(path).map_err(|error| error.to_string())?.len();
+        super::flac::write_in_place(path, metadata, cover)?;
+        return verify_written(path, before_len, metadata);
+    }
+    write_in_place_with_hook(path, metadata, cover, || Ok(()))
+}
+
+fn write_in_place_with_hook(
+    path: &Path,
+    metadata: &Metadata,
+    cover: Option<&[u8]>,
+    after_save: impl FnOnce() -> std::result::Result<(), String>,
+) -> std::result::Result<(), String> {
+    write_candidate(path, metadata, cover, after_save)
 }
 
 fn write_with_hook<F>(
@@ -128,9 +163,7 @@ fn write_candidate(
         tag.insert_text(ItemKey::TrackArtist, value.text.clone());
     }
     if let Some(bytes) = cover {
-        validate_cover(bytes)?;
-        let picture =
-            Picture::from_reader(&mut std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
+        let picture = parse_cover(bytes)?;
         tag.remove_picture_type(PictureType::CoverFront);
         tag.push_picture(Picture::new_unchecked(
             PictureType::CoverFront,
@@ -147,6 +180,14 @@ fn write_candidate(
     file.save_to(&mut output, WriteOptions::default())
         .map_err(|e| e.to_string())?;
     after_save()?;
+    verify_written(path, before_len, metadata)
+}
+
+fn verify_written(
+    path: &Path,
+    before_len: u64,
+    metadata: &Metadata,
+) -> std::result::Result<(), String> {
     let after_len = fs::metadata(path).map_err(|e| e.to_string())?.len();
     if after_len == 0 || before_len == 0 {
         return Err("tag write produced empty audio".into());
@@ -166,6 +207,21 @@ fn write_candidate(
 mod tests {
     use super::*;
     use base64::{engine::general_purpose::STANDARD, Engine};
+
+    fn flac_audio(bytes: &[u8]) -> &[u8] {
+        assert_eq!(&bytes[..4], b"fLaC");
+        let mut offset = 4;
+        loop {
+            let last = bytes[offset] & 0x80 != 0;
+            let length =
+                u32::from_be_bytes([0, bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
+                    as usize;
+            offset += 4 + length;
+            if last {
+                return &bytes[offset..];
+            }
+        }
+    }
     #[test]
     fn cover_validation_rejects_bad_or_large_bytes() {
         assert!(validate_cover(b"not-an-image").is_err());
@@ -215,6 +271,78 @@ mod tests {
                 .filter(|entry| entry.file_name().to_string_lossy().starts_with(".unlockm-"))
                 .count(),
             1
+        );
+    }
+    #[test]
+    fn in_place_post_save_failure_is_reported_after_private_stage_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".unlockm-stage-disposable");
+        let fixture = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/lofty-silent.mp3.b64"),
+        )
+        .unwrap();
+        std::fs::write(&path, STANDARD.decode(fixture.trim()).unwrap()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let metadata = Metadata {
+            title: Some(MetadataValue::new("mutated", Provenance::Container)),
+            ..Default::default()
+        };
+        assert!(write_in_place_with_hook(&path, &metadata, None, || {
+            Err("injected post-save verification failure".into())
+        })
+        .is_err());
+        assert_ne!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(read(&path).unwrap().title.unwrap().text, "mutated");
+    }
+    #[test]
+    fn streaming_flac_write_grows_and_reuses_padding_without_changing_audio() {
+        const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLxmwAAAABJRU5ErkJggg==";
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".unlockm-stage-flac");
+        let fixture = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/lofty-full_test.flac.b64"),
+        )
+        .unwrap();
+        std::fs::write(&path, STANDARD.decode(fixture.trim()).unwrap()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let before_audio = flac_audio(&before).to_vec();
+
+        let long_title = "x".repeat(64 * 1024);
+        let metadata = Metadata {
+            title: Some(MetadataValue::new(
+                long_title.clone(),
+                Provenance::Container,
+            )),
+            album: Some(MetadataValue::new("album", Provenance::Container)),
+            artists: Some(MetadataValue::new("artist", Provenance::Container)),
+            ..Default::default()
+        };
+        write_in_place(&path, &metadata, Some(&STANDARD.decode(PNG).unwrap())).unwrap();
+        let grown = std::fs::read(&path).unwrap();
+        assert_eq!(flac_audio(&grown), before_audio);
+        let reread = read(&path).unwrap();
+        assert_eq!(reread.title.unwrap().text, long_title);
+        assert_eq!(reread.album.unwrap().text, "album");
+        assert_eq!(reread.artists.unwrap().text, "artist");
+        assert_eq!(
+            reread.cover.unwrap().bytes.unwrap(),
+            STANDARD.decode(PNG).unwrap()
+        );
+
+        let short = Metadata {
+            title: Some(MetadataValue::new("short", Provenance::Container)),
+            ..Default::default()
+        };
+        write_in_place(&path, &short, None).unwrap();
+        let padded = std::fs::read(&path).unwrap();
+        assert_eq!(flac_audio(&padded), before_audio);
+        let reread = read(&path).unwrap();
+        assert_eq!(reread.title.unwrap().text, "short");
+        assert_eq!(
+            reread.cover.unwrap().bytes.unwrap(),
+            STANDARD.decode(PNG).unwrap()
         );
     }
     #[test]

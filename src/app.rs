@@ -4,7 +4,7 @@ pub mod scan;
 pub mod watch;
 
 use crate::{config::RunConfig, error::Result, PARTIAL_FAILURE_EXIT};
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::info;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -26,6 +26,28 @@ pub enum JobOutcome {
     Skipped,
     Conflict,
     Failed,
+}
+
+/// Per-file timings kept for internal diagnostics. They intentionally do not
+/// change `Summary`, which remains the stable application/CLI count contract.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct JobTimings {
+    pub preflight: Duration,
+    pub decrypt: Duration,
+    pub metadata_resolve: Duration,
+    pub tag_write: Duration,
+    pub fallback: Duration,
+    pub copy: Duration,
+    pub publish: Duration,
+}
+
+/// The terminal report for one path accepted by a runner invocation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobReport {
+    pub relative_path: PathBuf,
+    pub logical_bytes: u64,
+    pub outcome: JobOutcome,
+    pub timings: JobTimings,
 }
 impl Summary {
     pub fn exit_code(self) -> i32 {
@@ -71,7 +93,9 @@ impl From<JobOutcome> for Summary {
 }
 pub async fn run(config: RunConfig) -> Result<Summary> {
     let config = Arc::new(config);
-    let initial = runner::run_paths(config.clone(), scan::enumerate(&config)?).await?;
+    let paths = scan::enumerate(&config)?;
+    config.presentation.begin_batch(paths.len());
+    let initial = runner::run_paths(config.clone(), paths).await?;
     info!(
         converted = initial.converted,
         copied = initial.copied,
@@ -80,6 +104,7 @@ pub async fn run(config: RunConfig) -> Result<Summary> {
         "batch summary"
     );
     if config.watch {
+        config.presentation.begin_watch();
         watch::run(config, initial).await
     } else {
         Ok(initial)

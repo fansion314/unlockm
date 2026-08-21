@@ -6,7 +6,8 @@ use std::{
 
 pub fn load_ekeys(path: &Path) -> std::result::Result<HashMap<String, String>, String> {
     let mut bytes = fs::read(path).map_err(|e| e.to_string())?;
-    umc_kgm::decrypt_db(&mut bytes).map_err(|_| "KGM database decryption failed".to_owned())?;
+    crate::crypto::kgm::decrypt_db(&mut bytes)
+        .map_err(|_| "KGM database decryption failed".to_owned())?;
     let temp = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
     fs::write(temp.path(), bytes).map_err(|e| e.to_string())?;
     let connection = rusqlite::Connection::open_with_flags(

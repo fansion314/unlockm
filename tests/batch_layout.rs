@@ -1,3 +1,6 @@
+#[path = "support/qmc_fixture.rs"]
+mod qmc_fixture;
+
 use std::{fs, process::Command};
 use tempfile::tempdir;
 
@@ -80,9 +83,9 @@ fn flat_preflight_rejects_every_copy_and_conversion_claimant() {
     let mut plain = b"fLaC".to_vec();
     plain.resize(64, 0);
     let mut qmc = plain.clone();
-    umc_qmc::v1::decrypt(&mut qmc, 0);
+    qmc_fixture::transform(&mut qmc, 0);
     let mut round_trip = qmc.clone();
-    umc_qmc::v1::decrypt(&mut round_trip, 0);
+    qmc_fixture::transform(&mut round_trip, 0);
     assert_eq!(round_trip, plain);
     assert_eq!(
         unlockm::formats::extension(&round_trip).as_deref(),
@@ -135,14 +138,16 @@ fn flat_preflight_rejects_every_copy_and_conversion_claimant() {
             "same-run flat conflicts must not publish a winner: {}",
             String::from_utf8_lossy(&result.stderr)
         );
-        assert!(
-            fs::read_dir(&output).unwrap().all(|entry| !entry
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".unlockm-stage-")),
-            "conflicted staging files are owned and cleaned"
-        );
+        if output.exists() {
+            assert!(
+                fs::read_dir(&output).unwrap().all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".unlockm-stage-")),
+                "conflicted staging files are owned and cleaned"
+            );
+        }
     }
 }
 

@@ -1,4 +1,7 @@
-use crate::error::{AppError, Result};
+use crate::{
+    error::{AppError, Result},
+    presentation::ProgressReporter,
+};
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
@@ -29,6 +32,7 @@ pub struct RunConfig {
     pub qmc_key_map: Option<PathBuf>,
     pub qmc_ekey: Option<String>,
     pub kgg_db: Option<PathBuf>,
+    pub presentation: ProgressReporter,
 }
 
 impl RunConfig {
@@ -106,6 +110,7 @@ impl RunConfig {
             qmc_key_map,
             qmc_ekey,
             kgg_db,
+            presentation: ProgressReporter::disabled(),
         })
     }
     pub fn output_is_proper_child(&self) -> bool {

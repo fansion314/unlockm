@@ -14,6 +14,9 @@ use std::{
 };
 use unlockm::{app, config::RunConfig};
 
+#[path = "../tests/support/qmc_fixture.rs"]
+mod qmc_fixture;
+
 const BUFFER: usize = 1024 * 1024;
 
 fn env_bytes(name: &str, default: usize) -> usize {
@@ -43,7 +46,7 @@ fn write_qmc(path: &Path, bytes: usize) -> [u8; 32] {
             };
         }
         hash.update(&chunk[..n]);
-        umc_qmc::v1::decrypt(&mut chunk[..n], offset);
+        qmc_fixture::transform(&mut chunk[..n], offset);
         output.write_all(&chunk[..n]).unwrap();
         offset += n;
     }
@@ -94,7 +97,7 @@ fn direct(input: &Path, output: &Path) -> Duration {
         if n == 0 {
             break;
         }
-        umc_qmc::v1::decrypt(&mut chunk[..n], offset);
+        qmc_fixture::transform(&mut chunk[..n], offset);
         output.write_all(&chunk[..n]).unwrap();
         offset += n;
     }

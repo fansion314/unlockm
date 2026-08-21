@@ -98,8 +98,23 @@ pub fn prepare(path: &Path) -> Result<PreparedClassification> {
     Ok(PreparedClassification::Unknown)
 }
 
+pub(crate) fn ncm_metadata_evidence(path: &Path) -> Result<adapter::NcmMetadataEvidence> {
+    let mut input = File::open(path).map_err(|source| AppError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let ncm = crate::crypto::ncm::header::NcmFile::new_from_readable(&mut input)
+        .map_err(|_| AppError::InvalidEncrypted(path.to_path_buf()))?;
+    Ok(adapter::NcmMetadataEvidence {
+        json: ncm
+            .metadata_json()
+            .map_err(|_| AppError::InvalidEncrypted(path.to_path_buf()))?,
+        image1: ncm.image1,
+    })
+}
+
 fn qmc_metadata_hints(path: &Path) -> Result<adapter::MetadataHints> {
-    use umc_qmc::footer::{self, Data};
+    use crate::crypto::qmc::footer::{self, Data};
     let mut input = File::open(path).map_err(|source| AppError::Io {
         path: path.to_path_buf(),
         source,
@@ -165,6 +180,250 @@ pub fn predicted_extension(path: &Path, kind: Kind) -> Option<&'static str> {
     }
 }
 
+const PROBE_BYTES: usize = 128 * 1024;
+
+fn read_probe(reader: &mut impl Read, path: &Path, limit: usize) -> Result<Vec<u8>> {
+    let mut output = Vec::with_capacity(limit);
+    reader
+        .take(limit as u64)
+        .read_to_end(&mut output)
+        .map_err(|source| AppError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    Ok(output)
+}
+
+fn probe_detect(bytes: &[u8], input: &Path) -> Result<String> {
+    extension(bytes).ok_or_else(|| AppError::InvalidEncrypted(input.to_path_buf()))
+}
+
+/// Resolve the native output extension from at most a bounded decrypted
+/// prefix. This is the cheap planning operation used before collision grouping;
+/// it never creates a full decrypted stage.
+pub(crate) fn probe_extension(
+    kind: Kind,
+    input: &Path,
+    qmc_ekey: Option<&str>,
+    keys: &KeySources,
+) -> Result<String> {
+    match kind {
+        Kind::Ncm => {
+            let mut file = File::open(input).map_err(|source| AppError::Io {
+                path: input.to_path_buf(),
+                source,
+            })?;
+            let ncm = crate::crypto::ncm::header::NcmFile::new_from_readable(&mut file)
+                .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            file.seek(SeekFrom::Start(ncm.audio_data_offset as u64))
+                .map_err(|source| AppError::Io {
+                    path: input.to_path_buf(),
+                    source,
+                })?;
+            let mut prefix = read_probe(&mut file, input, PROBE_BYTES)?;
+            ncm.decrypt(&mut prefix, 0);
+            probe_detect(&prefix, input)
+        }
+        Kind::QmcV1 => {
+            let mut file = File::open(input).map_err(|source| AppError::Io {
+                path: input.to_path_buf(),
+                source,
+            })?;
+            let mut prefix = read_probe(&mut file, input, PROBE_BYTES)?;
+            if let Some(ekey) = keys.qmc_ekey(input, None) {
+                crate::crypto::qmc::QmcV2Cipher::new_from_ekey(ekey)
+                    .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?
+                    .decrypt(&mut prefix, 0);
+            } else {
+                crate::crypto::qmc::v1::decrypt(&mut prefix, 0);
+            }
+            probe_detect(&prefix, input)
+        }
+        Kind::QmcV2 => {
+            use crate::crypto::qmc::footer;
+            let mut file = File::open(input).map_err(|source| AppError::Io {
+                path: input.to_path_buf(),
+                source,
+            })?;
+            let total = file
+                .metadata()
+                .map_err(|source| AppError::Io {
+                    path: input.to_path_buf(),
+                    source,
+                })?
+                .len();
+            if total < footer::INITIAL_DETECTION_LEN as u64 {
+                return Err(AppError::InvalidEncrypted(input.to_path_buf()));
+            }
+            file.seek(SeekFrom::End(-(footer::INITIAL_DETECTION_LEN as i64)))
+                .map_err(|source| AppError::Io {
+                    path: input.to_path_buf(),
+                    source,
+                })?;
+            let mut footer_bytes = vec![0; footer::INITIAL_DETECTION_LEN];
+            file.read_exact(&mut footer_bytes)
+                .map_err(|source| AppError::Io {
+                    path: input.to_path_buf(),
+                    source,
+                })?;
+            let parsed = footer::from_byte_slice(&footer_bytes).ok().flatten();
+            let footer_size = parsed.as_ref().map_or(0, |metadata| metadata.size) as u64;
+            let footer_filename = parsed.as_ref().and_then(|metadata| match &metadata.data {
+                footer::Data::PCv2MusicEx(tag) => Some(tag.media_filename.clone()),
+                _ => None,
+            });
+            let ekey = parsed
+                .and_then(|metadata| metadata.ekey)
+                .or_else(|| qmc_ekey.map(str::to_owned))
+                .or_else(|| {
+                    keys.qmc_ekey(input, footer_filename.as_deref())
+                        .map(str::to_owned)
+                })
+                .ok_or_else(|| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            let cipher = crate::crypto::qmc::QmcV2Cipher::new_from_ekey(ekey)
+                .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            file.seek(SeekFrom::Start(0))
+                .map_err(|source| AppError::Io {
+                    path: input.to_path_buf(),
+                    source,
+                })?;
+            let payload = total
+                .checked_sub(footer_size)
+                .ok_or_else(|| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            let mut prefix = read_probe(&mut file.take(payload), input, PROBE_BYTES)?;
+            cipher.decrypt(&mut prefix, 0);
+            probe_detect(&prefix, input)
+        }
+        Kind::Kgm => {
+            let mut file = File::open(input).map_err(|source| AppError::Io {
+                path: input.to_path_buf(),
+                source,
+            })?;
+            let header = crate::crypto::kgm::header::Header::from_reader(&mut file)
+                .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            let ekey = (header.crypto_version == 5)
+                .then(|| keys.kgm_ekey(&header.audio_hash))
+                .flatten()
+                .map(str::to_owned);
+            let cipher = crate::crypto::kgm::Decipher::new_v5(&header, ekey)
+                .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            file.seek(SeekFrom::Start(header.offset_to_data as u64))
+                .map_err(|source| AppError::Io {
+                    path: input.to_path_buf(),
+                    source,
+                })?;
+            let mut prefix = read_probe(&mut file, input, PROBE_BYTES)?;
+            cipher.decrypt(&mut prefix, 0);
+            probe_detect(&prefix, input)
+        }
+        Kind::Kwm => {
+            let mut file = File::open(input).map_err(|source| AppError::Io {
+                path: input.to_path_buf(),
+                source,
+            })?;
+            let mut raw = [0_u8; 0x40];
+            file.read_exact(&mut raw)
+                .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            let header = crate::crypto::kuwo::Header::from_bytes(raw)
+                .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            let cipher = crate::crypto::kuwo::Decipher::new(
+                &header,
+                qmc_ekey.or_else(|| keys.qmc_ekey(input, None)),
+            )
+            .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            file.seek(SeekFrom::Start(
+                crate::crypto::kuwo::DATA_START_OFFSET as u64,
+            ))
+            .map_err(|source| AppError::Io {
+                path: input.to_path_buf(),
+                source,
+            })?;
+            let mut prefix = read_probe(&mut file, input, PROBE_BYTES)?;
+            cipher.decrypt(&mut prefix, 0);
+            probe_detect(&prefix, input)
+        }
+        Kind::Xiami => {
+            let mut file = File::open(input).map_err(|source| AppError::Io {
+                path: input.to_path_buf(),
+                source,
+            })?;
+            let mut raw = [0_u8; 0x10];
+            file.read_exact(&mut raw)
+                .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            let cipher = crate::crypto::xiami::XiamiFile::from_header(&raw)
+                .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            let copied = cipher.copy_len.min(PROBE_BYTES);
+            let mut prefix = read_probe(&mut file, input, copied)?;
+            if prefix.len() < PROBE_BYTES && copied == cipher.copy_len {
+                let mut encrypted = read_probe(&mut file, input, PROBE_BYTES - prefix.len())?;
+                cipher.decrypt(&mut encrypted);
+                prefix.extend_from_slice(&encrypted);
+            }
+            probe_detect(&prefix, input)
+        }
+        Kind::Ximalaya => {
+            let mut file = File::open(input).map_err(|source| AppError::Io {
+                path: input.to_path_buf(),
+                source,
+            })?;
+            let name = lower_name(input);
+            let mut prefix = Vec::new();
+            if name.ends_with(".x2m") || name.ends_with(".x3m") {
+                let mut header = [0_u8; 0x400];
+                file.read_exact(&mut header)
+                    .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+                let kind = if name.ends_with(".x2m") {
+                    crate::crypto::xmly::android::FileType::X2M
+                } else {
+                    crate::crypto::xmly::android::FileType::X3M
+                };
+                crate::crypto::xmly::android::decrypt_android(kind, &mut header);
+                prefix.extend_from_slice(&header);
+                prefix.extend(read_probe(&mut file, input, PROBE_BYTES - prefix.len())?);
+            } else {
+                let mut header = vec![0_u8; 8192];
+                file.read_exact(&mut header)
+                    .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+                let parsed = crate::crypto::xmly::pc::Header::from_buffer(&header)
+                    .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+                if parsed.encrypted_header_size > PROBE_BYTES {
+                    return Err(AppError::InvalidEncrypted(input.to_path_buf()));
+                }
+                prefix.extend_from_slice(&parsed.copy_m4a_header());
+                file.seek(SeekFrom::Start(parsed.data_start_offset as u64))
+                    .map_err(|source| AppError::Io {
+                        path: input.to_path_buf(),
+                        source,
+                    })?;
+                let mut encrypted = vec![0_u8; parsed.encrypted_header_size];
+                file.read_exact(&mut encrypted)
+                    .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+                prefix.extend_from_slice(
+                    parsed
+                        .decrypt(&mut encrypted)
+                        .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?,
+                );
+            }
+            probe_detect(&prefix, input)
+        }
+        Kind::Tm => {
+            let mut file = File::open(input).map_err(|source| AppError::Io {
+                path: input.to_path_buf(),
+                source,
+            })?;
+            let mut encrypted_header = [0_u8; 8];
+            file.read_exact(&mut encrypted_header)
+                .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
+            if &encrypted_header[..4] != b"QQMU" {
+                return Err(AppError::InvalidEncrypted(input.to_path_buf()));
+            }
+            let mut prefix = vec![0, 0, 0, 0x20, b'f', b't', b'y', b'p'];
+            prefix.extend(read_probe(&mut file, input, PROBE_BYTES - prefix.len())?);
+            probe_detect(&prefix, input)
+        }
+    }
+}
+
 /// Write a transformed payload using a fixed-size caller-provided buffer.
 pub fn decrypt_to(
     kind: Kind,
@@ -174,23 +433,43 @@ pub fn decrypt_to(
     qmc_ekey: Option<&str>,
     keys: &KeySources,
 ) -> Result<String> {
+    decrypt_to_expected(kind, input, output, buffer_size, qmc_ekey, keys, None)
+}
+
+pub(crate) fn decrypt_to_expected(
+    kind: Kind,
+    input: &Path,
+    output: &mut File,
+    buffer_size: usize,
+    qmc_ekey: Option<&str>,
+    keys: &KeySources,
+    expected_extension: Option<&str>,
+) -> Result<String> {
     match kind {
-        Kind::Ncm => decrypt_ncm(input, output, buffer_size),
-        Kind::QmcV1 => decrypt_qmc_v1(input, output, buffer_size, keys),
-        Kind::QmcV2 => decrypt_qmc_v2(input, output, buffer_size, qmc_ekey, keys),
-        Kind::Kgm => decrypt_kgm(input, output, buffer_size, keys),
+        Kind::Ncm => decrypt_ncm(input, output, buffer_size, expected_extension),
+        Kind::QmcV1 => decrypt_qmc_v1(input, output, buffer_size, keys, expected_extension),
+        Kind::QmcV2 => decrypt_qmc_v2(
+            input,
+            output,
+            buffer_size,
+            qmc_ekey,
+            keys,
+            expected_extension,
+        ),
+        Kind::Kgm => decrypt_kgm(input, output, buffer_size, keys, expected_extension),
         Kind::Kwm => decrypt_kwm(
             input,
             output,
             buffer_size,
             qmc_ekey.or_else(|| keys.qmc_ekey(input, None)),
+            expected_extension,
         ),
-        Kind::Xiami => decrypt_xiami(input, output, buffer_size),
-        Kind::Ximalaya => decrypt_ximalaya(input, output, buffer_size),
-        Kind::Tm => decrypt_tm(input, output),
+        Kind::Xiami => decrypt_xiami(input, output, buffer_size, expected_extension),
+        Kind::Ximalaya => decrypt_ximalaya(input, output, buffer_size, expected_extension),
+        Kind::Tm => decrypt_tm(input, output, expected_extension),
     }
 }
-fn decrypt_tm(input: &Path, output: &mut File) -> Result<String> {
+fn decrypt_tm(input: &Path, output: &mut File, expected_extension: Option<&str>) -> Result<String> {
     let mut f = File::open(input).map_err(|source| AppError::Io {
         path: input.to_path_buf(),
         source,
@@ -211,20 +490,21 @@ fn decrypt_tm(input: &Path, output: &mut File) -> Result<String> {
         path: input.to_path_buf(),
         source,
     })?;
-    sniff_written(output)
+    finish_written(output, expected_extension)
 }
 fn decrypt_kgm(
     input: &Path,
     output: &mut File,
     buffer_size: usize,
     keys: &KeySources,
+    expected_extension: Option<&str>,
 ) -> Result<String> {
-    use umc_kgm::Decipher;
+    use crate::crypto::kgm::Decipher;
     let mut f = File::open(input).map_err(|source| AppError::Io {
         path: input.to_path_buf(),
         source,
     })?;
-    let header = umc_kgm::header::Header::from_reader(&mut f)
+    let header = crate::crypto::kgm::header::Header::from_reader(&mut f)
         .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
     let ekey = (header.crypto_version == 5)
         .then(|| keys.kgm_ekey(&header.audio_hash))
@@ -240,13 +520,14 @@ fn decrypt_kgm(
     transform_stream(&mut f, output, buffer_size, |bytes, offset| {
         decipher.decrypt(bytes, offset)
     })?;
-    sniff_written(output)
+    finish_written(output, expected_extension)
 }
 fn decrypt_kwm(
     input: &Path,
     output: &mut File,
     buffer_size: usize,
     ekey: Option<&str>,
+    expected_extension: Option<&str>,
 ) -> Result<String> {
     let mut f = File::open(input).map_err(|source| AppError::Io {
         path: input.to_path_buf(),
@@ -255,21 +536,28 @@ fn decrypt_kwm(
     let mut raw = [0_u8; 0x40];
     f.read_exact(&mut raw)
         .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
-    let header = umc_kuwo::Header::from_bytes(raw)
+    let header = crate::crypto::kuwo::Header::from_bytes(raw)
         .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
-    let decipher = umc_kuwo::Decipher::new(&header, ekey)
+    let decipher = crate::crypto::kuwo::Decipher::new(&header, ekey)
         .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
-    f.seek(SeekFrom::Start(umc_kuwo::DATA_START_OFFSET as u64))
-        .map_err(|source| AppError::Io {
-            path: input.to_path_buf(),
-            source,
-        })?;
+    f.seek(SeekFrom::Start(
+        crate::crypto::kuwo::DATA_START_OFFSET as u64,
+    ))
+    .map_err(|source| AppError::Io {
+        path: input.to_path_buf(),
+        source,
+    })?;
     transform_stream(&mut f, output, buffer_size, |bytes, offset| {
         decipher.decrypt(bytes, offset)
     })?;
-    sniff_written(output)
+    finish_written(output, expected_extension)
 }
-fn decrypt_xiami(input: &Path, output: &mut File, buffer_size: usize) -> Result<String> {
+fn decrypt_xiami(
+    input: &Path,
+    output: &mut File,
+    buffer_size: usize,
+    expected_extension: Option<&str>,
+) -> Result<String> {
     let mut f = File::open(input).map_err(|source| AppError::Io {
         path: input.to_path_buf(),
         source,
@@ -277,7 +565,7 @@ fn decrypt_xiami(input: &Path, output: &mut File, buffer_size: usize) -> Result<
     let mut raw = [0_u8; 0x10];
     f.read_exact(&mut raw)
         .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
-    let decipher = umc_xiami::XiamiFile::from_header(&raw)
+    let decipher = crate::crypto::xiami::XiamiFile::from_header(&raw)
         .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
     let mut remaining = decipher.copy_len;
     let mut buffer = vec![0; buffer_size];
@@ -317,9 +605,14 @@ fn decrypt_xiami(input: &Path, output: &mut File, buffer_size: usize) -> Result<
         offset += n;
     }
     let _ = offset;
-    sniff_written(output)
+    finish_written(output, expected_extension)
 }
-fn decrypt_ximalaya(input: &Path, output: &mut File, buffer_size: usize) -> Result<String> {
+fn decrypt_ximalaya(
+    input: &Path,
+    output: &mut File,
+    buffer_size: usize,
+    expected_extension: Option<&str>,
+) -> Result<String> {
     let mut f = File::open(input).map_err(|source| AppError::Io {
         path: input.to_path_buf(),
         source,
@@ -330,11 +623,11 @@ fn decrypt_ximalaya(input: &Path, output: &mut File, buffer_size: usize) -> Resu
         f.read_exact(&mut header)
             .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
         let kind = if name.ends_with(".x2m") {
-            umc_xmly::android::FileType::X2M
+            crate::crypto::xmly::android::FileType::X2M
         } else {
-            umc_xmly::android::FileType::X3M
+            crate::crypto::xmly::android::FileType::X3M
         };
-        umc_xmly::android::decrypt_android(kind, &mut header);
+        crate::crypto::xmly::android::decrypt_android(kind, &mut header);
         output.write_all(&header).map_err(|source| AppError::Io {
             path: input.to_path_buf(),
             source,
@@ -347,7 +640,7 @@ fn decrypt_ximalaya(input: &Path, output: &mut File, buffer_size: usize) -> Resu
         let mut header = vec![0_u8; 8192];
         f.read_exact(&mut header)
             .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
-        let parsed = umc_xmly::pc::Header::from_buffer(&header)
+        let parsed = crate::crypto::xmly::pc::Header::from_buffer(&header)
             .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
         output
             .write_all(parsed.copy_m4a_header().as_slice())
@@ -376,7 +669,7 @@ fn decrypt_ximalaya(input: &Path, output: &mut File, buffer_size: usize) -> Resu
             source,
         })?;
     }
-    sniff_written(output)
+    finish_written(output, expected_extension)
 }
 fn transform_stream<F: FnMut(&mut [u8], usize)>(
     input: &mut File,
@@ -411,8 +704,9 @@ fn decrypt_qmc_v2(
     buffer_size: usize,
     override_ekey: Option<&str>,
     keys: &KeySources,
+    expected_extension: Option<&str>,
 ) -> Result<String> {
-    use umc_qmc::{footer, QMCv2Cipher};
+    use crate::crypto::qmc::{footer, QmcV2Cipher};
     let mut f = File::open(input).map_err(|source| AppError::Io {
         path: input.to_path_buf(),
         source,
@@ -452,7 +746,7 @@ fn decrypt_qmc_v2(
                 .map(str::to_owned)
         })
         .ok_or_else(|| AppError::InvalidEncrypted(input.to_path_buf()))?;
-    let cipher = QMCv2Cipher::new_from_ekey(ekey)
+    let cipher = QmcV2Cipher::new_from_ekey(ekey)
         .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
     f.seek(SeekFrom::Start(0)).map_err(|source| AppError::Io {
         path: input.to_path_buf(),
@@ -480,8 +774,15 @@ fn decrypt_qmc_v2(
         remaining -= n as u64;
         offset += n;
     }
-    sniff_written(output)
+    finish_written(output, expected_extension)
 }
+fn finish_written(output: &mut File, expected_extension: Option<&str>) -> Result<String> {
+    match expected_extension {
+        Some(extension) => Ok(extension.to_owned()),
+        None => sniff_written(output),
+    }
+}
+
 fn sniff_written(output: &mut File) -> Result<String> {
     output.flush().map_err(|source| AppError::Io {
         path: Path::new("output").to_path_buf(),
@@ -502,12 +803,17 @@ fn sniff_written(output: &mut File) -> Result<String> {
     extension(&h)
         .ok_or_else(|| AppError::InvalidEncrypted(Path::new("decrypted payload").to_path_buf()))
 }
-fn decrypt_ncm(input: &Path, output: &mut File, buffer_size: usize) -> Result<String> {
+fn decrypt_ncm(
+    input: &Path,
+    output: &mut File,
+    buffer_size: usize,
+    expected_extension: Option<&str>,
+) -> Result<String> {
     let mut input_file = File::open(input).map_err(|source| AppError::Io {
         path: input.to_path_buf(),
         source,
     })?;
-    let ncm = umc_ncm::header::NCMFile::new_from_readable(&mut input_file)
+    let ncm = crate::crypto::ncm::header::NcmFile::new_from_readable(&mut input_file)
         .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
     input_file
         .seek(SeekFrom::Start(ncm.audio_data_offset as u64))
@@ -532,13 +838,14 @@ fn decrypt_ncm(input: &Path, output: &mut File, buffer_size: usize) -> Result<St
         })?;
         offset += n;
     }
-    sniff_written(output)
+    finish_written(output, expected_extension)
 }
 fn decrypt_qmc_v1(
     input: &Path,
     output: &mut File,
     buffer_size: usize,
     keys: &KeySources,
+    expected_extension: Option<&str>,
 ) -> Result<String> {
     let mut f = File::open(input).map_err(|source| AppError::Io {
         path: input.to_path_buf(),
@@ -546,7 +853,7 @@ fn decrypt_qmc_v1(
     })?;
     let keyed = keys
         .qmc_ekey(input, None)
-        .map(umc_qmc::QMCv2Cipher::new_from_ekey)
+        .map(crate::crypto::qmc::QmcV2Cipher::new_from_ekey)
         .transpose()
         .map_err(|_| AppError::InvalidEncrypted(input.to_path_buf()))?;
     let mut offset = 0;
@@ -562,7 +869,7 @@ fn decrypt_qmc_v1(
         if let Some(cipher) = &keyed {
             cipher.decrypt(&mut buf[..n], offset);
         } else {
-            umc_qmc::v1::decrypt(&mut buf[..n], offset);
+            crate::crypto::qmc::v1::decrypt(&mut buf[..n], offset);
         }
         output.write_all(&buf[..n]).map_err(|source| AppError::Io {
             path: input.to_path_buf(),
@@ -570,7 +877,7 @@ fn decrypt_qmc_v1(
         })?;
         offset += n;
     }
-    sniff_written(output)
+    finish_written(output, expected_extension)
 }
 
 #[cfg(test)]
@@ -635,6 +942,32 @@ mod tests {
         }
     }
     #[test]
+    fn planned_extension_avoids_completed_stage_reread() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("planned.qmc0");
+        let mut encrypted = b"fLaC".to_vec();
+        encrypted.resize(4096, 0);
+        crate::crypto::qmc::v1::decrypt(&mut encrypted, 0);
+        std::fs::write(&source, encrypted).unwrap();
+        let prepared = match prepare(&source).unwrap() {
+            PreparedClassification::Encrypted(prepared) => prepared,
+            _ => panic!("fixture must be encrypted"),
+        };
+        let extension = prepared
+            .probe_extension(None, &KeySources::default())
+            .unwrap();
+        assert_eq!(extension, "flac");
+        // `File::create` is write-only. A completed-output sniff would fail;
+        // execution must trust the already validated bounded-prefix result.
+        let mut output = File::create(directory.path().join("stage")).unwrap();
+        assert_eq!(
+            prepared
+                .decrypt_to_expected(&mut output, 7, None, &KeySources::default(), &extension)
+                .unwrap(),
+            "flac"
+        );
+    }
+    #[test]
     fn registry_requires_positive_validation_but_allows_disguised_audio() {
         let dir = tempfile::tempdir().unwrap();
         let valid = dir.path().join("valid.tm2");
@@ -661,6 +994,32 @@ mod tests {
         ));
     }
     #[test]
+    fn tm_bounded_probe_rejects_header_only_junk_and_accepts_m4a_brand() {
+        let directory = tempfile::tempdir().unwrap();
+        let invalid = directory.path().join("invalid.tm6");
+        std::fs::write(&invalid, b"QQMU\0\0\0\0junk payload").unwrap();
+        let invalid = match prepare(&invalid).unwrap() {
+            PreparedClassification::Encrypted(prepared) => prepared,
+            _ => panic!("TM header must classify as encrypted"),
+        };
+        assert!(invalid
+            .probe_extension(None, &KeySources::default())
+            .is_err());
+
+        let valid = directory.path().join("valid.tm6");
+        let mut bytes = b"QQMU\0\0\0\0M4A ".to_vec();
+        bytes.resize(4096, 0);
+        std::fs::write(&valid, bytes).unwrap();
+        let valid = match prepare(&valid).unwrap() {
+            PreparedClassification::Encrypted(prepared) => prepared,
+            _ => panic!("TM header must classify as encrypted"),
+        };
+        assert_eq!(
+            valid.probe_extension(None, &KeySources::default()).unwrap(),
+            "m4a"
+        );
+    }
+    #[test]
     fn shared_xm_keeps_xiami_before_ximalaya_for_positive_validation() {
         let candidates = registry::candidates(Path::new("shared.xm"));
         assert_eq!(candidates[0].kind(), Kind::Xiami);
@@ -668,8 +1027,8 @@ mod tests {
     }
     #[test]
     fn qmc_v2_pc_footer_fixture_trims_and_ekey_paths_are_bounded() {
+        use crate::crypto::qmc::{ekey, footer, QmcV2Cipher};
         use sha2::{Digest, Sha256};
-        use umc_qmc::{ekey, footer, QMCv2Cipher};
         let dir = tempfile::tempdir().unwrap();
         // MIT/Apache-2.0 upstream qmc footer fixture, stored as base64 so this
         // repository is self-contained while preserving attribution in notices.
@@ -679,11 +1038,22 @@ mod tests {
         assert_eq!(metadata.size, 0x2c4);
         let ekey = metadata.ekey.unwrap();
         let raw_key = ekey::decrypt(&ekey).unwrap();
+        assert_eq!(
+            ekey::decrypt(ekey.trim_end_matches('=').as_bytes()).unwrap(),
+            raw_key,
+            "unpadded v1 EKey must use indifferent base64 padding"
+        );
+        let v2_ekey = ekey::encode_v2_for_test(ekey.as_bytes());
+        assert_eq!(
+            ekey::decrypt(v2_ekey).unwrap(),
+            raw_key,
+            "QQMusic EncV2 wrapper must round-trip the pinned v1 EKey"
+        );
         let mut plain = b"fLaC".to_vec();
         plain.extend((0..8_192).map(|n| (n % 251) as u8));
         plain.resize(8_224, 0);
         let mut encrypted = plain.clone();
-        QMCv2Cipher::new(&raw_key)
+        QmcV2Cipher::new(&raw_key)
             .unwrap()
             .decrypt(&mut encrypted, 0);
         encrypted.extend_from_slice(&fixture[fixture.len() - metadata.size..]);
@@ -721,7 +1091,7 @@ mod tests {
 
         let override_input = dir.path().join("override.mflac");
         let mut override_ciphertext = plain.clone();
-        QMCv2Cipher::new(&raw_key)
+        QmcV2Cipher::new(&raw_key)
             .unwrap()
             .decrypt(&mut override_ciphertext, 0);
         std::fs::write(&override_input, override_ciphertext).unwrap();
@@ -783,7 +1153,8 @@ mod tests {
     }
 
     #[test]
-    fn qmc_footer_identity_hints_cover_qtag_and_stag() {
+    fn qmc_footer_identity_hints_cover_qtag_stag_and_pc_v2() {
+        use base64::Engine;
         fn source_with_footer(dir: &Path, payload: &str, marker: &[u8]) -> std::path::PathBuf {
             let mut bytes = vec![0; footer::INITIAL_DETECTION_LEN - payload.len() - 8];
             bytes.extend_from_slice(payload.as_bytes());
@@ -793,7 +1164,7 @@ mod tests {
             std::fs::write(&path, bytes).unwrap();
             path
         }
-        use umc_qmc::footer;
+        use crate::crypto::qmc::footer;
         let dir = tempfile::tempdir().unwrap();
         let qtag = source_with_footer(dir.path(), "YWJj,123,2", b"QTag");
         assert_eq!(
@@ -811,6 +1182,29 @@ mod tests {
                 media_mid: Some("media-mid".into()),
             }
         );
+        let encoded = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/qmc_pc_enc_v2.bin.b64"),
+        )
+        .unwrap();
+        let footer_bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .unwrap();
+        let mut pc_bytes = vec![0_u8; footer::INITIAL_DETECTION_LEN - footer_bytes.len()];
+        pc_bytes.extend_from_slice(&footer_bytes);
+        assert!(matches!(
+            footer::from_byte_slice(&pc_bytes).unwrap().unwrap().data,
+            footer::Data::PCv2MusicEx(_)
+        ));
+        let pc = dir.path().join("pc-v2.mflac");
+        std::fs::write(&pc, pc_bytes).unwrap();
+        assert_eq!(
+            qmc_metadata_hints(&pc).unwrap(),
+            adapter::MetadataHints {
+                resource_id: None,
+                media_mid: Some("AaBbCcDdEeFfGg".into()),
+            }
+        );
     }
 
     #[test]
@@ -819,10 +1213,10 @@ mod tests {
         // it intentionally contains only a 15-byte audio fragment, so it is a
         // parser vector rather than a false claim of a probeable media fixture.
         let input = decode_base64("Q1RFTkZEQU0BaZAAAAAsztXraer7FFUNRb9h3Rcdk3FHHuHd2vTV6E8cugAgwwLp/imS4YFFbxjHLRHyvFu83CIz+Wi0sCg4P2NsiGY1+eexcA7uVay47YtIFyU65l61gHiKzdzh7z0w7JwqxsdRrj0RtWSIntZ3ZvYrUp76+WP23icQRYKsLSCElUwPeq6LkW0QLmMc6sr5FJfYs+hWAwAAUlVQQwgGGksnDA1EF0MODAcKBRpKWS9VVyU2UDRXOhs7UDklNw4BOUhbTAUJBytVIgBIMTJMFwcNJBo5ESZaFSkkUAIHIFYtM1oMECkmIihMGg0LBigNLBsJLgsrKAITDy8sDiUbTCtSMzYJNy0LJScsDA0CUTVaGjUtLztUKg1MKxYbDCYhC1IlUjZbUVBWAQoZFFtXMgcGUCVVVFMwLDJSFQBQNzkoDhUPNkgRJDNWByIgKRQoBhYBVEgLFyAlNgIBFgcnFgw3ICokISJQVg40UjcUKRAyIDYtUiECCTsLARcAMzYNASErF0w5AjNRAiAHN0xaJTkJUSVQVEwZMjcIBjJVG1MLC0wIFjNUJxECGjAoVyVQOy4oNFE7NhFTElYJISssFC0kWgJTFiEpFgJTAioxLTFWOxdRUg9WUFYAF1cvCBpSJRItSAUCNw82MAUUWjdaUFUWCVM7GyQaGiFQBjcuVwk5FxMmMQRSUFUQU1JXAgQCLwFaAiovGUwMVQBQLSkGFhEgDQFTIjIbNAAKBgIVDyVaGiIRDiEyMSI5VloJFjUWMCkPMCcsVVISSBYPDDYMJScoNQoaBgkWORsIECcSLCxbSAFIM0gOG1QbAjYlIEgxCwYNFREXASQgJzEwIg8iCBcPEwwMGhISUUw7Uzs3ORYlBVQQMg1IDFBbIAsZIhkNCygsCwU7UQlUCgYPVwhRUCQpFlczNhUEUFsvUVYSCS8nMFErN1ckNVsMDg0NUyolBjMiKVEkCFE6Bg4WMTYrEDQwCAovGTJaBDlSNhomFA4LKkw5VhoBLxQzM1YWJSkzDgstGhEpCBUCK0wBDAcPFUw2NglME1MRERICDxFWK1shKQtRCQI7EQIkFhIECjcLIloLAgoCNjYqKRoUFBMbLBExKkwoESsbMFE1EVMNCQ85DyUXAlsaOSZbUTsuBC4hNgQ7EVYKLi0aJyEQB1MRNwcvUVcrJFcBUzVSDy8tSFJWKwAXGjkAEgkCBwJSLCBMOUxIUA0PFUwAKw83SBkXMjUxKAsNLTIQMlYzKDsrVRIEB1AkAAgBECYwLDQQIQ0lAi5TESsZNjEuWlIzNSAUUzAEBQg0EwJUIgVaASATFDkqJRs3SFdTKiI6ADRTJBJGV2xHAQwAAAAFAAAAaW1nIzFJTUFHRSMyLmTDX6yvG3QMVRTuwFBF");
-        let ncm = umc_ncm::header::NCMFile::new(&input).unwrap();
+        let ncm = crate::crypto::ncm::header::NcmFile::new(&input).unwrap();
         assert_eq!(input.len(), 1056);
         assert_eq!(ncm.audio_data_offset, 1041);
-        assert!(ncm.get_metadata().unwrap().starts_with(b"{\"musicId\""));
+        assert!(ncm.metadata_json().unwrap().starts_with(b"{\"musicId\""));
         let mut audio = input[ncm.audio_data_offset..].to_vec();
         ncm.decrypt(&mut audio, 0);
         assert_eq!(&audio[..3], b"ID3");
@@ -830,19 +1224,19 @@ mod tests {
 
     #[test]
     fn kgm_v5_uses_only_database_resolved_ekeys() {
-        use umc_qmc::QMCv2Cipher;
-        let footer = umc_qmc::footer::from_byte_slice(&pc_footer_fixture())
+        use crate::crypto::qmc::QmcV2Cipher;
+        let footer = crate::crypto::qmc::footer::from_byte_slice(&pc_footer_fixture())
             .unwrap()
             .unwrap();
         let ekey = footer.ekey.unwrap();
-        let cipher = QMCv2Cipher::new_from_ekey(&ekey).unwrap();
+        let cipher = QmcV2Cipher::new_from_ekey(&ekey).unwrap();
         let audio_hash = "0123456789abcdef0123456789abcdef";
         let mut header = Vec::new();
-        header.extend(umc_kgm::header::KGM_HEADER);
+        header.extend(crate::crypto::kgm::header::KGM_HEADER);
         header.extend(104_u32.to_le_bytes());
         header.extend(5_u32.to_le_bytes());
         header.extend(0_i32.to_le_bytes());
-        let mut test = umc_kgm::header::KGM_TEST_DATA;
+        let mut test = crate::crypto::kgm::header::KGM_TEST_DATA;
         cipher.decrypt(&mut test, 0);
         header.extend(test);
         header.extend([0; 16]);

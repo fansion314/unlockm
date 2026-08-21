@@ -1,3 +1,6 @@
+#[path = "support/qmc_fixture.rs"]
+mod qmc_fixture;
+
 use std::fs;
 
 #[test]
@@ -7,7 +10,7 @@ fn encrypted_preflight_without_update_metadata_never_needs_a_provider() {
     let output = temp.path().join("out");
     let mut flac = b"fLaC".to_vec();
     flac.resize(64, 0);
-    umc_qmc::v1::decrypt(&mut flac, 0);
+    qmc_fixture::transform(&mut flac, 0);
     fs::write(&input, flac).unwrap();
     let config = unlockm::config::RunConfig::new(
         input.clone(),
@@ -32,6 +35,10 @@ fn encrypted_preflight_without_update_metadata_never_needs_a_provider() {
         .unwrap();
     assert!(matches!(
         planned.action,
-        unlockm::app::job::PlannedAction::StagedDecrypt(_)
+        unlockm::app::job::PlannedAction::Decrypt { .. }
     ));
+    assert!(
+        !config.output.exists(),
+        "bounded preflight must not materialize a full stage or output root"
+    );
 }

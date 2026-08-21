@@ -3,11 +3,13 @@
 pub mod app;
 pub mod cli;
 pub mod config;
+pub(crate) mod crypto;
 pub mod error;
 pub mod formats;
 pub mod io;
 pub mod keys;
 pub mod metadata;
 pub mod pathing;
+pub mod presentation;
 
 pub const PARTIAL_FAILURE_EXIT: i32 = 3;

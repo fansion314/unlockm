@@ -3,9 +3,10 @@ use std::{fs::File, path::Path};
 
 pub fn parse(path: &Path) -> std::result::Result<Metadata, String> {
     let mut file = File::open(path).map_err(|e| e.to_string())?;
-    let ncm = umc_ncm::header::NCMFile::new_from_readable(&mut file).map_err(|e| e.to_string())?;
+    let ncm = crate::crypto::ncm::header::NcmFile::new_from_readable(&mut file)
+        .map_err(|e| e.to_string())?;
     let json: serde_json::Value =
-        serde_json::from_slice(&ncm.get_metadata().map_err(|e| e.to_string())?)
+        serde_json::from_slice(&ncm.metadata_json().map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
     Ok(from_json(json, ncm.image1))
 }

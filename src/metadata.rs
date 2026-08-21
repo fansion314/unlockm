@@ -1,24 +1,46 @@
 //! Evidence-gated metadata. A conversion is already complete before this
 //! module runs; parser, provider, and tag failures are warnings.
+mod flac;
 pub mod merge;
 pub mod model;
 pub mod ncm;
 pub mod provider;
 pub mod tags;
 use crate::formats::adapter::MetadataHints;
+use crate::formats::adapter::NcmMetadataEvidence;
 use crate::formats::Kind;
 pub use merge::merge;
 pub use model::{Metadata, MetadataValue, Provenance};
 use provider::qq::MetadataClient;
 use std::path::Path;
 
+pub(crate) struct ResolvedMetadata {
+    metadata: Metadata,
+    cover: Option<Vec<u8>>,
+}
+
 pub fn enrich_staged(
     audio: &Path,
     source: &Path,
     kind: Kind,
     hints: &MetadataHints,
+    ncm_evidence: Option<&NcmMetadataEvidence>,
     client: &MetadataClient,
 ) -> std::result::Result<Option<std::path::PathBuf>, String> {
+    let Some(resolved) = resolve_staged(audio, source, kind, hints, ncm_evidence, client)? else {
+        return Ok(None);
+    };
+    tags::prepare_write(audio, &resolved.metadata, resolved.cover.as_deref()).map(Some)
+}
+
+pub(crate) fn resolve_staged(
+    audio: &Path,
+    source: &Path,
+    kind: Kind,
+    hints: &MetadataHints,
+    ncm_evidence: Option<&NcmMetadataEvidence>,
+    client: &MetadataClient,
+) -> std::result::Result<Option<ResolvedMetadata>, String> {
     let existing = tags::read(audio).map_err(|error| {
         format!(
             "read existing tags from staged {}: {error}",
@@ -26,20 +48,24 @@ pub fn enrich_staged(
         )
     })?;
     let incoming = match kind {
-        Kind::Ncm => ncm::parse(source)?,
+        Kind::Ncm => match ncm_evidence {
+            Some(evidence) => {
+                let json = serde_json::from_slice(&evidence.json).map_err(|e| e.to_string())?;
+                ncm::from_json(json, evidence.image1.clone())
+            }
+            None => ncm::parse(source)?,
+        },
         Kind::QmcV2 => qmc_incoming(&existing, source, hints, client)?,
         _ => Metadata::default(),
     };
     let merged = merge(existing, incoming);
-    apply_merged(audio, merged, client)
-        .map_err(|error| format!("update staged metadata at {}: {error}", audio.display()))
+    resolve_merged(merged, client)
 }
 
-fn apply_merged(
-    audio: &Path,
+fn resolve_merged(
     merged: Metadata,
     client: &MetadataClient,
-) -> std::result::Result<Option<std::path::PathBuf>, String> {
+) -> std::result::Result<Option<ResolvedMetadata>, String> {
     if merged.is_empty() {
         return Ok(None);
     }
@@ -48,13 +74,23 @@ fn apply_merged(
         .as_ref()
         .and_then(|cover| {
             if let Some(bytes) = &cover.bytes {
-                Some(Ok(bytes.clone()))
+                Some(tags::validate_cover(bytes).map(|()| bytes.clone()))
             } else {
                 cover.url.as_deref().map(|url| client.cover(url))
             }
         })
         .transpose()?;
-    tags::prepare_write(audio, &merged, cover.as_deref()).map(Some)
+    Ok(Some(ResolvedMetadata {
+        metadata: merged,
+        cover,
+    }))
+}
+
+pub(crate) fn apply_resolved_in_place(
+    audio: &Path,
+    resolved: &ResolvedMetadata,
+) -> std::result::Result<(), String> {
+    tags::write_in_place(audio, &resolved.metadata, resolved.cover.as_deref())
 }
 
 fn qmc_incoming(
@@ -177,6 +213,7 @@ mod tests {
                 resource_id: Some("42".into()),
                 media_mid: Some("mid".into()),
             },
+            None,
             &client,
         )
         .unwrap()
@@ -201,6 +238,7 @@ mod tests {
             Path::new("Artist - Song.mflac"),
             Kind::QmcV2,
             &MetadataHints::default(),
+            None,
             &client,
         )
         .unwrap();
@@ -220,7 +258,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(apply_merged(&audio, metadata, &MetadataClient::new(1)).is_err());
+        assert!(resolve_merged(metadata, &MetadataClient::new(1)).is_err());
         assert_eq!(std::fs::read(&audio).unwrap(), before);
     }
 }

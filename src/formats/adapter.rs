@@ -1,4 +1,4 @@
-use super::{decrypt_to, Kind};
+use super::{decrypt_to, decrypt_to_expected, probe_extension, Kind};
 use crate::{error::Result, keys::KeySources};
 use std::{
     fs::File,
@@ -11,6 +11,12 @@ use std::{
 pub struct MetadataHints {
     pub resource_id: Option<String>,
     pub media_mid: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NcmMetadataEvidence {
+    pub json: Vec<u8>,
+    pub image1: Option<Vec<u8>>,
 }
 
 /// A registered encrypted format. Implementations own suffix selection and a
@@ -57,5 +63,30 @@ impl PreparedDecrypt {
         keys: &KeySources,
     ) -> Result<String> {
         decrypt_to(self.kind, &self.source, output, buffer_size, qmc_ekey, keys)
+    }
+    pub(crate) fn probe_extension(
+        &self,
+        qmc_ekey: Option<&str>,
+        keys: &KeySources,
+    ) -> Result<String> {
+        probe_extension(self.kind, &self.source, qmc_ekey, keys)
+    }
+    pub(crate) fn decrypt_to_expected(
+        &self,
+        output: &mut File,
+        buffer_size: usize,
+        qmc_ekey: Option<&str>,
+        keys: &KeySources,
+        expected_extension: &str,
+    ) -> Result<String> {
+        decrypt_to_expected(
+            self.kind,
+            &self.source,
+            output,
+            buffer_size,
+            qmc_ekey,
+            keys,
+            Some(expected_extension),
+        )
     }
 }

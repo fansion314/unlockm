@@ -1,91 +1,217 @@
 # unlockm
 
-`unlockm` converts supported encrypted music downloads to their native playable
-audio without transcoding. It retains sources, keeps memory bounded by
-`--jobs * --buffer-size`, and only exposes a destination after an atomic publish.
+[简体中文](README.zh.md)
 
-## Build and install
+`unlockm` turns supported encrypted music downloads into normal, playable
+audio files. It decrypts the original audio stream without transcoding, keeps
+your source files, and can preserve the input directory layout in a separate
+output folder.
 
-Rust 1.75+ is required. The lockfile is part of the release contract.
+## Why unlockm?
+
+- **No quality loss:** audio is decrypted, not re-encoded.
+- **Safe by default:** source files are never deleted, and completed outputs
+  are published atomically.
+- **Useful for whole libraries:** directories are scanned recursively, while
+  cover images, lyrics, and other companion files are copied by default.
+- **Clear feedback:** an interactive terminal shows overall progress and the
+  file currently being processed.
+- **Self-contained crypto:** all format-specific decryption code used by the
+  program lives in this repository; there is no runtime dependency on an
+  external crypto service or FFmpeg.
+
+## Install
+
+Rust 1.75 or newer is required. The lockfile is part of the release contract.
+
+```sh
+cd unlockm
+cargo install --path . --locked
+unlockm --version
+```
+
+To build without installing:
 
 ```sh
 cargo build --release --locked
 ./target/release/unlockm --help
 ```
 
-## Examples
+## Quick start
+
+Convert a music directory and mirror its layout under a new output directory:
 
 ```sh
-# Mirror a tree into a separate output directory (the default layout).
-unlockm -o ./unlocked ./downloads
-
-# Flatten files; same-run name collisions are errors, never arbitrary winners.
-unlockm --flat --no-copy -o ./music ./downloads
-
-# Convert the initial tree, then recursively monitor later changes.
-unlockm --watch --overwrite -o ./unlocked ./downloads
+unlockm ~/Music/Encrypted -o ~/Music/Unlocked
 ```
 
-Directory inputs are recursive, mirror empty directories, and copy ordinary
-companion files by default. `--no-copy` affects only passthrough files; it never
-suppresses encrypted-audio conversion. Existing destinations are skipped unless
-`--overwrite` is given. Overwrite first completes a same-directory temporary and
-retains a recoverable old destination until publication succeeds. An output root
-inside the input tree and unlockm-owned temporary files are ignored by scan and
-watch processing. In-place passthrough is a no-op.
+Convert it and conservatively improve tags and cover art:
 
-`--watch` requires a directory. It subscribes recursively after the initial
-batch scan, normalizes create/modify/rename/remove events, waits for matching
-size/mtime observations, and coalesces storms. A change while a path is running
-causes exactly one follow-up pass. Ctrl-C or a remove cancels owned temporary
-work; it never deletes a source or publishes a partial output. A low-frequency
-reconciliation protects against notification loss.
+```sh
+unlockm ~/Music/Encrypted -o ~/Music/Unlocked --update-metadata
+```
 
-## Formats and keys
+Convert encrypted audio only, without copying lyrics, images, or other
+ordinary files:
 
-Run `unlockm --supported-ext` for the complete, versioned suffix list. The
-supported families are NCM; QMC v1/v2 and their QQ/Moo aliases; KGM/KGG/KGMA/VPR;
-KWM; Xiami; Ximalaya; and QQ iOS TM. Standard audio that merely has a registered
-suffix is passed through only after positive probing. Corrupt or keyless
-registered inputs fail per-file instead of being reported as copied ciphertext.
+```sh
+unlockm ~/Music/Encrypted -o ~/Music/Unlocked --no-copy
+```
 
-QMC v2 prefers its embedded footer ekey, then `--qmc-key-map` (JSON object or
-`identifier=ekey` lines), `--qmc-mmkv`, and `--qmc-ekey`. `--qmc-mmkv-key`
-accepts an MMKV password for an encrypted store; the matching `<store>.crc`
-must be present because it supplies the MMKV IV. The password is only used to
-load the in-memory map and is never logged. On macOS, QQMusic 8.x MMKV and
-10.x plist-derived encrypted stores are discovered automatically when present.
-KGM v5 uses `--kgg-db`, or its conventional Windows database when it can be
-found.
+Run `unlockm --help` for every option and `unlockm --supported-ext` for the
+complete, versioned suffix list.
 
-## Metadata, privacy, and diagnostics
+## Where files go
 
-Without `--update-metadata`, conversion makes no metadata network request and
-retains embedded tags/artwork. With it, NCM container data and QMC footer
-identities may enrich a content-probed staged output even though its private
-`.unlockm-stage-*` filename has no audio extension. QMC uses an exact resource/media identity
-request when available; only files without that identity may use a strict unique
-title/artist/duration search. Filename search is only a hint: ambiguous or
-offline results leave existing tags untouched. Artwork precedence is embedded
-audio art, container art, exact lookup art, then verified-search art. Artwork is
-size, magic, and decode validated. Network/provider/tag failures are warnings,
-never conversion failures; there is no FFmpeg runtime dependency.
+The default **mirror** layout keeps subdirectories:
 
-Metadata requests use HTTPS only. Provider RPC is pinned to QQ's API host, and
-remote artwork is accepted only from the documented QQ and Netease music CDNs;
-URLs with local hosts, IP literals, userinfo, or other origins are rejected
-before a request is dispatched.
+```text
+Encrypted/Artist/Album/song.ncm
+                    ↓
+Unlocked/Artist/Album/song.flac
+```
 
-The default log level is `warn`. Use `error` for fatal/per-file errors only,
-`warn` for best-effort metadata skips, `info` for summaries, `debug` for
-per-file diagnosis, `trace` for maximal diagnostics, or `off` to suppress
-tracing output; `--json-logs` changes rendering only, not this filter. A batch
-with conflicts or file failures exits 3 after processing unaffected siblings.
-Check `--help` for all budgets and paths. If a key is absent, confirm its
-explicit source instead of attempting a raw key fallback.
+Ordinary companion files are copied unless `--no-copy` is set. Existing
+destinations are skipped unless you explicitly pass `--overwrite`; replacement
+still happens only after the new file is complete. If the output directory is
+inside the input tree, unlockm ignores it during scanning and watch mode.
+
+Use `--flat` to place every result directly in the output root:
+
+```sh
+unlockm ~/Music/Encrypted -o ~/Music/Unlocked --flat
+```
+
+If two inputs would produce the same flat filename, both are reported as a
+conflict. unlockm never picks an arbitrary winner.
+
+## Progress and command output
+
+Interactive terminals show two live rows:
+
+```text
+[========--------------] 118/326  36.2%  2.4s
+Decrypting: Artist/Album/song.ncm (+1 active)
+```
+
+The count advances as each file finishes. The second row shows the latest
+active relative path; `(+1 active)` means one other file is being processed.
+
+`--progress auto` is the default and animates only on a terminal. Use
+`--progress always` to force it or `--progress never` to disable it. Redirected
+human output contains no terminal control codes and ends with a stable summary:
+
+```text
+unlockm: converted=80, copied=246, skipped=0, conflicted=0, failed=0
+```
+
+For scripts, `--json-logs` disables live progress and emits JSON diagnostics
+plus a final JSON summary. Progress and diagnostics are written to stderr.
+
+## Concurrency and performance
+
+`--jobs` is the maximum number of **files** processed at the same time. The
+default is two file jobs; it does not limit a run to two files, and it is not a
+promise that the program uses only two operating-system threads.
+
+Two was the fastest default on the representative 3.4 GiB mixed APFS workload
+with metadata updates: median times were 3.62s at one job, 2.99s at two, 3.39s
+at four, and 5.66s at eight. More simultaneous decrypt, copy, and tag writes
+can create storage contention, so more jobs are not always faster. You can tune
+the value for a different drive or workload:
+
+```sh
+unlockm ~/Music/Encrypted -o ~/Music/Unlocked --jobs 4
+```
+
+`--metadata-jobs` is separate: it limits concurrent metadata network requests,
+not file conversion jobs.
+
+## Metadata and privacy
+
+Without `--update-metadata`, unlockm makes no metadata network requests and
+retains embedded tags and artwork. With the flag enabled, it can enrich NCM
+container metadata and verified QMC identities. Existing information wins when
+a remote result is absent, ambiguous, invalid, or unavailable.
+
+Metadata lookup and tag-writing failures are warnings rather than conversion
+failures. Artwork is checked for size, file signature, and decodability before
+use. Requests are HTTPS-only and restricted to the documented QQ/Netease API
+and artwork hosts; local addresses, IP literals, userinfo, and unexpected hosts
+are rejected before dispatch.
+
+## Supported format families and keys
+
+| Family | Notes |
+| --- | --- |
+| NCM | NetEase Cloud Music containers, including embedded metadata and artwork. |
+| QMC / QQ / Moo | QMC v1/v2 and aliases. QMC v2 tries its embedded footer key first, followed by configured key sources. |
+| KGM / KGG / KGMA / VPR | KuGou formats. KGM v5 may require a KuGou encrypted key database. |
+| KWM | Kuwo Music formats. |
+| Xiami | Xiami encrypted audio. |
+| Ximalaya | Android and PC X2M/X3M variants. |
+| TM | QQ Music iOS TM variants. |
+
+QMC v2 key options are tried after an embedded footer key:
+
+1. `--qmc-key-map` — a JSON object or `identifier=ekey` lines.
+2. `--qmc-mmkv` — a QQMusic MMKV store; use `--qmc-mmkv-key` for an
+   encrypted store. Its matching `.crc` file must be present.
+3. `--qmc-ekey` — one explicit fallback ekey.
+
+On macOS, unlockm also discovers conventional QQMusic 8.x MMKV and 10.x
+plist-derived stores when available. KGM v5 accepts `--kgg-db` and can discover
+the conventional Windows database location. Secrets are used only to build
+in-memory key maps and are never logged.
+
+A registered encrypted suffix must also pass format validation. Corrupt or
+keyless encrypted inputs fail per file instead of being copied as ciphertext.
+
+## Watch mode
+
+`--watch` first completes the initial directory conversion, then recursively
+watches for stable file changes:
+
+```sh
+unlockm ~/Music/Encrypted -o ~/Music/Unlocked --watch --overwrite
+```
+
+Create, modify, rename, and remove event bursts are coalesced. If a file changes
+while it is running, unlockm schedules one clean follow-up pass. Ctrl-C or a
+remove event cancels private temporary work without deleting the source or
+publishing a partial result.
+
+## Exit status and troubleshooting
+
+- Exit `0`: every file completed, copied, or was safely skipped.
+- Exit `1`: the command or overall run could not start or continue.
+- Exit `3`: some files failed or conflicted; unaffected files were still
+  processed.
+
+Common cases:
+
+- **Everything is skipped:** the destinations already exist; use `--overwrite`
+  only if replacing them is intended.
+- **An encrypted file fails validation:** confirm that it is not corrupt and
+  that the required QMC/KGM key source is available.
+- **Metadata warnings appear:** the decrypted output is still kept; metadata
+  enrichment is best effort.
+- **No animated bar appears in redirected output:** this is intentional; use
+  `--progress always` only when terminal-style output is desired.
+- **A faster drive performs differently:** benchmark `--jobs 1`, `2`, and `4`
+  on a representative copy of the library before changing the default.
+
+## Safety model
+
+Decryption and copies are streamed with bounded buffers. Destination collisions
+are rejected before heavy work, output paths remain contained, and a destination
+becomes visible only after its private same-directory temporary file is
+complete. Source size and modification time are checked again before
+publication, and metadata recovery never replaces valid decrypted audio with a
+partially modified file.
 
 ## License and notices
 
 New project code is MIT licensed. See [LICENSE](LICENSE) and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the pinned crypto reference,
-fixture attribution, and release-audit requirements.
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for copied-code and fixture
+attribution.
