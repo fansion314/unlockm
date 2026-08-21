@@ -6,9 +6,9 @@ pub mod model;
 pub mod ncm;
 pub mod provider;
 pub mod tags;
+use crate::formats::Kind;
 use crate::formats::adapter::MetadataHints;
 use crate::formats::adapter::NcmMetadataEvidence;
-use crate::formats::Kind;
 pub use merge::merge;
 pub use model::{Metadata, MetadataValue, Provenance};
 use provider::qq::MetadataClient;
@@ -138,13 +138,13 @@ fn search_hints(existing: &Metadata, source: &Path) -> (Option<String>, Option<S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{engine::general_purpose::STANDARD, Engine};
+    use base64::{Engine, engine::general_purpose::STANDARD};
     use std::{
         io::{Read, Write},
         net::TcpListener,
         sync::{
-            atomic::{AtomicUsize, Ordering},
             Arc,
+            atomic::{AtomicUsize, Ordering},
         },
         thread,
     };

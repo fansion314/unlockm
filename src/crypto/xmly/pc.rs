@@ -1,11 +1,10 @@
 use crate::crypto::common::{base64_decode, base64_decode_overwrite};
 use crate::crypto::xmly::XmlyError;
-use aes::cipher::generic_array::GenericArray;
-use aes::cipher::BlockDecryptMut;
+use aes::cipher::{Array, BlockModeDecrypt};
 use aes::{Aes192Dec, Aes256Dec};
-use byteorder::{ByteOrder, BE};
-use cbc::cipher::KeyIvInit;
+use byteorder::{BE, ByteOrder};
 use cbc::Decryptor;
+use cbc::cipher::KeyIvInit;
 use cipher::block_padding::Pkcs7;
 
 type Aes256CbcDec = Decryptor<Aes256Dec>;
@@ -124,12 +123,12 @@ impl Header {
 
     const STAGE1_KEY: [u8; 32] = *b"ximalayaximalayaximalayaximalaya";
     fn decrypt_stage1<'a>(&self, buffer: &'a mut [u8]) -> Result<&'a [u8], XmlyError> {
-        let key = GenericArray::from(Self::STAGE1_KEY);
-        let iv = GenericArray::from(self.stage1_iv);
+        let key = Array::from(Self::STAGE1_KEY);
+        let iv = Array::from(self.stage1_iv);
         let aes = Aes256CbcDec::new(&key, &iv);
 
         let len = aes
-            .decrypt_padded_mut::<Pkcs7>(buffer)
+            .decrypt_padded::<Pkcs7>(buffer)
             .map_err(XmlyError::DecryptStage1Error)?
             .len();
         base64_decode_overwrite(&mut buffer[..len]).map_err(XmlyError::DecryptStage1B64Error)
@@ -141,7 +140,7 @@ impl Header {
         let aes = Aes192CbcDec::new_from_slices(key, iv).map_err(XmlyError::InitStage2Error)?;
 
         let len = aes
-            .decrypt_padded_mut::<Pkcs7>(buffer)
+            .decrypt_padded::<Pkcs7>(buffer)
             .map_err(XmlyError::DecryptStage2Error)?
             .len();
         base64_decode_overwrite(&mut buffer[..len]).map_err(XmlyError::DecryptStage2B64Error)
@@ -160,19 +159,19 @@ impl Header {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes::cipher::BlockEncryptMut;
+    use aes::cipher::BlockModeEncrypt;
     use base64::Engine;
     use cbc::Encryptor;
 
     fn encrypt_padded<C>(cipher: C, input: &[u8]) -> Vec<u8>
     where
-        C: BlockEncryptMut,
+        C: BlockModeEncrypt,
     {
         let mut buffer = input.to_vec();
         let length = buffer.len();
         buffer.resize(length + 16, 0);
         cipher
-            .encrypt_padded_mut::<Pkcs7>(&mut buffer, length)
+            .encrypt_padded::<Pkcs7>(&mut buffer, length)
             .unwrap()
             .to_vec()
     }

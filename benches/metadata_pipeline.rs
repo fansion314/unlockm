@@ -6,7 +6,7 @@
 #[path = "../tests/support/ncm_fixture.rs"]
 mod ncm_fixture;
 
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use sha2::{Digest, Sha256};
 use std::{
     fs,

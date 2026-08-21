@@ -16,7 +16,7 @@ use crate::crypto::kgm::v3::DecipherV3;
 use thiserror::Error;
 
 use crate::crypto::kgm::v5::DecipherV5;
-use block_padding::UnpadError;
+use block_padding::Error as PaddingError;
 
 #[derive(Debug, Error)]
 pub enum KugouError {
@@ -39,7 +39,7 @@ pub enum KugouError {
     SelfTestFailed,
 
     #[error("Failed decrypt kugou db data: {0}")]
-    DecryptKugouDbError(UnpadError),
+    DecryptKugouDbError(PaddingError),
 
     #[error("Invalid database size: {0}")]
     InvalidDatabaseSize(usize),

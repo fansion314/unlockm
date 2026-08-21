@@ -1,11 +1,11 @@
 [package]
 name = "unlockm"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.75"
+edition = "2024"
+rust-version = "1.89"
 description = "Fast, safe conversion of encrypted music downloads"
 license = "MIT"
-repository = "https://git.um-react.app/um/unlockm"
+repository = "https://git.fansionia.world/fansion/unlockm"
 
 [features]
 default = []
@@ -13,38 +13,38 @@ default = []
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
-notify = "6.1"
+notify = "8.2"
 tempfile = "3.12"
 filetime = "0.2"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 unicode-normalization = "0.1"
-lofty = "0.21"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+lofty = "0.25"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
 thiserror = "2.0"
 tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 walkdir = "2.5"
-aes = "0.8"
-base64 = "0.22"
+aes = "0.9"
+base64 = "0.23"
 byteorder = "1.5"
-block-padding = "0.3"
-cbc = "0.1"
-cipher = { version = "0.4", features = ["block-padding"] }
+block-padding = "0.4"
+cbc = "0.2"
+cipher = { version = "0.5", features = ["block-padding"] }
 crc = "3.2"
 hex = "0.4"
-itertools = "0.14"
+itertools = "0.15"
 lazy_static = "1.5"
-md-5 = "0.10"
+md-5 = "0.11"
 tc_tea = { version = "0.2.1", default-features = false }
 url = "2.5"
 
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"
-sha2 = "0.10"
+sha2 = "0.11"
 
 [profile.release]
 lto = "thin"

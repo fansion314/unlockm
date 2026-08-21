@@ -1,4 +1,4 @@
-use super::{adapter::FormatAdapter, Kind};
+use super::{Kind, adapter::FormatAdapter};
 use std::path::Path;
 
 pub struct Adapter {

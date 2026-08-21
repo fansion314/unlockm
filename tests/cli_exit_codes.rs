@@ -13,9 +13,11 @@ fn invalid_arguments_use_clap_error() {
 }
 #[test]
 fn help_works() {
-    assert!(Command::new(env!("CARGO_BIN_EXE_unlockm"))
-        .arg("--help")
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_unlockm"))
+            .arg("--help")
+            .status()
+            .unwrap()
+            .success()
+    );
 }

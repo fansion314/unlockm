@@ -163,14 +163,10 @@ fn write_candidate(
         tag.insert_text(ItemKey::TrackArtist, value.text.clone());
     }
     if let Some(bytes) = cover {
-        let picture = parse_cover(bytes)?;
+        let mut picture = parse_cover(bytes)?;
+        picture.set_pic_type(PictureType::CoverFront);
         tag.remove_picture_type(PictureType::CoverFront);
-        tag.push_picture(Picture::new_unchecked(
-            PictureType::CoverFront,
-            picture.mime_type().cloned(),
-            None,
-            bytes.to_vec(),
-        ));
+        tag.push_picture(picture);
     }
     let mut output = OpenOptions::new()
         .read(true)
@@ -197,7 +193,7 @@ fn verify_written(
         reread
             .title
             .as_ref()
-            .map_or(true, |actual| actual.text != v.text)
+            .is_none_or(|actual| actual.text != v.text)
     }) {
         return Err("tag title did not round-trip".into());
     }
@@ -206,7 +202,7 @@ fn verify_written(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{engine::general_purpose::STANDARD, Engine};
+    use base64::{Engine, engine::general_purpose::STANDARD};
 
     fn flac_audio(bytes: &[u8]) -> &[u8] {
         assert_eq!(&bytes[..4], b"fLaC");
@@ -258,10 +254,12 @@ mod tests {
             title: Some(MetadataValue::new("mutated", Provenance::Container)),
             ..Default::default()
         };
-        assert!(write_with_hook(&path, &metadata, None, || {
-            Err("injected post-save verification failure".into())
-        })
-        .is_err());
+        assert!(
+            write_with_hook(&path, &metadata, None, || {
+                Err("injected post-save verification failure".into())
+            })
+            .is_err()
+        );
         assert_eq!(std::fs::read(&path).unwrap(), before);
         assert!(probe(&path).is_ok());
         assert_eq!(
@@ -288,10 +286,12 @@ mod tests {
             title: Some(MetadataValue::new("mutated", Provenance::Container)),
             ..Default::default()
         };
-        assert!(write_in_place_with_hook(&path, &metadata, None, || {
-            Err("injected post-save verification failure".into())
-        })
-        .is_err());
+        assert!(
+            write_in_place_with_hook(&path, &metadata, None, || {
+                Err("injected post-save verification failure".into())
+            })
+            .is_err()
+        );
         assert_ne!(std::fs::read(&path).unwrap(), before);
         assert_eq!(read(&path).unwrap().title.unwrap().text, "mutated");
     }

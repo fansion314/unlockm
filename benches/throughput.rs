@@ -198,7 +198,9 @@ fn main() {
             many_expected
         );
     }
-    println!("unlockm throughput: bytes={bytes} files={files} jobs={jobs} samples={samples} buffer={BUFFER}");
+    println!(
+        "unlockm throughput: bytes={bytes} files={files} jobs={jobs} samples={samples} buffer={BUFFER}"
+    );
     for sample in 0..samples {
         let direct_out = directory.path().join(format!("direct-{sample}.flac"));
         let elapsed = direct(&single, &direct_out);

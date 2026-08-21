@@ -1,6 +1,6 @@
+use crate::crypto::kgm::KugouError;
 use crate::crypto::kgm::header::Header;
 use crate::crypto::kgm::slot_keys::get_slot_key;
-use crate::crypto::kgm::KugouError;
 
 pub struct DecipherV3 {
     slot_key: [u8; 16],
@@ -11,7 +11,10 @@ impl DecipherV3 {
     fn hash_key<T: AsRef<[u8]>>(data: T) -> [u8; 16] {
         let digest = crate::crypto::common::md5(data);
         let mut result = [0u8; 16];
-        for (result, digest) in result.rchunks_exact_mut(2).zip(digest.chunks_exact(2)) {
+        for (result, digest) in result
+            .rchunks_exact_mut(2)
+            .zip(digest.as_chunks::<2>().0.iter())
+        {
             result[0] = digest[0];
             result[1] = digest[1];
         }

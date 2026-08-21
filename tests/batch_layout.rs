@@ -15,13 +15,15 @@ fn mirrors_nested_companions_and_empty_directories() {
     let output = tree.path().join("output");
     fs::create_dir_all(input.join("nested/empty")).unwrap();
     fs::write(input.join("nested/song.lrc"), "words").unwrap();
-    assert!(unlockm()
-        .args(["-o"])
-        .arg(&output)
-        .arg(&input)
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        unlockm()
+            .args(["-o"])
+            .arg(&output)
+            .arg(&input)
+            .status()
+            .unwrap()
+            .success()
+    );
     assert_eq!(
         fs::read_to_string(output.join("nested/song.lrc")).unwrap(),
         "words"
@@ -36,14 +38,16 @@ fn no_copy_leaves_companions_out() {
     let output = tree.path().join("out");
     fs::create_dir_all(&input).unwrap();
     fs::write(input.join("x.lrc"), "x").unwrap();
-    assert!(unlockm()
-        .arg("--no-copy")
-        .arg("-o")
-        .arg(&output)
-        .arg(&input)
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        unlockm()
+            .arg("--no-copy")
+            .arg("-o")
+            .arg(&output)
+            .arg(&input)
+            .status()
+            .unwrap()
+            .success()
+    );
     assert!(!output.join("x.lrc").exists());
 }
 
@@ -172,13 +176,15 @@ fn copied_file_keeps_mtime() {
     fs::write(&source, "x").unwrap();
     let time = filetime::FileTime::from_unix_time(1_700_000_000, 0);
     filetime::set_file_mtime(&source, time).unwrap();
-    assert!(unlockm()
-        .arg("-o")
-        .arg(&output)
-        .arg(&input)
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        unlockm()
+            .arg("-o")
+            .arg(&output)
+            .arg(&input)
+            .status()
+            .unwrap()
+            .success()
+    );
     assert_eq!(
         filetime::FileTime::from_last_modification_time(
             &fs::metadata(output.join("x.lrc")).unwrap()

@@ -3,8 +3,11 @@
 
 use super::NcmError;
 use aes::{
-    cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyInit},
     Aes128Dec,
+    cipher::{
+        Block, BlockCipherDecrypt, KeyInit,
+        block_padding::{Padding, Pkcs7},
+    },
 };
 use base64::Engine;
 
@@ -19,9 +22,12 @@ pub(super) fn decrypt(encrypted: &[u8]) -> Result<Vec<u8>, NcmError> {
         .decode(encoded)
         .map_err(|_| NcmError::MetadataBase64)?;
     let cipher = Aes128Dec::new_from_slice(&METADATA_KEY).expect("fixed AES-128 key");
-    let plaintext = cipher
-        .decrypt_padded_mut::<Pkcs7>(&mut bytes)
-        .map_err(|_| NcmError::MetadataDecrypt)?;
+    let (blocks, tail) = Block::<Aes128Dec>::slice_as_chunks_mut(&mut bytes);
+    if !tail.is_empty() {
+        return Err(NcmError::MetadataDecrypt);
+    }
+    cipher.decrypt_blocks(blocks);
+    let plaintext = Pkcs7::unpad_blocks(blocks).map_err(|_| NcmError::MetadataDecrypt)?;
     plaintext
         .strip_prefix(b"music:")
         .map(Vec::from)

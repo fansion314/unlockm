@@ -2,7 +2,7 @@
 
 mod key;
 
-use super::{v1, QmcError};
+use super::{QmcError, v1};
 
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct Qmc2Map {

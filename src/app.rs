@@ -3,7 +3,7 @@ pub mod runner;
 pub mod scan;
 pub mod watch;
 
-use crate::{config::RunConfig, error::Result, PARTIAL_FAILURE_EXIT};
+use crate::{PARTIAL_FAILURE_EXIT, config::RunConfig, error::Result};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::info;
 

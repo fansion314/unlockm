@@ -2,7 +2,7 @@ use crate::metadata::{
     merge::verified_search,
     model::{Candidate, Metadata},
 };
-use reqwest::{blocking::Client, redirect::Policy, StatusCode};
+use reqwest::{StatusCode, blocking::Client, redirect::Policy};
 use std::{
     collections::HashMap,
     sync::{Arc, Condvar, Mutex},
@@ -75,7 +75,7 @@ impl MetadataClient {
         let host = match url.host() {
             Some(Host::Domain(host)) => host.to_ascii_lowercase(),
             Some(Host::Ipv4(_)) | Some(Host::Ipv6(_)) => {
-                return Err("provider URL must not use an IP literal".into())
+                return Err("provider URL must not use an IP literal".into());
             }
             None => return Err("provider URL is missing a host".into()),
         };
@@ -230,9 +230,11 @@ mod tests {
         client.exact("1").unwrap();
         let redirect =
             server("HTTP/1.1 302 Found\r\nLocation: /other\r\nContent-Length: 0\r\n\r\n");
-        assert!(MetadataClient::with_test_base(1, redirect)
-            .exact("1")
-            .is_err());
+        assert!(
+            MetadataClient::with_test_base(1, redirect)
+                .exact("1")
+                .is_err()
+        );
     }
     #[test]
     fn production_url_policy_accepts_only_trusted_https_origins() {
@@ -257,11 +259,15 @@ mod tests {
                 "{url}"
             );
         }
-        assert!(client
-            .allowed_url("https://u.y.qq.com/exact/1", RequestKind::Provider)
-            .is_ok());
-        assert!(client
-            .allowed_url("https://y.gtimg.cn/exact/1", RequestKind::Provider)
-            .is_err());
+        assert!(
+            client
+                .allowed_url("https://u.y.qq.com/exact/1", RequestKind::Provider)
+                .is_ok()
+        );
+        assert!(
+            client
+                .allowed_url("https://y.gtimg.cn/exact/1", RequestKind::Provider)
+                .is_err()
+        );
     }
 }

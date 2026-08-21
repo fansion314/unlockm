@@ -1,6 +1,6 @@
 //! Bounded standard-audio probing shared by registry and decrypted staging.
 
-use crate::crypto::audio::{detect_audio_type, AudioType};
+use crate::crypto::audio::{AudioType, detect_audio_type};
 
 pub fn is_standard_audio(header: &[u8]) -> bool {
     detect_audio_type(header).is_ok_and(|kind| kind != AudioType::Unknown)

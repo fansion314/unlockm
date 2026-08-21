@@ -1,14 +1,14 @@
 //! Platform-specific notify events are normalised before debounce and state
 //! handling so every backend follows the same batch-equivalent pipeline.
-use super::{runner, scan, Summary};
+use super::{Summary, runner, scan};
 use crate::{
     config::RunConfig,
     error::{AppError, Result},
     io::atomic::is_owned_temp,
 };
 use notify::{
-    event::{ModifyKind, RenameMode},
     Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+    event::{ModifyKind, RenameMode},
 };
 use std::{
     collections::HashMap,
@@ -94,10 +94,10 @@ fn normalize_event_path(path: PathBuf) -> PathBuf {
     if let Ok(path) = path.canonicalize() {
         return path;
     }
-    if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
-        if let Ok(parent) = parent.canonicalize() {
-            return parent.join(name);
-        }
+    if let (Some(parent), Some(name)) = (path.parent(), path.file_name())
+        && let Ok(parent) = parent.canonicalize()
+    {
+        return parent.join(name);
     }
     path
 }

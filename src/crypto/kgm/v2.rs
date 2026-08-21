@@ -1,6 +1,6 @@
+use crate::crypto::kgm::KugouError;
 use crate::crypto::kgm::header::Header;
 use crate::crypto::kgm::slot_keys::get_slot_key;
-use crate::crypto::kgm::KugouError;
 
 pub struct DecipherV2 {
     key: [u8; 4],

@@ -24,7 +24,24 @@ impl XiamiFile {
         }
 
         let (copy_len, key) = match buffer[..0x10] {
-            [b'i', b'f', b'm', b't', f1, f2, f3, f4, 0xfe, 0xfe, 0xfe, 0xfe, a, b, c, key] => {
+            [
+                b'i',
+                b'f',
+                b'm',
+                b't',
+                f1,
+                f2,
+                f3,
+                f4,
+                0xfe,
+                0xfe,
+                0xfe,
+                0xfe,
+                a,
+                b,
+                c,
+                key,
+            ] => {
                 let copy_len = (a as usize) | ((b as usize) << 8) | ((c as usize) << 16);
                 let _format = [f1, f2, f3, f4];
                 (copy_len, key.wrapping_sub(1))

@@ -1,4 +1,4 @@
-use crate::crypto::qmc::footer::{musicex_v1, FooterParseError, Metadata, MetadataParser};
+use crate::crypto::qmc::footer::{FooterParseError, Metadata, MetadataParser, musicex_v1};
 use byteorder::{ByteOrder, LE};
 
 #[derive(Debug, Clone, PartialEq)]

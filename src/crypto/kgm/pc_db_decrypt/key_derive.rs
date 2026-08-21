@@ -1,9 +1,7 @@
 use crate::crypto::common::md5;
 use byteorder::{ByteOrder, LE};
 
-use aes::cipher::{
-    block_padding::NoPadding, generic_array::GenericArray, BlockDecryptMut, KeyIvInit,
-};
+use aes::cipher::{Array, BlockModeDecrypt, KeyIvInit, block_padding::NoPadding};
 
 use crate::crypto::kgm::KugouError;
 
@@ -48,22 +46,22 @@ pub fn decrypt_db_page(buffer: &mut [u8], page_number: u32) -> Result<(), KugouE
     let key = derive_page_aes_key(page_number);
     let iv = derive_page_aes_iv(page_number);
 
-    let key = GenericArray::from(key);
-    let iv = GenericArray::from(iv);
+    let key = Array::from(key);
+    let iv = Array::from(iv);
     let dec = Aes128CbcDec::new(&key, &iv);
-    dec.decrypt_padded_mut::<NoPadding>(buffer)
+    dec.decrypt_padded::<NoPadding>(buffer)
         .map_err(KugouError::DecryptKugouDbError)?;
     Ok(())
 }
 
 #[cfg(test)]
 pub(super) fn encrypt_db_page(buffer: &mut [u8], page_number: u32) {
-    use aes::cipher::BlockEncryptMut;
+    use aes::cipher::BlockModeEncrypt;
     type Aes128CbcEnc = cbc::Encryptor<aes::Aes128Enc>;
-    let key = GenericArray::from(derive_page_aes_key(page_number));
-    let iv = GenericArray::from(derive_page_aes_iv(page_number));
+    let key = Array::from(derive_page_aes_key(page_number));
+    let iv = Array::from(derive_page_aes_iv(page_number));
     Aes128CbcEnc::new(&key, &iv)
-        .encrypt_padded_mut::<NoPadding>(buffer, buffer.len())
+        .encrypt_padded::<NoPadding>(buffer, buffer.len())
         .unwrap();
 }
 

@@ -11,9 +11,11 @@ fn rejected_without_dispatch(url: &str) {
     let address = listener.local_addr().unwrap();
     let local = format!("http://{address}/cover");
     let client = MetadataClient::new(1);
-    assert!(client
-        .cover(if url == "$LOCAL" { &local } else { url })
-        .is_err());
+    assert!(
+        client
+            .cover(if url == "$LOCAL" { &local } else { url })
+            .is_err()
+    );
     let until = Instant::now() + Duration::from_millis(150);
     while Instant::now() < until {
         match listener.accept() {

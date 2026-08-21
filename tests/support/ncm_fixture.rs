@@ -6,7 +6,7 @@
 //! retained static 256-byte cipher-stream vector, so this test/benchmark helper
 //! has no dependency on the production crypto implementation.
 
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use std::{fs, path::Path};
 
 pub const VALID_PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLxmwAAAABJRU5ErkJggg==";

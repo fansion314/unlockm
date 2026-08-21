@@ -6,7 +6,7 @@ use crate::{
     io::atomic::AtomicOutput,
     keys::KeySources,
     metadata::{self, provider::qq::MetadataClient},
-    pathing::{plan, Reservations},
+    pathing::{Reservations, plan},
 };
 use std::{
     fs,
@@ -405,14 +405,12 @@ pub fn execute_cancellable_with_resources(
             )
             .map_err(|e| e.to_string())?;
             timings.publish += publish_started.elapsed();
-            if result {
-                if let Ok(metadata) = fs::metadata(&planned.source) {
-                    let _ = fs::set_permissions(&planned.destination, metadata.permissions());
-                    let _ = filetime::set_file_mtime(
-                        &planned.destination,
-                        filetime::FileTime::from_last_modification_time(&metadata),
-                    );
-                }
+            if result && let Ok(metadata) = fs::metadata(&planned.source) {
+                let _ = fs::set_permissions(&planned.destination, metadata.permissions());
+                let _ = filetime::set_file_mtime(
+                    &planned.destination,
+                    filetime::FileTime::from_last_modification_time(&metadata),
+                );
             }
             Ok(Summary {
                 converted: usize::from(result),
@@ -561,33 +559,37 @@ mod tests {
         let mut changed = fs::read(&source).unwrap();
         changed.push(0);
         fs::write(&source, changed).unwrap();
-        assert!(regenerate_clean_stage(
-            &config,
-            &KeySources::default(),
-            &source,
-            &parent,
-            &prepared,
-            "flac",
-            &fingerprint,
-            &cancellation,
-        )
-        .unwrap_err()
-        .contains("source changed"));
+        assert!(
+            regenerate_clean_stage(
+                &config,
+                &KeySources::default(),
+                &source,
+                &parent,
+                &prepared,
+                "flac",
+                &fingerprint,
+                &cancellation,
+            )
+            .unwrap_err()
+            .contains("source changed")
+        );
 
         let cancelled = Cancellation::default();
         cancelled.cancel();
-        assert!(regenerate_clean_stage(
-            &config,
-            &KeySources::default(),
-            &source,
-            &parent,
-            &prepared,
-            "flac",
-            &source_fingerprint(&source).unwrap(),
-            &cancelled,
-        )
-        .unwrap_err()
-        .contains("cancelled"));
+        assert!(
+            regenerate_clean_stage(
+                &config,
+                &KeySources::default(),
+                &source,
+                &parent,
+                &prepared,
+                "flac",
+                &source_fingerprint(&source).unwrap(),
+                &cancelled,
+            )
+            .unwrap_err()
+            .contains("cancelled")
+        );
     }
 
     #[test]
@@ -629,13 +631,15 @@ mod tests {
             }
             drop(stage);
             assert_eq!(fs::read(&destination).unwrap(), b"old destination");
-            assert!(fs::read_dir(destination.parent().unwrap())
-                .unwrap()
-                .filter_map(Result::ok)
-                .all(|entry| !entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".unlockm-stage-")));
+            assert!(
+                fs::read_dir(destination.parent().unwrap())
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .all(|entry| !entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".unlockm-stage-"))
+            );
         }
     }
 }

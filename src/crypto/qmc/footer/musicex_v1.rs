@@ -1,7 +1,7 @@
 use crate::crypto::qmc::footer::pc_v2_musicex::PcV2MusicEx;
 use crate::crypto::qmc::footer::utils::from_ascii_utf16;
 use crate::crypto::qmc::footer::{Data, FooterParseError, Metadata};
-use byteorder::{ByteOrder, ReadBytesExt, LE};
+use byteorder::{ByteOrder, LE, ReadBytesExt};
 use std::io::{Cursor, Read};
 
 #[derive(Debug, Clone, PartialEq)]

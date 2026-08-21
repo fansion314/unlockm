@@ -706,7 +706,7 @@ fn decrypt_qmc_v2(
     keys: &KeySources,
     expected_extension: Option<&str>,
 ) -> Result<String> {
-    use crate::crypto::qmc::{footer, QmcV2Cipher};
+    use crate::crypto::qmc::{QmcV2Cipher, footer};
     let mut f = File::open(input).map_err(|source| AppError::Io {
         path: input.to_path_buf(),
         source,
@@ -1002,9 +1002,11 @@ mod tests {
             PreparedClassification::Encrypted(prepared) => prepared,
             _ => panic!("TM header must classify as encrypted"),
         };
-        assert!(invalid
-            .probe_extension(None, &KeySources::default())
-            .is_err());
+        assert!(
+            invalid
+                .probe_extension(None, &KeySources::default())
+                .is_err()
+        );
 
         let valid = directory.path().join("valid.tm6");
         let mut bytes = b"QQMU\0\0\0\0M4A ".to_vec();
@@ -1027,7 +1029,7 @@ mod tests {
     }
     #[test]
     fn qmc_v2_pc_footer_fixture_trims_and_ekey_paths_are_bounded() {
-        use crate::crypto::qmc::{ekey, footer, QmcV2Cipher};
+        use crate::crypto::qmc::{QmcV2Cipher, ekey, footer};
         use sha2::{Digest, Sha256};
         let dir = tempfile::tempdir().unwrap();
         // MIT/Apache-2.0 upstream qmc footer fixture, stored as base64 so this
@@ -1084,7 +1086,7 @@ mod tests {
             let output = std::fs::read(output).unwrap();
             assert_eq!(output, plain, "buffer={size}");
             assert_eq!(
-                format!("{:x}", Sha256::digest(&output)),
+                hex::encode(Sha256::digest(&output)),
                 "ead056c44472778892f0ff35b7f76e2ca47e9db1afd4885ba30ebe6be4146ac5"
             );
         }
@@ -1125,15 +1127,17 @@ mod tests {
             .truncate(true)
             .open(dir.path().join("missing-output"))
             .unwrap();
-        assert!(decrypt_to(
-            Kind::QmcV2,
-            &override_input,
-            &mut missing,
-            7,
-            None,
-            &KeySources::default()
-        )
-        .is_err());
+        assert!(
+            decrypt_to(
+                Kind::QmcV2,
+                &override_input,
+                &mut missing,
+                7,
+                None,
+                &KeySources::default()
+            )
+            .is_err()
+        );
         let mut invalid = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -1141,15 +1145,17 @@ mod tests {
             .truncate(true)
             .open(dir.path().join("invalid-output"))
             .unwrap();
-        assert!(decrypt_to(
-            Kind::QmcV2,
-            &override_input,
-            &mut invalid,
-            7,
-            Some("invalid"),
-            &KeySources::default()
-        )
-        .is_err());
+        assert!(
+            decrypt_to(
+                Kind::QmcV2,
+                &override_input,
+                &mut invalid,
+                7,
+                Some("invalid"),
+                &KeySources::default()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1212,7 +1218,9 @@ mod tests {
         // MIT/Apache-2.0 upstream `ncm_test1.bin` (1056 B), retained as text;
         // it intentionally contains only a 15-byte audio fragment, so it is a
         // parser vector rather than a false claim of a probeable media fixture.
-        let input = decode_base64("Q1RFTkZEQU0BaZAAAAAsztXraer7FFUNRb9h3Rcdk3FHHuHd2vTV6E8cugAgwwLp/imS4YFFbxjHLRHyvFu83CIz+Wi0sCg4P2NsiGY1+eexcA7uVay47YtIFyU65l61gHiKzdzh7z0w7JwqxsdRrj0RtWSIntZ3ZvYrUp76+WP23icQRYKsLSCElUwPeq6LkW0QLmMc6sr5FJfYs+hWAwAAUlVQQwgGGksnDA1EF0MODAcKBRpKWS9VVyU2UDRXOhs7UDklNw4BOUhbTAUJBytVIgBIMTJMFwcNJBo5ESZaFSkkUAIHIFYtM1oMECkmIihMGg0LBigNLBsJLgsrKAITDy8sDiUbTCtSMzYJNy0LJScsDA0CUTVaGjUtLztUKg1MKxYbDCYhC1IlUjZbUVBWAQoZFFtXMgcGUCVVVFMwLDJSFQBQNzkoDhUPNkgRJDNWByIgKRQoBhYBVEgLFyAlNgIBFgcnFgw3ICokISJQVg40UjcUKRAyIDYtUiECCTsLARcAMzYNASErF0w5AjNRAiAHN0xaJTkJUSVQVEwZMjcIBjJVG1MLC0wIFjNUJxECGjAoVyVQOy4oNFE7NhFTElYJISssFC0kWgJTFiEpFgJTAioxLTFWOxdRUg9WUFYAF1cvCBpSJRItSAUCNw82MAUUWjdaUFUWCVM7GyQaGiFQBjcuVwk5FxMmMQRSUFUQU1JXAgQCLwFaAiovGUwMVQBQLSkGFhEgDQFTIjIbNAAKBgIVDyVaGiIRDiEyMSI5VloJFjUWMCkPMCcsVVISSBYPDDYMJScoNQoaBgkWORsIECcSLCxbSAFIM0gOG1QbAjYlIEgxCwYNFREXASQgJzEwIg8iCBcPEwwMGhISUUw7Uzs3ORYlBVQQMg1IDFBbIAsZIhkNCygsCwU7UQlUCgYPVwhRUCQpFlczNhUEUFsvUVYSCS8nMFErN1ckNVsMDg0NUyolBjMiKVEkCFE6Bg4WMTYrEDQwCAovGTJaBDlSNhomFA4LKkw5VhoBLxQzM1YWJSkzDgstGhEpCBUCK0wBDAcPFUw2NglME1MRERICDxFWK1shKQtRCQI7EQIkFhIECjcLIloLAgoCNjYqKRoUFBMbLBExKkwoESsbMFE1EVMNCQ85DyUXAlsaOSZbUTsuBC4hNgQ7EVYKLi0aJyEQB1MRNwcvUVcrJFcBUzVSDy8tSFJWKwAXGjkAEgkCBwJSLCBMOUxIUA0PFUwAKw83SBkXMjUxKAsNLTIQMlYzKDsrVRIEB1AkAAgBECYwLDQQIQ0lAi5TESsZNjEuWlIzNSAUUzAEBQg0EwJUIgVaASATFDkqJRs3SFdTKiI6ADRTJBJGV2xHAQwAAAAFAAAAaW1nIzFJTUFHRSMyLmTDX6yvG3QMVRTuwFBF");
+        let input = decode_base64(
+            "Q1RFTkZEQU0BaZAAAAAsztXraer7FFUNRb9h3Rcdk3FHHuHd2vTV6E8cugAgwwLp/imS4YFFbxjHLRHyvFu83CIz+Wi0sCg4P2NsiGY1+eexcA7uVay47YtIFyU65l61gHiKzdzh7z0w7JwqxsdRrj0RtWSIntZ3ZvYrUp76+WP23icQRYKsLSCElUwPeq6LkW0QLmMc6sr5FJfYs+hWAwAAUlVQQwgGGksnDA1EF0MODAcKBRpKWS9VVyU2UDRXOhs7UDklNw4BOUhbTAUJBytVIgBIMTJMFwcNJBo5ESZaFSkkUAIHIFYtM1oMECkmIihMGg0LBigNLBsJLgsrKAITDy8sDiUbTCtSMzYJNy0LJScsDA0CUTVaGjUtLztUKg1MKxYbDCYhC1IlUjZbUVBWAQoZFFtXMgcGUCVVVFMwLDJSFQBQNzkoDhUPNkgRJDNWByIgKRQoBhYBVEgLFyAlNgIBFgcnFgw3ICokISJQVg40UjcUKRAyIDYtUiECCTsLARcAMzYNASErF0w5AjNRAiAHN0xaJTkJUSVQVEwZMjcIBjJVG1MLC0wIFjNUJxECGjAoVyVQOy4oNFE7NhFTElYJISssFC0kWgJTFiEpFgJTAioxLTFWOxdRUg9WUFYAF1cvCBpSJRItSAUCNw82MAUUWjdaUFUWCVM7GyQaGiFQBjcuVwk5FxMmMQRSUFUQU1JXAgQCLwFaAiovGUwMVQBQLSkGFhEgDQFTIjIbNAAKBgIVDyVaGiIRDiEyMSI5VloJFjUWMCkPMCcsVVISSBYPDDYMJScoNQoaBgkWORsIECcSLCxbSAFIM0gOG1QbAjYlIEgxCwYNFREXASQgJzEwIg8iCBcPEwwMGhISUUw7Uzs3ORYlBVQQMg1IDFBbIAsZIhkNCygsCwU7UQlUCgYPVwhRUCQpFlczNhUEUFsvUVYSCS8nMFErN1ckNVsMDg0NUyolBjMiKVEkCFE6Bg4WMTYrEDQwCAovGTJaBDlSNhomFA4LKkw5VhoBLxQzM1YWJSkzDgstGhEpCBUCK0wBDAcPFUw2NglME1MRERICDxFWK1shKQtRCQI7EQIkFhIECjcLIloLAgoCNjYqKRoUFBMbLBExKkwoESsbMFE1EVMNCQ85DyUXAlsaOSZbUTsuBC4hNgQ7EVYKLi0aJyEQB1MRNwcvUVcrJFcBUzVSDy8tSFJWKwAXGjkAEgkCBwJSLCBMOUxIUA0PFUwAKw83SBkXMjUxKAsNLTIQMlYzKDsrVRIEB1AkAAgBECYwLDQQIQ0lAi5TESsZNjEuWlIzNSAUUzAEBQg0EwJUIgVaASATFDkqJRs3SFdTKiI6ADRTJBJGV2xHAQwAAAAFAAAAaW1nIzFJTUFHRSMyLmTDX6yvG3QMVRTuwFBF",
+        );
         let ncm = crate::crypto::ncm::header::NcmFile::new(&input).unwrap();
         assert_eq!(input.len(), 1056);
         assert_eq!(ncm.audio_data_offset, 1041);
@@ -1274,19 +1282,23 @@ mod tests {
             .truncate(true)
             .open(dir.path().join("missing"))
             .unwrap();
-        assert!(decrypt_to(
-            Kind::Kgm,
-            &source,
-            &mut missing,
-            7,
-            None,
-            &KeySources::default()
-        )
-        .is_err());
+        assert!(
+            decrypt_to(
+                Kind::Kgm,
+                &source,
+                &mut missing,
+                7,
+                None,
+                &KeySources::default()
+            )
+            .is_err()
+        );
     }
 
     fn pc_footer_fixture() -> Vec<u8> {
-        let mut fixture = decode_base64("W2R1bW15X2RhdGFdTlVaNmIwbGFkMmJmb0tJT2hNbG5tdER0dGdXZ28ycWVBbVVJY1Q3ckFoNEVtWk9mT1B5bnZyK3grcmlNUHRRVGpPZDd4eU9iTUozTDNiYzd0ZXZlbmtoUHBWUlpRMG1ORVBLTWpLZnhMTVJCdkRrOTFzWWt0OTA4cGpIV1lFOHJWbStzbVYvNlp6SFJTR3dHQ0FIMS9JT0IyU25KNkdRVk1oWjJLRUdRbFBKUnJ6blpaVjFYRHZJSjU0c050OXd2UWllUVJ6amVaYjh6Z2hmWVRQbU9UYVExWk5FTFY0TThsUGVGV29lNWp2VUl5YWtHYjdHZ0ltMEpHR0V4REpzdDVWVTMrRE1ITzhxMzVJdFZJQkJyKy9JRjlhSTdLQ0taRnk1T3V5cVlhejZ3Ti9uZHpiTDU1R2xYODVkd1lMNnBpQkgwNElaeGozWnpDcW5peXNzUjQzRzhWR2QyRHh3NFp5THBuZ2pQcnAvVThvanp5WGU1a09BZjFlZ1BzaXo2bU8rVzBBdGlkKzZqcFp5YjZmUDRRZ2RGc2tjcFZIYWFXMTc3Ry9WWWdkMzRGT2tVb0pxMG5NM1ArbTJ3V3AxWURrZElyc05aTmdOa1VNdUZ5N1lucGplUmQ4S29rRWpRODQyaFNkZXgxbGdKTDkyZCtwa1Q4RGEzajFHdlkwbkhFNjBmT0xpZVg4SU9oYk1KZWVxa3AybmpmaGZDS1FFZk5ELzZJeEpSMkFmWGJSajB5bndtcWFSUGQ3d2g2MEtZNUhHanFucDRqWFZSS0hWUGxLcDVCL3UyNEwrTER6YUNTTEJ4QVhzYjZKWlN2bkVvMFAyMDJ6ckZGVGVtL0VEdFNuNytqdjdkUnBPZkxTdjgrTkdBZ1JyVFpCMUlNQlhjWVBhUnAwZzgvajFmcXlEL001aGNRY3ZwV0lXcldBeW7AAgAA");
+        let mut fixture = decode_base64(
+            "W2R1bW15X2RhdGFdTlVaNmIwbGFkMmJmb0tJT2hNbG5tdER0dGdXZ28ycWVBbVVJY1Q3ckFoNEVtWk9mT1B5bnZyK3grcmlNUHRRVGpPZDd4eU9iTUozTDNiYzd0ZXZlbmtoUHBWUlpRMG1ORVBLTWpLZnhMTVJCdkRrOTFzWWt0OTA4cGpIV1lFOHJWbStzbVYvNlp6SFJTR3dHQ0FIMS9JT0IyU25KNkdRVk1oWjJLRUdRbFBKUnJ6blpaVjFYRHZJSjU0c050OXd2UWllUVJ6amVaYjh6Z2hmWVRQbU9UYVExWk5FTFY0TThsUGVGV29lNWp2VUl5YWtHYjdHZ0ltMEpHR0V4REpzdDVWVTMrRE1ITzhxMzVJdFZJQkJyKy9JRjlhSTdLQ0taRnk1T3V5cVlhejZ3Ti9uZHpiTDU1R2xYODVkd1lMNnBpQkgwNElaeGozWnpDcW5peXNzUjQzRzhWR2QyRHh3NFp5THBuZ2pQcnAvVThvanp5WGU1a09BZjFlZ1BzaXo2bU8rVzBBdGlkKzZqcFp5YjZmUDRRZ2RGc2tjcFZIYWFXMTc3Ry9WWWdkMzRGT2tVb0pxMG5NM1ArbTJ3V3AxWURrZElyc05aTmdOa1VNdUZ5N1lucGplUmQ4S29rRWpRODQyaFNkZXgxbGdKTDkyZCtwa1Q4RGEzajFHdlkwbkhFNjBmT0xpZVg4SU9oYk1KZWVxa3AybmpmaGZDS1FFZk5ELzZJeEpSMkFmWGJSajB5bndtcWFSUGQ3d2g2MEtZNUhHanFucDRqWFZSS0hWUGxLcDVCL3UyNEwrTER6YUNTTEJ4QVhzYjZKWlN2bkVvMFAyMDJ6ckZGVGVtL0VEdFNuNytqdjdkUnBPZkxTdjgrTkdBZ1JyVFpCMUlNQlhjWVBhUnAwZzgvajFmcXlEL001aGNRY3ZwV0lXcldBeW7AAgAA",
+        );
         // `ekey_pc_enc_v1.bin` contains a 12-byte detector prefix before the
         // actual footer.  These two bytes preserve that upstream fixture's
         // literal payload after text transport.
@@ -1308,7 +1320,7 @@ mod tests {
         let input = value.as_bytes();
         assert_eq!(input.len() % 4, 0);
         let mut out = Vec::with_capacity(input.len() / 4 * 3);
-        for chunk in input.chunks_exact(4) {
+        for chunk in input.as_chunks::<4>().0 {
             let a = sextet(chunk[0]);
             let b = sextet(chunk[1]);
             let c = if chunk[2] == b'=' {

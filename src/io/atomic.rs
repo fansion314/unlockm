@@ -154,20 +154,20 @@ where
         None
     };
     if let Err(source) = rename(&temp, destination) {
-        if let Some(backup) = &backup {
-            if let Err(restore_error) = rename(backup, destination) {
-                // A second rename failure must not silently strand the only
-                // good bytes. Copying is a recoverable fallback for this rare
-                // error path; successful copy restores the destination before
-                // cleanup, while a failed copy reports the backup location.
-                if let Err(copy_error) = fs::copy(backup, destination) {
-                    return Err(AppError::Internal(format!(
-                        "publish rename failed ({source}); restore rename failed ({restore_error}); backup retained at {} after copy fallback failed ({copy_error})",
-                        backup.display()
-                    )));
-                }
-                let _ = fs::remove_file(backup);
+        if let Some(backup) = &backup
+            && let Err(restore_error) = rename(backup, destination)
+        {
+            // A second rename failure must not silently strand the only
+            // good bytes. Copying is a recoverable fallback for this rare
+            // error path; successful copy restores the destination before
+            // cleanup, while a failed copy reports the backup location.
+            if let Err(copy_error) = fs::copy(backup, destination) {
+                return Err(AppError::Internal(format!(
+                    "publish rename failed ({source}); restore rename failed ({restore_error}); backup retained at {} after copy fallback failed ({copy_error})",
+                    backup.display()
+                )));
             }
+            let _ = fs::remove_file(backup);
         }
         let _ = fs::remove_file(&temp);
         return Err(AppError::Io {

@@ -1,8 +1,8 @@
 #[path = "support/ncm_fixture.rs"]
 mod ncm_fixture;
 
-use base64::{engine::general_purpose::STANDARD, Engine};
-use ncm_fixture::{fixture_mp3, mpeg_payload, ncm_with_audio, VALID_PNG};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use ncm_fixture::{VALID_PNG, fixture_mp3, mpeg_payload, ncm_with_audio};
 use std::{fs, path::Path, process::Command};
 
 fn run(input: &Path, output: &Path) -> std::process::Output {

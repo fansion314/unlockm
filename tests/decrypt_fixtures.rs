@@ -58,15 +58,17 @@ fn registered_uppercase_and_multidot_names_remain_fail_closed_when_corrupt() {
             .truncate(true)
             .open(output)
             .unwrap();
-        assert!(unlockm::formats::decrypt_to(
-            kind,
-            &path,
-            &mut sink,
-            7,
-            None,
-            &unlockm::keys::KeySources::default()
-        )
-        .is_err());
+        assert!(
+            unlockm::formats::decrypt_to(
+                kind,
+                &path,
+                &mut sink,
+                7,
+                None,
+                &unlockm::keys::KeySources::default()
+            )
+            .is_err()
+        );
     }
     assert_eq!(
         unlockm::formats::candidate(Path::new("Album.Track.VPR.FLAC")),

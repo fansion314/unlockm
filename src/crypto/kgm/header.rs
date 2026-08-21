@@ -1,5 +1,5 @@
 use crate::crypto::kgm::KugouError;
-use byteorder::{ReadBytesExt, LE};
+use byteorder::{LE, ReadBytesExt};
 use std::io::{BufReader, Read};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

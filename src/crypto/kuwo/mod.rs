@@ -5,7 +5,7 @@ mod kwm_v1;
 
 use crate::crypto::kuwo::kwm_v1::CipherV1;
 use crate::crypto::qmc::{QmcError, QmcV2Cipher};
-use byteorder::{ReadBytesExt, LE};
+use byteorder::{LE, ReadBytesExt};
 use std::fmt;
 use std::io::{Cursor, Read};
 use thiserror::Error;

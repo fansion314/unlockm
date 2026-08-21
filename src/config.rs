@@ -152,32 +152,37 @@ mod tests {
         let temp = tempdir().unwrap();
         let input = temp.path().join("track.ncm");
         std::fs::write(&input, b"x").unwrap();
-        assert!(RunConfig::new(
-            input, None, false, false, false, true, false, 1, 1, 1, None, None, None, None, None
-        )
-        .is_err());
+        assert!(
+            RunConfig::new(
+                input, None, false, false, false, true, false, 1, 1, 1, None, None, None, None,
+                None
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn zero_limits_are_rejected() {
         let temp = tempdir().unwrap();
-        assert!(RunConfig::new(
-            temp.path().to_path_buf(),
-            None,
-            false,
-            false,
-            false,
-            false,
-            false,
-            0,
-            1,
-            1,
-            None,
-            None,
-            None,
-            None,
-            None
-        )
-        .is_err());
+        assert!(
+            RunConfig::new(
+                temp.path().to_path_buf(),
+                None,
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+                1,
+                1,
+                None,
+                None,
+                None,
+                None,
+                None
+            )
+            .is_err()
+        );
     }
 }

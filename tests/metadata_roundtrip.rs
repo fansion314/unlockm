@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use lofty::{file::AudioFile, properties::FileProperties};
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};

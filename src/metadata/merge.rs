@@ -57,7 +57,7 @@ pub fn verified_search(
             if normalize(&c.title) != title || !normalize(&c.artists).contains(&artists) {
                 return None;
             }
-            let ok = duration_ms.map_or(true, |d| c.duration_ms.abs_diff(d) <= 2000);
+            let ok = duration_ms.is_none_or(|d| c.duration_ms.abs_diff(d) <= 2000);
             ok.then_some((
                 c,
                 100 - duration_ms.map_or(0, |d| c.duration_ms.abs_diff(d) / 100) as i32,
@@ -67,7 +67,7 @@ pub fn verified_search(
     ranked.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
     match ranked.as_slice() {
         [(c, score), ..]
-            if *score >= 80 && ranked.get(1).map_or(true, |(_, next)| score - next >= 10) =>
+            if *score >= 80 && ranked.get(1).is_none_or(|(_, next)| score - next >= 10) =>
         {
             Some(c.metadata.clone())
         }

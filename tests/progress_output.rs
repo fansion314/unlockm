@@ -131,9 +131,11 @@ fn json_mode_has_no_live_controls_and_ends_with_parseable_summary() {
     assert_eq!(summary["event"], "summary");
     assert_eq!(summary["copied"], 1);
     assert_eq!(summary["exit_code"], 0);
-    assert!(lines
-        .iter()
-        .all(|line| serde_json::from_str::<serde_json::Value>(line).is_ok()));
+    assert!(
+        lines
+            .iter()
+            .all(|line| serde_json::from_str::<serde_json::Value>(line).is_ok())
+    );
 }
 
 #[test]
@@ -147,8 +149,10 @@ fn json_rejects_forced_progress_contract() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("--json-logs conflicts with --progress always"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("--json-logs conflicts with --progress always")
+    );
 }
 
 #[test]

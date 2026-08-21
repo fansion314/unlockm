@@ -1,4 +1,4 @@
-use super::{decrypt_to, decrypt_to_expected, probe_extension, Kind};
+use super::{Kind, decrypt_to, decrypt_to_expected, probe_extension};
 use crate::{error::Result, keys::KeySources};
 use std::{
     fs::File,

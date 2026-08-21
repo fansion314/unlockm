@@ -5,7 +5,7 @@ use crate::{
 };
 use clap::Parser;
 use std::{path::PathBuf, sync::OnceLock};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 fn default_jobs() -> usize {
     std::thread::available_parallelism()

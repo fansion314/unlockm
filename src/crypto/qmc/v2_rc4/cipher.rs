@@ -44,7 +44,7 @@ impl Qmc2Rc4 {
             data = b;
             offset += n;
         }
-        if offset % SEGMENT != 0 {
+        if !offset.is_multiple_of(SEGMENT) {
             let n = (SEGMENT - offset % SEGMENT).min(data.len());
             let (a, b) = data.split_at_mut(n);
             self.other(a, offset);

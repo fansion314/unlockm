@@ -2,8 +2,8 @@
 //! `5dad838c33c3e4aab198d995160d3fbb9968470f`, MIT OR Apache-2.0.
 
 use base64::DecodeError;
-use cipher::block_padding::UnpadError;
 use cipher::InvalidLength;
+use cipher::block_padding::Error as PaddingError;
 use thiserror::Error;
 
 pub mod android;
@@ -30,7 +30,7 @@ pub enum XmlyError {
     ParseAudioHeaderError,
 
     #[error("Decryption stage 1 failed (padding)")]
-    DecryptStage1Error(UnpadError),
+    DecryptStage1Error(PaddingError),
 
     #[error("Decryption stage 1 failed (b64 decode)")]
     DecryptStage1B64Error(DecodeError),
@@ -39,7 +39,7 @@ pub enum XmlyError {
     InitStage2Error(InvalidLength),
 
     #[error("Decryption stage 2 failed (padding)")]
-    DecryptStage2Error(UnpadError),
+    DecryptStage2Error(PaddingError),
 
     #[error("Decryption stage 2 failed (b64 decode)")]
     DecryptStage2B64Error(DecodeError),

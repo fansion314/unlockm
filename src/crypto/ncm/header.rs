@@ -1,9 +1,9 @@
 //! Attribution: `umc_ncm::header` from the pinned upstream revision,
 //! MIT OR Apache-2.0.
 
-use super::{content_key, metadata, NcmError};
+use super::{NcmError, content_key, metadata};
 use crate::crypto::common::read_le_u32;
-use crc::{Crc, CRC_32_ISO_HDLC};
+use crc::{CRC_32_ISO_HDLC, Crc};
 use std::{cmp::max, io::Read};
 
 const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);

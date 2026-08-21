@@ -1,5 +1,5 @@
 use crate::crypto::qmc::footer::{Data, FooterParseError, Metadata, MetadataParser};
-use byteorder::{ByteOrder, BE};
+use byteorder::{BE, ByteOrder};
 use itertools::Itertools;
 
 #[derive(Debug, Clone, PartialEq)]

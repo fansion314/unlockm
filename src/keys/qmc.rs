@@ -1,6 +1,6 @@
 use aes::{
-    cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit},
     Aes128,
+    cipher::{Block, BlockCipherEncrypt, KeyInit},
 };
 use md5::{Digest, Md5};
 use std::{
@@ -111,7 +111,7 @@ fn decrypt_payload(
     let mut feedback = iv;
     for chunk in result.chunks_mut(16) {
         let ciphertext = chunk.to_vec();
-        let mut stream = GenericArray::clone_from_slice(&feedback);
+        let mut stream = Block::<Aes128>::from(feedback);
         cipher.encrypt_block(&mut stream);
         for (byte, key_byte) in chunk.iter_mut().zip(stream.iter()) {
             *byte ^= *key_byte;
@@ -235,10 +235,7 @@ fn macos_v10_store(
         .get(..name_len as usize)
         .ok_or("macOS v10 UDID is too short")?;
     let digest = Md5::digest(format!("{udid}{:04x}", id + 0xa546));
-    Ok((
-        directory.join(name),
-        format!("{:x}", digest)[..16].to_owned(),
-    ))
+    Ok((directory.join(name), hex::encode(digest)[..16].to_owned()))
 }
 
 #[cfg(target_os = "macos")]

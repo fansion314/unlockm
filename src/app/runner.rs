@@ -1,10 +1,10 @@
-use super::{job, JobOutcome, JobReport, JobTimings, Summary};
+use super::{JobOutcome, JobReport, JobTimings, Summary, job};
 use crate::{
     config::RunConfig,
     error::Result,
     keys::KeySources,
     metadata::provider::qq::MetadataClient,
-    pathing::{collision_key, Reservations},
+    pathing::{Reservations, collision_key},
 };
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};

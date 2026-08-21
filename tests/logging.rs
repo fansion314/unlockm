@@ -43,10 +43,12 @@ fn debug_level_is_accepted() {
     let d = tempdir().unwrap();
     let p = d.path().join("x.lrc");
     fs::write(&p, b"x").unwrap();
-    assert!(bin()
-        .args(["--log-level", "debug"])
-        .arg(&p)
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        bin()
+            .args(["--log-level", "debug"])
+            .arg(&p)
+            .status()
+            .unwrap()
+            .success()
+    );
 }
