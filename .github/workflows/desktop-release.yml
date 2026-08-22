@@ -141,11 +141,52 @@ jobs:
               throw "preview artifact must be NotSigned: $($binary.FullName)"
             }
           }
-      - name: Inspect Windows NSIS payload for engine and bundled notices
+      - name: Inspect Windows NSIS payload GUI subsystem, engine, and bundled notices
         if: matrix.id == 'windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          function Get-PeSubsystem([string] $binaryPath) {
+            $stream = [IO.File]::Open(
+              $binaryPath,
+              [IO.FileMode]::Open,
+              [IO.FileAccess]::Read,
+              [IO.FileShare]::Read
+            )
+            $reader = [IO.BinaryReader]::new($stream)
+            try {
+              if ($stream.Length -lt 64) { throw "PE file is too small: $binaryPath" }
+              if ($reader.ReadUInt16() -ne 0x5a4d) {
+                throw "DOS MZ header is missing: $binaryPath"
+              }
+              $stream.Position = 0x3c
+              $peOffset = $reader.ReadUInt32()
+              if ($peOffset + 24 -gt $stream.Length) {
+                throw "PE signature or COFF header is truncated: $binaryPath"
+              }
+              $stream.Position = $peOffset
+              if ($reader.ReadUInt32() -ne 0x00004550) {
+                throw "PE signature is missing: $binaryPath"
+              }
+              $stream.Position = $peOffset + 20
+              $optionalHeaderSize = $reader.ReadUInt16()
+              if ($optionalHeaderSize -lt 70) {
+                throw "PE optional header is too small: $binaryPath"
+              }
+              if ($peOffset + 24 + $optionalHeaderSize -gt $stream.Length) {
+                throw "PE optional header is truncated: $binaryPath"
+              }
+              $stream.Position = $peOffset + 24
+              $magic = $reader.ReadUInt16()
+              if ($magic -ne 0x10b -and $magic -ne 0x20b) {
+                throw "unsupported PE optional-header magic $magic in $binaryPath"
+              }
+              $stream.Position = $peOffset + 24 + 68
+              return $reader.ReadUInt16()
+            } finally {
+              $reader.Dispose()
+            }
+          }
           $installers = @(Get-ChildItem "${{ matrix.bundle_dir }}" -Filter "*-setup.exe")
           if ($installers.Count -ne 1) { throw "expected exactly one NSIS setup executable" }
           & 7z l $installers[0].FullName
@@ -155,8 +196,15 @@ jobs:
           & 7z x $installers[0].FullName "-o$payload" -y | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "7z could not unpack the NSIS installer" }
           $files = @(Get-ChildItem $payload -Recurse -File)
-          if (@($files | Where-Object Name -ieq "unlockm-desktop.exe").Count -ne 1) {
+          $payloadApplications = @($files | Where-Object Name -ieq "unlockm-desktop.exe")
+          if ($payloadApplications.Count -ne 1) {
             throw "NSIS payload must contain exactly one unlockm-desktop.exe"
+          }
+          # IMAGE_SUBSYSTEM_WINDOWS_GUI = 2. A console subsystem (3) creates
+          # the black command window reported when the installed app starts.
+          $subsystem = Get-PeSubsystem $payloadApplications[0].FullName
+          if ($subsystem -ne 2) {
+            throw "packaged unlockm-desktop.exe must use IMAGE_SUBSYSTEM_WINDOWS_GUI (2), got $subsystem"
           }
           foreach ($notice in "SIL-OFL-1.1.txt", "THIRD_PARTY_NOTICES.md") {
             if (@($files | Where-Object Name -ieq $notice).Count -ne 1) {

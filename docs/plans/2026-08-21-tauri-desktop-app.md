@@ -2,7 +2,7 @@
 
 ## Status
 
-Done
+In Progress
 
 ## Objective
 
@@ -10,7 +10,7 @@ Build a polished Tauri v2 desktop application for macOS and Windows that links t
 
 The redesigned shell has a fixed localized product bar, an explicit language menu, and a light/dark toggle whose fresh-install default is light. The home view puts the drop target and action/options column in an approximately golden-ratio composition, then places a full-width one-row-per-run conversion history below it. Opening a run transitions to a compact detail view with a server-backed searchable, filterable, sortable, genuinely paginated flat song list. Each song shows artwork, title, artist, album, converted file type and size, provides one-at-a-time in-app playback with play/pause and seeking, and offers narrow actions to reveal the file or open it in the system player.
 
-The v0.2.0 release is multilingual (`zh-CN`, `en-US`, and `ja-JP`), visually modern and restrained in both themes, motion-rich without sacrificing accessibility, and distributed by GitHub Actions for macOS and Windows.
+The v0.2.1 release is multilingual (`zh-CN`, `en-US`, and `ja-JP`), visually modern and restrained in both themes, motion-rich without sacrificing accessibility, and distributed by GitHub Actions for macOS and Windows. Its installed Windows application is linked as a GUI subsystem executable so launching UnlockM does not create a console window.
 
 The desktop application must not start the `unlockm` CLI or any other conversion sidecar. All decryption, path planning, metadata handling, bounded concurrency, and atomic publication remain in the in-process Rust core.
 
@@ -43,6 +43,7 @@ The desktop application must not start the `unlockm` CLI or any other conversion
 - Add component, state/reducer, Rust unit/integration, persistence/restart, and macOS-native build/runtime validation for this redesign. Preserve the existing Windows product code, CI, and release definitions, but do not require new Windows execution evidence in this implementation cycle.
 - Add GitHub Actions checks and tagged release packaging for a universal macOS DMG and a Windows x86_64 NSIS `.exe` installer.
 - Publish those tag artifacts automatically as clearly labeled unsigned preview prereleases: macOS uses Tauri ad-hoc signing only, Windows uses no Authenticode certificate, all artifacts include SHA-256 files, and documentation gives least-privilege first-open guidance.
+- Link Windows release builds of `unlockm-desktop.exe` with `IMAGE_SUBSYSTEM_WINDOWS_GUI` while retaining the console subsystem for debug/development builds; inspect the final NSIS payload's PE header before publishing so the packaged application cannot regress to a console executable.
 - Update `ARCHITECTURE.md`, user documentation, license notices, and build instructions when implementation changes the repository boundary.
 - Change the canonical bundle/application identifier from the erroneous `world.fansion.unlockm` to `world.fansionia.unlockm`, and perform a one-time SQLite online backup from the legacy app-data directory when the new history database does not yet exist.
 - Rebalance the compact detail summary so long input names/paths and localized completion timestamps are fully readable at the 1080×760 native window instead of being clipped around oversized metric gaps.
@@ -458,6 +459,20 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
   - Full Rust/frontend build and release gates listed below.
   - Remote branch/tag identity, GitHub Actions conclusion, prerelease state/title, exact asset list, and checksum metadata inspection.
 
+### M12. Windows console suppression and v0.2.1 release
+
+- Goal: stop the installed Windows application from opening a command-line console window and publish the verified correction as `v0.2.1` through the existing unsigned-preview channel.
+- Dependencies: completed M11 release, the Rust binary entrypoint, the Windows NSIS payload inspection step, and the configured GitHub release workflow.
+- Acceptance criteria:
+  - `desktop/src-tauri/src/main.rs` applies `windows_subsystem = "windows"` only for non-debug Windows builds; debug builds retain their console for diagnostics and non-Windows targets are unaffected.
+  - A repository regression test guards the release-only crate attribute, and the Windows release workflow parses the packaged `unlockm-desktop.exe` PE optional header and requires subsystem value `2` (`IMAGE_SUBSYSTEM_WINDOWS_GUI`) before upload.
+  - Root Cargo, desktop Cargo, frontend package, Tauri configuration, and workspace lockfile consistently report `0.2.1`; annotated tag `v0.2.1` resolves to the reviewed release commit.
+  - GitHub macOS/Windows package jobs and publish job succeed; the v0.2.1 prerelease exposes the exact two unsigned installers and SHA-256 manifests, with the Windows payload GUI-subsystem assertion passing.
+- Validation:
+  - Focused security-policy test for release-only Windows GUI subsystem configuration.
+  - Full locked Rust/frontend gates and local macOS no-bundle/universal packaging regression as practical.
+  - Real GitHub Windows x86_64 release job as authoritative PE/NSIS evidence, plus remote tag/branch/release/asset/checksum inspection.
+
 ## Task Breakdown
 
 - [x] T1.1 Add the root Cargo workspace/member/default-member configuration and scaffold `desktop/src-tauri/Cargo.toml` so the desktop crate links `unlockm` by path; verify the existing default CLI build still selects only the root package.
@@ -531,6 +546,12 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - [x] T11.3 Bump all authoritative package/application versions and workspace lock entries from `0.1.0` to `0.2.0`; verify the release tag guard accepts only `v0.2.0`.
 - [x] T11.4 Run full Rust/frontend validation, review the M11 diff against this ExecPlan, fix all material findings, and return the plan to `In Progress` for publication after re-review passes; `Done` still requires T11.5 remote evidence.
 - [x] T11.5 Create the validated conventional commit and annotated `v0.2.0` tag, push `main` and the tag to GitHub, then record the completed Actions prerelease URL, conclusion, assets, and remote commit/tag identity.
+
+- [x] T12.1 Add the release-only Windows GUI subsystem crate attribute to `desktop/src-tauri/src/main.rs` and a focused source-policy regression test.
+- [x] T12.2 Extend `.github/workflows/desktop-release.yml` to parse the final NSIS payload application PE header and reject any subsystem other than Windows GUI (`2`).
+- [x] T12.3 Bump every authoritative package/application version and both workspace lock entries from `0.2.0` to `0.2.1`; validate the tag/version guard.
+- [x] T12.4 Run the full local validation matrix, review M12 against this ExecPlan, fix all material findings, and re-review before publication.
+- [ ] T12.5 Create validated conventional commit(s) and annotated `v0.2.1`, push `main`/tag to GitHub, then record successful Actions, prerelease, exact assets, checksums, and remote identities before returning the plan to `Done`.
 
 ## Validation Strategy
 
@@ -708,9 +729,15 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - [x] 2026-08-22 first GitHub v0.2.0 run (`32564012836`, superseded): `main` and annotated tag `v0.2.0` were atomically pushed at `957a9d7`, but the macOS package job failed in `Run complete Rust workspace tests` with exit 101 before packaging; publish did not run. BrowserOS inspection and source audit traced the clean-checkout-only failure to three M10 regressions reading an unversioned sibling path under `../samples`, which exists locally but not in GitHub Actions.
 - [x] 2026-08-22 release-blocker fix and re-review: the NCM parser, metadata-off snapshot, and bounded history-repair regressions now synthesize inputs from the committed deterministic `tests/support/ncm_fixture.rs` plus the committed silent MP3 fixture. Exact nested-array parsing remains asserted separately, propagation expectations derive from parsed container evidence, and audio immutability remains asserted. No production path changed. `rg` finds no remaining sibling-sample dependency; formatter, strict locked workspace Clippy, and all 178 Rust tests across 18 suites pass. Re-review status: `Pass`; the failed tag/run must be replaced with an exact new tag at the fix commit before republishing.
 - [x] 2026-08-22 T11.5 publication complete. Commit `957a9d7` added Japanese/v0.2.0, commit `239c710` made the release regressions hermetic, and the failed unpublished tag was narrowly replaced. Remote `github/main` and peeled annotated `v0.2.0` both resolve to `239c7103753fe43c5d65d9dd13c4027f58b27679`. GitHub Actions run `32564666408` completed successfully in 19m31s: macOS universal and Windows x86_64 package jobs passed all locked Rust/frontend/security/license/build/signature/payload/checksum gates, then the publish job succeeded. The resulting prerelease is `UnlockM v0.2.0 — Unsigned Preview` at `https://github.com/fansion314/unlockm/releases/tag/v0.2.0` with exactly the four planned installer/checksum assets (plus GitHub's two automatic source archives). Remote installer checksums are macOS `a243eac1af2e776a6aafceb02303929994b66f268239c31a876799d57c724611` and Windows `55128300c11f4ce4f6c8c90b887fdb3cd6d17d0dd263ddd6aaa3d5aa8417f86a`. All M11 tasks and review/release findings are closed; status returned to `Done`.
+- [ ] 2026-08-22: Reopened the completed plan for M12 after the user reported that the installed Windows v0.2.0 app launches with a black console window. Inspection found `desktop/src-tauri/src/main.rs` contains only `unlockm_desktop::run()` and has no `windows_subsystem` crate attribute; Tauri window configuration does not change the PE executable subsystem. The worktree was clean at `620042c`, `github/main` matched it, and `v0.2.1` was unused locally/remotely. Source fix, PE payload assertion, 0.2.1 version bump, validation/review, commit/tag/push, and live release evidence remain in progress.
+- [x] 2026-08-22: Completed T12.1–T12.3 implementation. The binary entrypoint now requests the Windows GUI subsystem only for non-debug Windows builds; the security-policy suite guards that exact condition plus the release workflow assertion. The Windows NSIS payload step now opens the packaged `unlockm-desktop.exe`, validates its PE signature/optional-header form, reads the subsystem field at offset 68, and rejects any value other than `2`. Root/desktop Cargo, frontend package, Tauri config, and both workspace lock entries are `0.2.1`; the local version guard accepts only `v0.2.1`. Focused security-policy tests passed (3 tests), Cargo formatting passes after one formatting-only correction, and `desktop-release.yml` parses as YAML. The actual PE assertion remains intentionally pending the GitHub Windows release job under T12.5.
+- [x] 2026-08-22: M12 pre-review gates passed: Cargo formatting, strict locked workspace Clippy, and 179 Rust tests across 18 suites; frozen Vite+ install, 46-file format/lint/type check, 36 frontend tests across 12 suites, and production build. `rtk vp -C desktop exec tauri build --no-bundle` completed the macOS release host at v0.2.1, confirming the target-gated attribute does not affect non-Windows release linking. `git diff --check` is clean. Status moved to `In Review`; the GitHub Windows job remains the authoritative packaged PE subsystem check.
+- [x] 2026-08-22 M12 review-plan first pass (`Pass with Notes`, resolved): Minor - the workflow PE reader correctly located the subsystem for normal compiler output but did not validate the DOS `MZ` signature or COFF-declared optional-header size/bounds before reading offset 68. It now requires `MZ`, a complete PE/COFF header, optional-header size at least 70 bytes, and the full declared optional header within the file; the policy-test name now accurately describes configuration coverage. Focused formatting, strict desktop Clippy, 3 security-policy tests, YAML parsing, and diff checks pass.
+- [x] 2026-08-22 M12 re-review (`Pass`): no blocker, major, or meaningful minor findings remain. The target/debug conditions are exact, the packaged NSIS application is the verification target, PE offsets/signatures/declared bounds are validated before requiring subsystem `2`, versions are consistent, local full gates are credible, and the plan accurately leaves only commit/tag/push plus real GitHub Windows/package/release evidence under T12.5. Status returns to `In Progress` for publication.
 
 ## Discoveries
 
+- **2026-08-22 Windows launch discovery:** A Tauri window entry in `tauri.conf.json` does not suppress the operating-system console allocated for a Rust binary linked with the console subsystem. The release binary entrypoint must request `windows_subsystem = "windows"`; the final packaged PE header, not source text alone, is the authoritative release evidence.
 - **2026-08-22 clean-checkout release discovery:** Three otherwise-correct M10 regressions used a 24 MB real NCM sample from the checkout's unversioned sibling `../samples` repository. Local full gates therefore passed while GitHub's clean checkout failed at the complete Rust test step. Release-critical tests must use committed deterministic fixtures; real sibling samples remain manual/native QA evidence only.
 - The current library boundary is already strong enough to avoid a CLI subprocess, but the existing test-only report collector is not a product event API and cannot persist trustworthy per-item failures/warnings/artwork.
 - The content-probing tag reader already supplies the exact local metadata/artwork snapshot needed by history; adding a second TypeScript parser or remote artwork layer would duplicate logic and weaken privacy/correctness.
@@ -799,6 +826,7 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - **2026-08-22 — D39:** Keep the native standard menu structure and customize only About metadata. Credits are bilingual in one panel so they remain correct regardless of current webview locale.
 - **2026-08-22 — D40:** Ship Japanese as the third complete locale under `ja-JP`. Japanese platform locales select it on first launch, unsupported locales continue to fall back to English, and the persisted preference/bootstrap contract remains the authoritative explicit selection. Publish this increment as the existing checksum-backed unsigned-preview channel at `v0.2.0`.
 - **2026-08-22 — D41:** Release-blocking automated tests must be hermetic within this repository. Use the committed deterministic NCM/header/audio fixtures for parser/snapshot/history regressions and retain the external 24 MB Claire sample only as explicit native/manual QA evidence; never infer clean-checkout coverage from its local presence.
+- **2026-08-22 — D42:** Apply `windows_subsystem = "windows"` only when targeting Windows without debug assertions. This removes the installed/release console window while preserving debug console diagnostics. The release workflow must parse the shipped NSIS payload's PE optional header and require subsystem `2`, rather than treating compilation or a source grep as proof.
 
 ## Completion Evidence
 
@@ -813,6 +841,8 @@ This baseline evidence alone does not validate M6–M9. The current Progress ent
 M6–M10 and T5.6 are complete. The previous `world.fansion.unlockm` DMG remains historical redesign evidence only and is superseded for release purposes by the corrected M10 artifact below.
 
 M11 is complete. `ja-JP` has full semantic-key parity, first-launch detection, persistence, keyboard-accessible selection, and Rust/TypeScript bootstrap coverage; every authoritative package/application version is `0.2.0`. The reviewed release commit is `239c7103753fe43c5d65d9dd13c4027f58b27679`, and both `github/main` and peeled annotated tag `v0.2.0` resolved to it at publication.
+
+M12 is in progress for the release-only Windows GUI subsystem correction and v0.2.1 publication. The v0.2.0 artifacts remain historical evidence; no v0.2.1 success is claimed before the GitHub Windows job proves the packaged PE subsystem and the publish job exposes the final assets.
 
 ### v0.2.0 GitHub release evidence
 

@@ -79,6 +79,25 @@ fn desktop_host_never_spawns_unlockm_or_a_helper_process() {
     assert!(!capabilities.contains("opener:"));
 }
 
+#[test]
+fn windows_release_gui_subsystem_and_payload_check_are_configured() {
+    let main = workspace_file("src/main.rs");
+    let compact_main: String = main
+        .chars()
+        .filter(|value| !value.is_whitespace())
+        .collect();
+    assert!(compact_main.contains(
+        "#![cfg_attr(all(target_os=\"windows\",not(debug_assertions)),windows_subsystem=\"windows\")]"
+    ));
+
+    let release_workflow = workspace_file("../../.github/workflows/desktop-release.yml");
+    assert!(release_workflow.contains("Get-PeSubsystem"));
+    assert!(release_workflow.contains("DOS MZ header is missing"));
+    assert!(release_workflow.contains("$optionalHeaderSize -lt 70"));
+    assert!(release_workflow.contains("IMAGE_SUBSYSTEM_WINDOWS_GUI"));
+    assert!(release_workflow.contains("$subsystem -ne 2"));
+}
+
 fn rust_sources(directory: &Path) -> Vec<String> {
     let mut sources = Vec::new();
     for entry in fs::read_dir(directory).unwrap() {
