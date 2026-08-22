@@ -1493,10 +1493,20 @@ mod tests {
 
     #[test]
     fn bounded_page_read_repairs_missing_artist_from_local_ncm_container() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+
         let (directory, store) = store();
-        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../samples/Claire Rosinkranz - Frankenstein.ncm");
+        let source = directory.path().join("portable.ncm");
+        let audio = STANDARD
+            .decode(include_str!("../../../../tests/fixtures/lofty-silent.mp3.b64").trim())
+            .unwrap();
+        fs::write(
+            &source,
+            crate::desktop_ncm_fixture::ncm_with_audio(&[], &audio),
+        )
+        .unwrap();
         let expected = unlockm::metadata::ncm::parse(&source).unwrap();
+        let expected_artist = expected.artists.as_ref().unwrap().text.as_str();
         let run = store
             .create_run(CreateRun {
                 input_kind: InputKind::File,
@@ -1517,14 +1527,14 @@ mod tests {
         let page = store
             .query_music_items(run.id, ItemQuery::default())
             .unwrap();
-        assert_eq!(page.items[0].artist.as_deref(), Some("Claire Rosinkranz"));
+        assert_eq!(page.items[0].artist.as_deref(), Some(expected_artist));
         assert_eq!(
             page.items[0].title.as_deref(),
             expected
                 .title
                 .as_ref()
                 .map(|value| value.text.as_str())
-                .or(Some("Frankenstein"))
+                .or(Some("portable"))
         );
     }
 

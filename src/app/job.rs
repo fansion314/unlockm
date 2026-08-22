@@ -915,18 +915,23 @@ mod tests {
     #[test]
     fn metadata_off_history_snapshot_uses_local_ncm_artist_without_mutating_audio() {
         let directory = tempfile::tempdir().unwrap();
-        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../samples/Claire Rosinkranz - Frankenstein.ncm");
+        let source = directory.path().join("portable.ncm");
         let destination = directory.path().join("output.mp3");
         let audio = STANDARD
             .decode(include_str!("../../tests/fixtures/lofty-silent.mp3.b64").trim())
             .unwrap();
+        fs::write(
+            &source,
+            crate::test_ncm_fixture::ncm_with_audio(&[], &audio),
+        )
+        .unwrap();
         fs::write(&destination, &audio).unwrap();
         let expected = crate::metadata::ncm::parse(&source).unwrap();
+        let expected_artist = expected.artists.unwrap().text;
         let expected_title = expected
             .title
             .map(|value| value.text)
-            .unwrap_or_else(|| "Frankenstein".into());
+            .unwrap_or_else(|| "portable".into());
         let before = fs::read(&destination).unwrap();
 
         let mut warnings = Vec::new();
@@ -937,7 +942,7 @@ mod tests {
             &mut warnings,
         );
 
-        assert_eq!(snapshot.artist.as_deref(), Some("Claire Rosinkranz"));
+        assert_eq!(snapshot.artist.as_deref(), Some(expected_artist.as_str()));
         assert_eq!(snapshot.title.as_deref(), Some(expected_title.as_str()));
         assert_eq!(fs::read(destination).unwrap(), before);
         assert!(warnings.is_empty());

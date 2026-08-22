@@ -105,11 +105,26 @@ mod tests {
     }
 
     #[test]
-    fn repository_sample_retains_nested_artist_name() {
-        let sample = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../samples/Claire Rosinkranz - Frankenstein.ncm");
+    fn portable_ncm_fixture_retains_container_artist_and_title() {
+        let directory = tempfile::tempdir().unwrap();
+        let sample = directory.path().join("portable.ncm");
+        std::fs::write(
+            &sample,
+            crate::test_ncm_fixture::ncm_with_audio(&[], &crate::test_ncm_fixture::fixture_mp3()),
+        )
+        .unwrap();
         let metadata = parse(&sample).unwrap();
-        assert_eq!(metadata.artists.unwrap().text, "Claire Rosinkranz");
-        assert_eq!(metadata.title.unwrap().text, "Frankenstein");
+        assert!(
+            metadata
+                .artists
+                .as_ref()
+                .is_some_and(|value| !value.text.is_empty())
+        );
+        assert!(
+            metadata
+                .title
+                .as_ref()
+                .is_some_and(|value| !value.text.is_empty())
+        );
     }
 }

@@ -30,11 +30,6 @@ use unlockm::{
     config::{OutputLayout, RunOptions},
 };
 
-#[cfg(test)]
-#[allow(dead_code)]
-#[path = "../../../../tests/support/ncm_fixture.rs"]
-mod desktop_ncm_fixture;
-
 pub type CommandResult<T> = Result<T, CommandError>;
 const SUPPORTED_LOCALES: [&str; 3] = ["zh-CN", "en-US", "ja-JP"];
 
@@ -959,7 +954,7 @@ mod tests {
         let audio = STANDARD
             .decode(include_str!("../../../../tests/fixtures/lofty-silent.mp3.b64").trim())
             .unwrap();
-        desktop_ncm_fixture::ncm_with_audio(&[], &audio)
+        crate::desktop_ncm_fixture::ncm_with_audio(&[], &audio)
     }
 
     fn channel() -> Channel<ConversionEventDto> {
@@ -1298,7 +1293,11 @@ mod tests {
         while audio.len() < 48 * 1024 * 1024 {
             audio.extend_from_slice(&single);
         }
-        fs::write(&input, desktop_ncm_fixture::ncm_with_audio(&[], &audio)).unwrap();
+        fs::write(
+            &input,
+            crate::desktop_ncm_fixture::ncm_with_audio(&[], &audio),
+        )
+        .unwrap();
         let state = AppState::new(HistoryStore::open(&database).unwrap()).unwrap();
         let run = start_conversion_blocking(
             state.clone(),
@@ -1381,7 +1380,11 @@ mod tests {
         while audio.len() < 64 * 1024 * 1024 {
             audio.extend_from_slice(&single);
         }
-        fs::write(&input, desktop_ncm_fixture::ncm_with_audio(&[], &audio)).unwrap();
+        fs::write(
+            &input,
+            crate::desktop_ncm_fixture::ncm_with_audio(&[], &audio),
+        )
+        .unwrap();
         let state =
             AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
                 .unwrap();

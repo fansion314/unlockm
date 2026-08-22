@@ -19,6 +19,11 @@ pub const PRODUCT_NAME: &str = "UnlockM";
 pub const APP_IDENTIFIER: &str = "world.fansionia.unlockm";
 const LEGACY_APP_IDENTIFIER: &str = "world.fansion.unlockm";
 
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../../../tests/support/ncm_fixture.rs"]
+pub(crate) mod desktop_ncm_fixture;
+
 fn about_metadata() -> AboutMetadata<'static> {
     let credits = "感谢加性饼干提供的词元，为魔仙煲和文森特李73制作\n\nThanks to Additive Cookie for providing the tokens.\nMade for Moxianbao and vincentlee73.";
     AboutMetadata {

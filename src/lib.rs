@@ -12,4 +12,9 @@ pub mod metadata;
 pub mod pathing;
 pub mod presentation;
 
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../tests/support/ncm_fixture.rs"]
+pub(crate) mod test_ncm_fixture;
+
 pub const PARTIAL_FAILURE_EXIT: i32 = 3;
