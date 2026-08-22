@@ -54,10 +54,16 @@ the test suite does not require a sibling checkout.
 The `desktop/` application is a separately locked, in-process host. Its
 frontend dependencies are recorded in `desktop/pnpm-lock.yaml`; Rust desktop
 dependencies are recorded in `Cargo.lock`. The desktop host uses Tauri v2,
-React, i18next/react-i18next, Motion, TanStack Virtual, and Vite+. These are
-used for windowing, UI, localization, motion, virtual rendering, and the
+React, i18next/react-i18next, Motion, TanStack Virtual, Phosphor Icons, the
+official Tauri opener plugin, and Vite+. These are used for windowing, UI,
+localization, motion, paged rendering, explicit system file actions, and the
 frontend toolchain; none is a conversion sidecar or an audio-processing
 dependency.
+
+`@phosphor-icons/react` 2.1.10 supplies the desktop interface icon family and
+is MIT licensed. `tauri-plugin-opener` 2.5.4 supplies the platform adapter used
+only after Rust resolves and validates a persisted run/item output; it is
+licensed Apache-2.0 OR MIT. The webview receives no generic opener permission.
 
 ### Fontsource bundled fonts (SIL OFL-1.1)
 

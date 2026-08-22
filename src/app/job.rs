@@ -13,7 +13,7 @@ use crate::{
 };
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::Path,
     sync::{Arc, Mutex},
     time::{Instant, SystemTime},
@@ -48,12 +48,26 @@ pub struct ExecutionReport {
 }
 
 fn fallback_music_snapshot(source: &Path) -> MusicSnapshot {
-    MusicSnapshot {
-        title: source
-            .file_stem()
-            .map(|value| value.to_string_lossy().into_owned())
-            .filter(|value| !value.trim().is_empty()),
-        ..Default::default()
+    let stem = source
+        .file_stem()
+        .map(|value| value.to_string_lossy().trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let artist_title = stem.as_deref().and_then(|stem| {
+        let (artist, title) = stem.split_once(" - ")?;
+        let artist = artist.trim();
+        let title = title.trim();
+        (!artist.is_empty() && !title.is_empty()).then(|| (artist.to_owned(), title.to_owned()))
+    });
+    match artist_title {
+        Some((artist, title)) => MusicSnapshot {
+            title: Some(title),
+            artist: Some(artist),
+            ..Default::default()
+        },
+        None => MusicSnapshot {
+            title: stem,
+            ..Default::default()
+        },
     }
 }
 
@@ -74,9 +88,20 @@ fn artwork_mime_type(bytes: &[u8]) -> Option<&'static str> {
 fn snapshot_music(
     source: &Path,
     destination: &Path,
+    source_kind: Option<formats::Kind>,
     warnings: &mut Vec<ReportWarning>,
 ) -> MusicSnapshot {
     let mut snapshot = fallback_music_snapshot(source);
+    match output_facts(destination) {
+        Ok((bytes, format)) => {
+            snapshot.output_bytes = Some(bytes);
+            snapshot.output_format = format;
+        }
+        Err(detail) => warnings.push(ReportWarning {
+            code: "output_snapshot_unavailable".into(),
+            detail,
+        }),
+    }
     let bounded = match crate::metadata::tags::read_bounded_snapshot(destination) {
         Ok(snapshot) => snapshot,
         Err(error) => {
@@ -95,9 +120,9 @@ fn snapshot_music(
     }
     let metadata = bounded.metadata;
     snapshot.title = metadata.title.map(|value| value.text).or(snapshot.title);
-    snapshot.artist = metadata.artists.map(|value| value.text);
-    snapshot.album = metadata.album.map(|value| value.text);
-    snapshot.duration_ms = metadata.duration_ms;
+    snapshot.artist = metadata.artists.map(|value| value.text).or(snapshot.artist);
+    snapshot.album = metadata.album.map(|value| value.text).or(snapshot.album);
+    snapshot.duration_ms = metadata.duration_ms.or(snapshot.duration_ms);
     if let Some(bytes) = metadata.cover.and_then(|cover| cover.bytes) {
         if let Some(mime_type) = artwork_mime_type(&bytes) {
             snapshot.artwork = Some(ArtworkSnapshot {
@@ -111,16 +136,51 @@ fn snapshot_music(
             });
         }
     }
+    if source_kind == Some(formats::Kind::Ncm)
+        && let Ok(container) = crate::metadata::ncm::parse(source)
+    {
+        snapshot.title = container.title.map(|value| value.text).or(snapshot.title);
+        snapshot.artist = container
+            .artists
+            .map(|value| value.text)
+            .or(snapshot.artist);
+        snapshot.album = container.album.map(|value| value.text).or(snapshot.album);
+        snapshot.duration_ms = container.duration_ms.or(snapshot.duration_ms);
+        if snapshot.artwork.is_none()
+            && let Some(bytes) = container.cover.and_then(|cover| cover.bytes)
+            && let Some(mime_type) = artwork_mime_type(&bytes)
+        {
+            snapshot.artwork = Some(ArtworkSnapshot {
+                mime_type: mime_type.into(),
+                bytes,
+            });
+        }
+    }
     snapshot
+}
+
+fn output_facts(destination: &Path) -> Result<(u64, Option<String>), String> {
+    let output_bytes = fs::metadata(destination)
+        .map_err(|error| format!("stat {}: {error}", destination.display()))?
+        .len();
+    let mut file = fs::File::open(destination)
+        .map_err(|error| format!("open {} for format probe: {error}", destination.display()))?;
+    let mut header = vec![0_u8; 8192];
+    let read = file
+        .read(&mut header)
+        .map_err(|error| format!("read {} for format probe: {error}", destination.display()))?;
+    header.truncate(read);
+    Ok((output_bytes, formats::extension(&header)))
 }
 
 fn music_execution_report(
     summary: Summary,
     source: &Path,
     destination: &Path,
+    source_kind: Option<formats::Kind>,
     mut warnings: Vec<ReportWarning>,
 ) -> ExecutionReport {
-    let music = snapshot_music(source, destination, &mut warnings);
+    let music = snapshot_music(source, destination, source_kind, &mut warnings);
     ExecutionReport {
         summary,
         warnings,
@@ -479,6 +539,10 @@ pub fn execute_cancellable_with_resources_report(
         return Ok(ExecutionReport::default());
     }
     let is_music = matches!(&planned.action, PlannedAction::Decrypt { .. });
+    let source_kind = match &planned.action {
+        PlannedAction::Decrypt { prepared, .. } => Some(prepared.kind()),
+        PlannedAction::Copy => None,
+    };
     let source = planned.source.clone();
     let destination = planned.destination.clone();
     if destination == source {
@@ -491,6 +555,7 @@ pub fn execute_cancellable_with_resources_report(
                 summary,
                 &source,
                 &destination,
+                source_kind,
                 Vec::new(),
             ));
         }
@@ -511,6 +576,7 @@ pub fn execute_cancellable_with_resources_report(
                 summary,
                 &source,
                 &destination,
+                source_kind,
                 Vec::new(),
             ));
         }
@@ -583,6 +649,7 @@ pub fn execute_cancellable_with_resources_report(
                     summary,
                     &source,
                     &destination,
+                    source_kind,
                     warnings,
                 ))
             } else {
@@ -832,9 +899,47 @@ mod tests {
         std::fs::write(&destination, bytes).unwrap();
 
         let mut warnings = Vec::new();
-        let snapshot = snapshot_music(&source, &destination, &mut warnings);
+        let snapshot = snapshot_music(&source, &destination, None, &mut warnings);
         assert_eq!(snapshot.title.as_deref(), Some("encrypted-track"));
         assert!(snapshot.duration_ms.is_some());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn filename_fallback_extracts_conservative_artist_and_title() {
+        let snapshot = fallback_music_snapshot(Path::new("Additive Cookie - Token Song.ncm"));
+        assert_eq!(snapshot.artist.as_deref(), Some("Additive Cookie"));
+        assert_eq!(snapshot.title.as_deref(), Some("Token Song"));
+    }
+
+    #[test]
+    fn metadata_off_history_snapshot_uses_local_ncm_artist_without_mutating_audio() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../samples/Claire Rosinkranz - Frankenstein.ncm");
+        let destination = directory.path().join("output.mp3");
+        let audio = STANDARD
+            .decode(include_str!("../../tests/fixtures/lofty-silent.mp3.b64").trim())
+            .unwrap();
+        fs::write(&destination, &audio).unwrap();
+        let expected = crate::metadata::ncm::parse(&source).unwrap();
+        let expected_title = expected
+            .title
+            .map(|value| value.text)
+            .unwrap_or_else(|| "Frankenstein".into());
+        let before = fs::read(&destination).unwrap();
+
+        let mut warnings = Vec::new();
+        let snapshot = snapshot_music(
+            &source,
+            &destination,
+            Some(formats::Kind::Ncm),
+            &mut warnings,
+        );
+
+        assert_eq!(snapshot.artist.as_deref(), Some("Claire Rosinkranz"));
+        assert_eq!(snapshot.title.as_deref(), Some(expected_title.as_str()));
+        assert_eq!(fs::read(destination).unwrap(), before);
         assert!(warnings.is_empty());
     }
 
@@ -846,6 +951,21 @@ mod tests {
         );
         assert_eq!(artwork_mime_type(b"\xff\xd8\xffbody"), Some("image/jpeg"));
         assert_eq!(artwork_mime_type(b"not an image"), None);
+    }
+
+    #[test]
+    fn output_facts_use_final_bytes_and_content_probe() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("extensionless-output");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(include_str!("../../tests/fixtures/lofty-silent.mp3.b64").trim())
+            .unwrap();
+        fs::write(&output, &bytes).unwrap();
+
+        assert_eq!(
+            output_facts(&output).unwrap(),
+            (bytes.len() as u64, Some("mp3".into()))
+        );
     }
 
     #[test]

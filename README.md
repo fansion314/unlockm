@@ -30,17 +30,26 @@ The first desktop release deliberately stays focused:
 
 - choose or drop exactly one file or directory, then optionally choose an
   output directory;
-- adjust metadata refresh, companion-file copy, and atomic overwrite before
-  converting;
+- adjust metadata refresh and directory companion-file copy before converting;
 - follow one active conversion, cancel it safely, and reopen its persisted
   history/detail view after restarting the app;
-- use English or Simplified Chinese; inspect captured metadata, outcomes, and
-  lazy album artwork in a virtualized detail list.
+- switch between a light-default and dark theme, and use English or Simplified
+  Chinese from the fixed application header;
+- search, filter, sort, and page through captured songs with album art,
+  artist/album metadata, and actual converted file type/size;
+- play one converted song at a time with pause and seeking, reveal a run or
+  song in Finder/Explorer, or open a song with the system's default player.
 
-Desktop watch mode, playlists, playback, cloud sync, accounts, telemetry, and
-manual key entry are not part of v1. Conversion is in-process: the app links
-this Rust library directly and does **not** launch the `unlockm` CLI, a
-sidecar, shell command, or daemon.
+The native About panel credits Additive Cookie for the tokens, states that the
+app was made for Moxianbao and vincentlee73, and records
+`Copyright © Hamlet Fansion (Peilin Fan)`.
+
+Desktop watch mode, playlists/queues, waveform rendering, cloud sync, accounts,
+telemetry, and manual key entry are not part of v1. Conversion is in-process:
+the app links this Rust library directly and does **not** launch the `unlockm`
+CLI, a sidecar, shell command, or conversion daemon. Explicit reveal/open
+buttons resolve a persisted run/item ID in Rust before asking the operating
+system to show that validated output.
 
 ### Desktop preview installers and local data
 
@@ -74,12 +83,17 @@ SmartScreen, or other system-wide protections. A signed/notarized channel may
 be added separately in the future.
 
 UnlockM stores its local `history.sqlite` database in Tauri's application-data
-directory (normally `~/Library/Application Support/world.fansion.unlockm/` on
-macOS and `%APPDATA%/world.fansion.unlockm/` on Windows). It contains local
+directory (normally `~/Library/Application Support/world.fansionia.unlockm/` on
+macOS and `%APPDATA%/world.fansionia.unlockm/` on Windows). On first launch
+after upgrading from the earlier misspelled identifier, UnlockM safely copies
+the legacy `world.fansion.unlockm/history.sqlite` database with SQLite's online
+backup API when the new database does not yet exist. It contains local
 conversion records, absolute source/output paths, settings snapshots, outcome
 details, captured metadata, and deduplicated album artwork (up to 10 MiB per
-image). It never stores audio payloads, sends telemetry, or deletes recorded
-music files. The app's clear/remove controls delete database records only.
+image), plus the content-probed output type and final byte size. It never stores
+audio payloads, sends telemetry, or deletes recorded music files. In-app
+playback uses a range-aware item-ID protocol and reads the validated output on
+demand. The app's clear/remove controls delete database records only.
 
 ### Desktop development
 

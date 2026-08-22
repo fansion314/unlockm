@@ -125,7 +125,8 @@ test("keyboard activation, validation errors, busy state, and directory-only cop
   expect((screen.getByRole("button", { name: "Choose file" }) as HTMLButtonElement).disabled).toBe(
     true,
   );
-  expect((screen.getByRole("button", { name: "Convert now" }) as HTMLButtonElement).disabled).toBe(
-    true,
-  );
+  expect(
+    (screen.getByRole("button", { name: "Conversion in progress" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(screen.queryByText("Atomically replace existing files")).toBeNull();
 });

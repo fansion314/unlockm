@@ -8,6 +8,6 @@ export function conversionRequest(
   return {
     inputPath: input.path,
     outputPath,
-    settings: { ...settings },
+    settings: { ...settings, overwrite: false },
   };
 }

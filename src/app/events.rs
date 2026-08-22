@@ -46,6 +46,8 @@ pub struct MusicSnapshot {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub duration_ms: Option<u32>,
+    pub output_bytes: Option<u64>,
+    pub output_format: Option<String>,
     pub artwork: Option<ArtworkSnapshot>,
 }
 

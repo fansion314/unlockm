@@ -12,6 +12,6 @@ test("conversion request snapshots the selected root output and quick settings",
   expect(request).toEqual({
     inputPath: "/input/album",
     outputPath: "/chosen/output",
-    settings: { updateMetadata: true, copyPassthrough: false, overwrite: true },
+    settings: { updateMetadata: true, copyPassthrough: false, overwrite: false },
   });
 });

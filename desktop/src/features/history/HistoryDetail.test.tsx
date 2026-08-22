@@ -1,44 +1,25 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, test, vi } from "vite-plus/test";
-import "../../i18n";
-import { Artwork, HistoryDetail, VisibleArtwork } from "./HistoryDetail";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import i18n from "../../i18n";
+import type { HistoryItem } from "../../lib/contracts";
+import { Artwork, HistoryDetail, VisibleArtwork } from "./HistoryDetail";
 
-const { api } = vi.hoisted(() => ({
-  api: { getArtwork: vi.fn(), getArtworkMime: vi.fn(), getRunItems: vi.fn() },
+const { api, convertFileSrc } = vi.hoisted(() => ({
+  api: {
+    getArtwork: vi.fn(),
+    getArtworkMime: vi.fn(),
+    queryRunItems: vi.fn(),
+    listRunItemFacets: vi.fn(),
+    revealRunOutput: vi.fn(),
+    revealRunItem: vi.fn(),
+    openRunItem: vi.fn(),
+  },
+  convertFileSrc: vi.fn((path: string, protocol: string) => `${protocol}://localhost/${path}`),
 }));
-
-const { virtualizerCalls } = vi.hoisted(() => ({ virtualizerCalls: [] as number[] }));
 
 vi.mock("../../lib/ipc", () => ({ desktopApi: api }));
-
-vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: (options: { count: number }) => ({
-    getTotalSize: () => options.count * 96,
-    getVirtualItems: () => {
-      virtualizerCalls.push(options.count);
-      return Array.from({ length: Math.min(options.count, 12) }, (_, index) => ({
-        index,
-        start: index * 96,
-        key: index,
-        size: 96,
-      }));
-    },
-    measureElement: () => undefined,
-  }),
-}));
-
-afterEach(async () => {
-  cleanup();
-  vi.restoreAllMocks();
-  api.getArtwork.mockReset();
-  api.getArtworkMime.mockReset();
-  api.getRunItems.mockReset();
-  virtualizerCalls.length = 0;
-  vi.unstubAllGlobals();
-  await i18n.changeLanguage("en-US");
-});
+vi.mock("@tauri-apps/api/core", () => ({ convertFileSrc }));
 
 const run = {
   id: 9,
@@ -48,8 +29,8 @@ const run = {
   settings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
   status: "completed" as const,
   createdAtMs: 0,
-  updatedAtMs: 0,
-  finishedAtMs: 0,
+  updatedAtMs: 65_000,
+  finishedAtMs: 65_000,
   totalItems: 4,
   completedItems: 4,
   converted: 4,
@@ -57,10 +38,81 @@ const run = {
   skipped: 0,
   conflicted: 0,
   failed: 0,
+  musicCount: 4,
   representativeArtworkId: null,
   terminalErrorCode: null,
   terminalErrorDetail: null,
 };
+
+let pauseSpy: ReturnType<typeof vi.spyOn>;
+let loadSpy: ReturnType<typeof vi.spyOn>;
+
+function item(id: number, title = `Track ${id}`): HistoryItem {
+  return {
+    id,
+    runId: 9,
+    ordinal: id - 1,
+    itemKind: "music" as const,
+    sourcePath: `/input/${id}.ncm`,
+    relativePath: `${id}.ncm`,
+    destinationPath: `/output/${id}.mp3`,
+    action: "convert",
+    outcome: "converted",
+    logicalBytes: 10,
+    outputBytes: 1_572_864,
+    outputFormat: "mp3",
+    errorCode: null,
+    errorDetail: null,
+    warnings: [],
+    title,
+    artist: id % 2 ? "Artist A" : "Artist B",
+    album: id % 2 ? "Album A" : "Album B",
+    durationMs: 65_000,
+    artworkId: null,
+  };
+}
+
+function page(items = [item(1)], overrides = {}) {
+  return {
+    items,
+    page: 1,
+    pageSize: 25,
+    pageCount: 1,
+    filteredTotal: items.length,
+    companionCount: 2,
+    musicTotal: 4,
+    ...overrides,
+  };
+}
+
+function renderDetail(onError = vi.fn()) {
+  return render(
+    <HistoryDetail layoutId="run-card-9" run={run} onBack={() => undefined} onError={onError} />,
+  );
+}
+
+beforeEach(() => {
+  api.queryRunItems.mockResolvedValue(page());
+  api.listRunItemFacets.mockImplementation(async (_runId, facet) => ({
+    values: facet === "artist" ? ["Artist A", "Artist B"] : ["Album A", "Album B"],
+    nextCursor: null,
+  }));
+  api.revealRunOutput.mockResolvedValue(true);
+  api.revealRunItem.mockResolvedValue(true);
+  api.openRunItem.mockResolvedValue(true);
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+  pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+  loadSpy = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+});
+
+afterEach(async () => {
+  cleanup();
+  vi.restoreAllMocks();
+  for (const method of Object.values(api)) method.mockReset();
+  convertFileSrc.mockClear();
+  vi.unstubAllGlobals();
+  await i18n.changeLanguage("en-US");
+});
 
 test("late artwork resolution after unmount revokes its object URL", async () => {
   let resolveBytes: ((bytes: ArrayBuffer) => void) | undefined;
@@ -81,167 +133,121 @@ test("late artwork resolution after unmount revokes its object URL", async () =>
   expect(revoke).toHaveBeenCalledWith("blob:cover");
 });
 
-test("detail uses persisted music total and a paginated row", async () => {
-  api.getRunItems.mockResolvedValue({
-    items: [
-      {
-        id: 1,
-        runId: 9,
-        ordinal: 0,
-        itemKind: "music",
-        sourcePath: "/input/a.ncm",
-        relativePath: "a.ncm",
-        destinationPath: "/output/a.mp3",
-        action: "convert",
-        outcome: "converted",
-        logicalBytes: 10,
-        errorCode: null,
-        errorDetail: null,
-        warnings: [],
-        title: "A track",
-        artist: "Artist",
-        album: "Album",
-        durationMs: 65_000,
-        artworkId: null,
-      },
-    ],
-    nextCursor: null,
-    companionCount: 2,
-    musicTotal: 1,
-  });
-  render(<HistoryDetail layoutId="run-card-9" run={run} onBack={() => undefined} />);
-  await waitFor(() => expect(screen.getByText("2 companion files")).toBeTruthy());
-  expect(document.querySelector(".detail-count strong")?.textContent).toBe("1");
-  expect(api.getRunItems).toHaveBeenCalledWith(9, null, 100);
+test("detail renders compact output facts without raw diagnostics", async () => {
+  const failed = {
+    ...item(1, "Broken track"),
+    destinationPath: null,
+    outcome: "failed",
+    outputBytes: null,
+    outputFormat: null,
+    errorDetail: "private diagnostic path",
+  };
+  api.queryRunItems.mockResolvedValue(page([failed]));
+  renderDetail();
+
+  expect(await screen.findByText("Broken track")).toBeTruthy();
+  expect(screen.getByText("Unknown format")).toBeTruthy();
+  expect(document.querySelector(".outcome-failed")?.textContent).toBe("Failed");
+  expect(screen.queryByText("private diagnostic path")).toBeNull();
+  expect(document.querySelector(".music-item details")).toBeNull();
 });
 
-test("missing artwork keeps placeholder", async () => {
-  api.getArtworkMime.mockRejectedValue(new Error("missing"));
-  render(<Artwork artworkId={22} title="Fallback" />);
-  expect(screen.getByText("F")).toBeTruthy();
-});
-
-test("detail can retry a failed page load", async () => {
+test("search, facets, sorting, and numbered pages produce server queries", async () => {
   const user = userEvent.setup();
-  api.getRunItems
+  api.queryRunItems.mockResolvedValue(
+    page([item(1)], { pageCount: 3, filteredTotal: 60, musicTotal: 60 }),
+  );
+  renderDetail();
+  await screen.findByText("Track 1");
+  expect(api.queryRunItems).toHaveBeenCalledWith(
+    9,
+    expect.objectContaining({ page: 1, pageSize: 25, sort: "ordinal", direction: "asc" }),
+  );
+
+  await user.type(screen.getByRole("searchbox", { name: "Search songs" }), "late target");
+  await waitFor(
+    () =>
+      expect(api.queryRunItems).toHaveBeenCalledWith(
+        9,
+        expect.objectContaining({ search: "late target", page: 1 }),
+      ),
+    { timeout: 1_000 },
+  );
+  await user.type(screen.getByPlaceholderText("All artists"), "Artist B");
+  await waitFor(() =>
+    expect(api.queryRunItems).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ artist: "Artist B", page: 1 }),
+    ),
+  );
+  await user.selectOptions(screen.getByLabelText("Sort"), "size:desc");
+  expect(api.queryRunItems).toHaveBeenCalledWith(
+    9,
+    expect.objectContaining({ sort: "size", direction: "desc", page: 1 }),
+  );
+  await user.click(screen.getByRole("button", { name: "2" }));
+  expect(api.queryRunItems).toHaveBeenCalledWith(9, expect.objectContaining({ page: 2 }));
+});
+
+test("one shared player switches tracks and keeps seek controls item-scoped", async () => {
+  const user = userEvent.setup();
+  api.queryRunItems.mockResolvedValue(page([item(1), item(2)]));
+  renderDetail();
+  const playOne = await screen.findByRole("button", { name: "Play Track 1" });
+  await user.click(playOne);
+  await waitFor(() => expect(convertFileSrc).toHaveBeenCalledWith("1", "unlockm-audio"));
+  expect(screen.getByRole("button", { name: "Pause Track 1" })).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Play Track 2" }));
+  await waitFor(() => expect(convertFileSrc).toHaveBeenCalledWith("2", "unlockm-audio"));
+  expect(pauseSpy).toHaveBeenCalled();
+  const seek = screen.getByRole("slider", { name: "Seek through Track 2" });
+  fireEvent.change(seek, { target: { value: "12" } });
+  expect((seek as HTMLInputElement).value).toBe("12");
+});
+
+test("normal player cleanup releases the source without forcing an error-prone reload", async () => {
+  const user = userEvent.setup();
+  renderDetail();
+  await user.click(await screen.findByRole("button", { name: "Play Track 1" }));
+  await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+  cleanup();
+  expect(pauseSpy).toHaveBeenCalled();
+  expect(loadSpy).toHaveBeenCalledTimes(1);
+});
+
+test("file reveal and system-player buttons call separate ID-only commands", async () => {
+  const user = userEvent.setup();
+  renderDetail();
+  await screen.findByText("Track 1");
+  await user.click(screen.getByRole("button", { name: "Reveal Track 1 in its folder" }));
+  await user.click(screen.getByRole("button", { name: "Open Track 1 in the system player" }));
+  expect(api.revealRunItem).toHaveBeenCalledWith(1);
+  expect(api.openRunItem).toHaveBeenCalledWith(1);
+});
+
+test("detail can retry a failed query", async () => {
+  const user = userEvent.setup();
+  api.queryRunItems
     .mockRejectedValueOnce(new Error("database unavailable"))
-    .mockResolvedValueOnce({ items: [], nextCursor: null, companionCount: 0, musicTotal: 0 });
-  render(<HistoryDetail layoutId="run-card-9" run={run} onBack={() => undefined} />);
+    .mockResolvedValueOnce(page([]));
+  renderDetail();
   expect(await screen.findByText("Could not load these details.")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Try again" }));
-  expect(api.getRunItems).toHaveBeenNthCalledWith(1, 9, null, 100);
-  expect(api.getRunItems).toHaveBeenNthCalledWith(2, 9, null, 100);
+  await waitFor(() => expect(api.queryRunItems).toHaveBeenCalledTimes(2));
 });
 
-test("initial and pagination loading reserve stable skeleton space", async () => {
-  let resolveInitial: ((page: object) => void) | undefined;
-  let resolveMore: ((page: object) => void) | undefined;
-  api.getRunItems
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveInitial = resolve;
-        }),
-    )
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveMore = resolve;
-        }),
-    );
-  const user = userEvent.setup();
-  render(<HistoryDetail layoutId="run-card-9" run={run} onBack={() => undefined} />);
-  expect(document.querySelectorAll(".music-skeleton")).toHaveLength(5);
-  resolveInitial?.({
-    items: [
-      {
-        id: 1,
-        runId: 9,
-        ordinal: 0,
-        itemKind: "music",
-        sourcePath: "/input/a.ncm",
-        relativePath: "a.ncm",
-        destinationPath: "/output/a.mp3",
-        action: "convert",
-        outcome: "converted",
-        logicalBytes: 10,
-        errorCode: null,
-        errorDetail: null,
-        warnings: [],
-        title: "A track",
-        artist: "Artist",
-        album: "Album",
-        durationMs: 65_000,
-        artworkId: null,
-      },
-    ],
-    nextCursor: 5,
-    companionCount: 0,
-    musicTotal: 8,
-  });
-  expect(await screen.findByRole("button", { name: "Load more" })).toBeTruthy();
-  await user.click(screen.getByRole("button", { name: "Load more" }));
-  await waitFor(() => expect(document.querySelector(".pagination-skeleton")).toBeTruthy());
-  resolveMore?.({ items: [], nextCursor: null, companionCount: 0, musicTotal: 8 });
-  await waitFor(() => expect(document.querySelector(".pagination-skeleton")).toBeNull());
-});
-
-test("item error codes use localized product copy while raw diagnostics remain collapsed", async () => {
-  api.getRunItems.mockResolvedValue({
-    items: [
-      {
-        id: 1,
-        runId: 9,
-        ordinal: 0,
-        itemKind: "music",
-        sourcePath: "/input/a.ncm",
-        relativePath: "a.ncm",
-        destinationPath: null,
-        action: "convert",
-        outcome: "failed",
-        logicalBytes: 10,
-        errorCode: "preflight_failed",
-        errorDetail: "unsupported encrypted stream #42",
-        warnings: [{ code: "artwork_snapshot_unavailable", detail: "cover too large" }],
-        title: "A track",
-        artist: "Artist",
-        album: "Album",
-        durationMs: 65_000,
-        artworkId: null,
-      },
-    ],
-    nextCursor: null,
-    companionCount: 0,
-    musicTotal: 1,
-  });
-  render(<HistoryDetail layoutId="run-card-9" run={run} onBack={() => undefined} />);
-  expect(await screen.findByText("UnlockM could not read this encrypted file.")).toBeTruthy();
-  const diagnostics = document.querySelector(".music-item details") as HTMLDetailsElement;
-  expect(diagnostics.open).toBe(false);
-  expect(diagnostics.textContent).toContain("unsupported encrypted stream #42");
-  expect(diagnostics.textContent).toContain("Artwork could not be loaded.");
-  await i18n.changeLanguage("zh-CN");
-  expect(await screen.findByText("UnlockM 无法读取这个加密文件。")).toBeTruthy();
-  expect(screen.getByText("无法加载封面。", { exact: false })).toBeTruthy();
-});
-
-test("home artwork waits for visibility and bounds requests across a long history", async () => {
+test("home artwork waits for visibility and bounds artwork requests", async () => {
   type ObserverCallback = (entries: IntersectionObserverEntry[]) => void;
   class FakeIntersectionObserver {
     static instances: FakeIntersectionObserver[] = [];
     callback: ObserverCallback;
-
     constructor(callback: ObserverCallback) {
       this.callback = callback;
       FakeIntersectionObserver.instances.push(this);
     }
-
     disconnect() {}
     observe() {}
-    unobserve() {}
-    takeRecords() {
-      return [];
-    }
     triggerVisible() {
       this.callback([{ isIntersecting: true } as IntersectionObserverEntry]);
     }
@@ -261,42 +267,4 @@ test("home artwork waits for visibility and bounds requests across a long histor
   expect(api.getArtwork).not.toHaveBeenCalled();
   for (const observer of FakeIntersectionObserver.instances.slice(0, 4)) observer.triggerVisible();
   await waitFor(() => expect(api.getArtwork).toHaveBeenCalledTimes(4));
-  expect(api.getArtworkMime).toHaveBeenCalledTimes(4);
-  expect(api.getArtwork).toHaveBeenCalledTimes(4);
-});
-
-test("a thousand loaded items are delegated to a bounded virtual window", async () => {
-  const items = Array.from({ length: 1_000 }, (_, index) => ({
-    id: index + 1,
-    runId: 9,
-    ordinal: index,
-    itemKind: "music" as const,
-    sourcePath: `/input/${index}.ncm`,
-    relativePath: `${index}.ncm`,
-    destinationPath: `/output/${index}.mp3`,
-    action: "convert",
-    outcome: "converted",
-    logicalBytes: 10,
-    errorCode: null,
-    errorDetail: null,
-    warnings: [],
-    title: `Track ${index}`,
-    artist: "Artist",
-    album: "Album",
-    durationMs: 65_000,
-    artworkId: null,
-  }));
-  api.getRunItems.mockResolvedValue({
-    items,
-    nextCursor: null,
-    companionCount: 0,
-    musicTotal: items.length,
-  });
-
-  render(<HistoryDetail layoutId="run-card-9" run={run} onBack={() => undefined} />);
-
-  await waitFor(() => expect(virtualizerCalls).toContain(1_000));
-  expect(document.querySelectorAll(".music-item").length).toBeLessThanOrEqual(12);
-  expect(screen.getByText("Track 0")).toBeTruthy();
-  expect(screen.queryByText("Track 999")).toBeNull();
 });

@@ -1,17 +1,19 @@
+import { FolderOpen, Trash, X } from "@phosphor-icons/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import unlockmIcon from "../src-tauri/icons/source/UnlockM Icon.png";
-import { Composer } from "./features/conversion/Composer";
-import { HistoryDetail, VisibleArtwork } from "./features/history/HistoryDetail";
 import { appReducer, initialAppModel } from "./app/conversion-state";
 import { pageTransition, pageVariants as createPageVariants } from "./app/page-motion";
-import type { RunSettings, ValidatedInput } from "./lib/contracts";
-import { desktopApi } from "./lib/ipc";
+import { AppHeader } from "./components/AppHeader";
+import { Composer } from "./features/conversion/Composer";
+import { HistoryDetail, VisibleArtwork } from "./features/history/HistoryDetail";
+import type { Preferences, RunSettings, ValidatedInput } from "./lib/contracts";
 import { conversionRequest } from "./lib/conversion-request";
 import { errorMessageKey, normalizeDesktopError } from "./lib/errors";
 import { formatTimestamp } from "./lib/format";
+import { desktopApi } from "./lib/ipc";
 import { persistPreferences } from "./lib/preferences";
+import { applyTheme, cachedTheme } from "./lib/theme";
 import "./App.css";
 import "./i18n";
 
@@ -21,26 +23,36 @@ const defaultSettings: RunSettings = {
   overwrite: false,
 };
 
+function currentLocale(language: string): Preferences["locale"] {
+  return language === "zh-CN" ? "zh-CN" : "en-US";
+}
+
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
 function App() {
   const { i18n, t } = useTranslation();
   const [model, dispatch] = useReducer(appReducer, initialAppModel);
   const [selected, setSelected] = useState<ValidatedInput | null>(null);
   const [outputPath, setOutputPath] = useState<string | null>(null);
   const [settings, setSettings] = useState<RunSettings>(defaultSettings);
+  const [theme, setTheme] = useState<Preferences["theme"]>(cachedTheme);
+  const [locale, setLocale] = useState<Preferences["locale"]>(() => currentLocale(i18n.language));
   const [detailRunId, setDetailRunId] = useState<number | null>(null);
   const [direction, setDirection] = useState<1 | -1>(1);
   const [loadingMoreRuns, setLoadingMoreRuns] = useState(false);
   const nextRequestId = useRef(0);
   const startInFlight = useRef(false);
-  const alternateLocale = i18n.language === "zh-CN" ? "en-US" : "zh-CN";
+  const preferencesBootstrapped = useRef(false);
   const reducedMotion = useReducedMotion();
+
   const reportError = useCallback(
     (error: unknown) => {
       const normalized = normalizeDesktopError(error);
-      const message = t(errorMessageKey(normalized.code), { defaultValue: t("errors.unknown") });
       dispatch({
         type: "uiError",
-        message,
+        message: t(errorMessageKey(normalized.code), { defaultValue: t("errors.unknown") }),
         detail: normalized.detail || null,
       });
     },
@@ -51,8 +63,14 @@ function App() {
     try {
       const bootstrap = await desktopApi.bootstrap();
       dispatch({ type: "booted", bootstrap });
-      setSettings(bootstrap.preferences.defaultSettings);
-      await i18n.changeLanguage(bootstrap.preferences.locale);
+      if (!preferencesBootstrapped.current) {
+        preferencesBootstrapped.current = true;
+        setSettings({ ...bootstrap.preferences.defaultSettings, overwrite: false });
+        setTheme(bootstrap.preferences.theme);
+        setLocale(bootstrap.preferences.locale);
+        applyTheme(bootstrap.preferences.theme);
+        await i18n.changeLanguage(bootstrap.preferences.locale);
+      }
     } catch (error) {
       const normalized = normalizeDesktopError(error);
       dispatch({
@@ -65,20 +83,29 @@ function App() {
     }
   }, [i18n]);
 
-  useEffect(() => {
-    void boot();
-  }, [boot]);
+  useEffect(() => void boot(), [boot]);
 
   useEffect(() => {
-    // A webview reload loses its old IPC Channel. For a recovered active run,
-    // poll the persisted bootstrap state until the Rust coordinator has made
-    // it terminal, then refresh history and clear the live row.
-    if (model.active?.requestId !== null || model.active?.runId === null) {
-      return;
-    }
+    if (model.active?.requestId !== null || model.active?.runId === null) return;
     const timer = window.setInterval(() => void boot(), 1_000);
     return () => window.clearInterval(timer);
   }, [boot, model.active?.requestId, model.active?.runId]);
+
+  const persist = useCallback(
+    async (
+      locale: Preferences["locale"],
+      nextTheme: Preferences["theme"],
+      nextSettings: RunSettings,
+    ) => {
+      await persistPreferences(
+        (preferences) => desktopApi.setPreferences(preferences),
+        locale,
+        nextTheme,
+        nextSettings,
+      );
+    },
+    [],
+  );
 
   const selectPath = useCallback(
     async (path: string) => {
@@ -93,39 +120,34 @@ function App() {
     [reportError],
   );
 
-  const selectError = useCallback(
-    (detail: string) => {
-      reportError(detail);
+  const changeLocale = useCallback(
+    async (nextLocale: Preferences["locale"]) => {
+      setLocale(nextLocale);
+      try {
+        await i18n.changeLanguage(nextLocale);
+        await persist(nextLocale, theme, settings);
+      } catch (error) {
+        reportError(error);
+      }
     },
-    [reportError],
+    [i18n, persist, reportError, settings, theme],
   );
 
-  const changeLocale = useCallback(async () => {
-    const locale = alternateLocale;
-    await i18n.changeLanguage(locale);
-    try {
-      await persistPreferences(
-        (preferences) => desktopApi.setPreferences(preferences),
-        locale,
-        settings,
-      );
-    } catch (error) {
-      reportError(error);
-    }
-  }, [alternateLocale, i18n, reportError, settings]);
+  const changeTheme = useCallback(
+    (nextTheme: Preferences["theme"]) => {
+      setTheme(nextTheme);
+      applyTheme(nextTheme);
+      void persist(locale, nextTheme, settings).catch(reportError);
+    },
+    [locale, persist, reportError, settings],
+  );
 
   const convert = useCallback(() => {
-    if (!selected || model.active || startInFlight.current) {
-      return;
-    }
+    if (!selected || model.active || startInFlight.current) return;
     const requestId = ++nextRequestId.current;
     startInFlight.current = true;
     dispatch({ type: "conversionStarted", requestId });
-    void persistPreferences(
-      (preferences) => desktopApi.setPreferences(preferences),
-      i18n.language === "zh-CN" ? "zh-CN" : "en-US",
-      settings,
-    ).catch(reportError);
+    void persist(locale, theme, settings).catch(reportError);
     void desktopApi
       .startConversion(conversionRequest(selected, outputPath, settings), (event) =>
         dispatch({ type: "conversionEvent", event }),
@@ -146,27 +168,21 @@ function App() {
       .finally(() => {
         startInFlight.current = false;
       });
-  }, [boot, i18n.language, model.active, outputPath, reportError, selected, settings, t]);
+  }, [boot, locale, model.active, outputPath, persist, reportError, selected, settings, t, theme]);
 
   const cancel = useCallback(() => {
     const runId = model.active?.runId;
-    if (runId !== null && runId !== undefined) {
-      void desktopApi.cancelConversion(runId);
-    }
+    if (runId !== null && runId !== undefined) void desktopApi.cancelConversion(runId);
   }, [model.active]);
 
   const clearHistory = useCallback(() => {
-    if (!window.confirm(t("app.clearConfirm"))) {
-      return;
-    }
+    if (!window.confirm(t("app.clearConfirm"))) return;
     void desktopApi.clearHistory().then(boot).catch(reportError);
   }, [boot, reportError, t]);
 
   const removeRun = useCallback(
     (runId: number) => {
-      if (!window.confirm(t("app.deleteConfirm"))) {
-        return;
-      }
+      if (!window.confirm(t("app.deleteConfirm"))) return;
       void desktopApi.deleteRun(runId).then(boot).catch(reportError);
     },
     [boot, reportError, t],
@@ -174,13 +190,10 @@ function App() {
 
   const loadMoreRuns = useCallback(async () => {
     const cursor = model.bootstrap?.history.nextCursor;
-    if (cursor === null || cursor === undefined || loadingMoreRuns) {
-      return;
-    }
+    if (cursor === null || cursor === undefined || loadingMoreRuns) return;
     setLoadingMoreRuns(true);
     try {
-      const page = await desktopApi.listRuns(cursor, 30);
-      dispatch({ type: "runsAppended", page });
+      dispatch({ type: "runsAppended", page: await desktopApi.listRuns(cursor, 30) });
     } catch (error) {
       reportError(error);
     } finally {
@@ -193,162 +206,184 @@ function App() {
   );
   const detailRun = runs.find((run) => run.id === detailRunId) ?? null;
   const busy = model.active !== null;
-  const pageTransitionVariants = createPageVariants(reducedMotion ?? false);
   const transition = pageTransition(reducedMotion ?? false);
+  const variants = createPageVariants(reducedMotion ?? false);
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <img src={unlockmIcon} alt="UnlockM" />
-          <span>UnlockM</span>
-        </div>
-        <button className="locale-switch" type="button" onClick={() => void changeLocale()}>
-          {t("app.language")}
-        </button>
-      </header>
-      {model.boot === "loading" ? <p className="boot-status">{t("app.loading")}</p> : null}
-      <AnimatePresence custom={direction} mode="wait">
-        {detailRun ? (
-          <motion.div
-            key={`detail-${detailRun.id}`}
-            animate="center"
-            className="view-motion"
-            custom={direction}
-            exit="exit"
-            initial="enter"
-            transition={transition}
-            variants={pageTransitionVariants}
-          >
-            <HistoryDetail
-              layoutId={`run-card-${detailRun.id}`}
-              run={detailRun}
-              onBack={() => {
-                setDirection(-1);
-                setDetailRunId(null);
-              }}
-              reducedMotion={reducedMotion ?? false}
-            />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="home"
-            animate="center"
-            className="app-grid view-motion"
-            custom={direction}
-            exit="exit"
-            initial="enter"
-            transition={transition}
-            variants={pageTransitionVariants}
-          >
-            <Composer
-              busy={busy}
-              outputPath={outputPath}
-              selected={selected}
-              settings={settings}
-              onConvert={convert}
-              onError={selectError}
-              onOutputPath={setOutputPath}
-              onSelectPath={selectPath}
-              onSettings={setSettings}
-            />
-            <aside className="history-panel" aria-label={t("app.history")}>
-              <div className="history-heading">
-                <div>
-                  <p className="eyebrow">{t("app.history")}</p>
-                  <h2>{runs.length}</h2>
-                </div>
-                <button type="button" disabled={busy || runs.length === 0} onClick={clearHistory}>
-                  {t("app.clearHistory")}
-                </button>
-              </div>
-              {busy && model.active ? (
-                <section className="live-run" aria-live="polite">
-                  <span className="status-dot" aria-hidden="true" />
-                  <strong>
-                    {t("app.progress", {
-                      completed: model.active.completed,
-                      total: model.active.total,
-                    })}
-                  </strong>
-                  <button disabled={model.active.runId === null} type="button" onClick={cancel}>
-                    {t("app.cancel")}
-                  </button>
-                </section>
-              ) : null}
-              <div className="run-list">
-                {model.boot === "loading"
-                  ? Array.from({ length: 3 }, (_, index) => (
-                      <div className="run-row run-skeleton" key={`skeleton-${index}`} />
-                    ))
-                  : runs.map((run) => (
-                      <motion.article
-                        className={`run-row status-${run.status}`}
-                        key={run.id}
-                        layoutId={`run-card-${run.id}`}
-                        transition={{ layout: transition.layout }}
-                      >
-                        <button
-                          aria-label={t("app.openDetails", {
-                            name: run.inputPath.split(/[\\/]/).pop(),
-                          })}
-                          className="run-detail-button"
-                          type="button"
-                          onClick={() => {
-                            setDirection(1);
-                            setDetailRunId(run.id);
-                          }}
-                        >
-                          <VisibleArtwork
-                            artworkId={run.representativeArtworkId}
-                            title={run.inputPath.split(/[\\/]/).pop() ?? null}
-                          />
-                          <span className="run-copy">
-                            <strong>{run.inputPath.split(/[\\/]/).pop()}</strong>
-                            <span>{t(`app.${run.status}`)}</span>
-                          </span>
-                          <small>
-                            {run.completedItems}/{run.totalItems}
-                          </small>
-                          <time className="run-date">
-                            {formatTimestamp(run.updatedAtMs, i18n.language)}
-                          </time>
-                        </button>
-                        <button
-                          aria-label={t("app.delete")}
-                          className="run-delete"
-                          type="button"
-                          onClick={() => removeRun(run.id)}
-                        >
-                          ×
-                        </button>
-                      </motion.article>
-                    ))}
-                {runs.length === 0 && !busy ? (
-                  <p className="empty-history">{t("app.emptyHistory")}</p>
-                ) : null}
-                {model.bootstrap?.history.nextCursor !== null &&
-                model.bootstrap?.history.nextCursor !== undefined ? (
+    <>
+      <AppHeader locale={locale} theme={theme} onLocale={changeLocale} onTheme={changeTheme} />
+      <main className="app-shell">
+        {model.boot === "loading" ? <p className="boot-status">{t("app.loading")}</p> : null}
+        <AnimatePresence custom={direction} mode="wait">
+          {detailRun ? (
+            <motion.div
+              key={`detail-${detailRun.id}`}
+              animate="center"
+              className="view-motion"
+              custom={direction}
+              exit="exit"
+              initial="enter"
+              transition={transition}
+              variants={variants}
+            >
+              <HistoryDetail
+                layoutId={`run-card-${detailRun.id}`}
+                run={detailRun}
+                onBack={() => {
+                  setDirection(-1);
+                  setDetailRunId(null);
+                }}
+                onError={reportError}
+                reducedMotion={reducedMotion ?? false}
+              />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="home"
+              animate="center"
+              className="home-view view-motion"
+              custom={direction}
+              exit="exit"
+              initial="enter"
+              transition={transition}
+              variants={variants}
+            >
+              <Composer
+                busy={busy}
+                outputPath={outputPath}
+                selected={selected}
+                settings={settings}
+                onConvert={convert}
+                onError={(detail) => reportError(detail)}
+                onOutputPath={setOutputPath}
+                onSelectPath={selectPath}
+                onSettings={(next) => setSettings({ ...next, overwrite: false })}
+              />
+
+              <section className="history-panel" aria-label={t("app.history")}>
+                <div className="history-heading">
+                  <div>
+                    <h1>{t("app.history")}</h1>
+                    <span>{t("app.historyCount", { count: runs.length })}</span>
+                  </div>
                   <button
-                    className="load-more"
-                    disabled={loadingMoreRuns}
+                    aria-label={t("app.clearHistory")}
+                    className="icon-button subtle"
+                    title={t("app.clearHistory")}
                     type="button"
-                    onClick={() => void loadMoreRuns()}
+                    disabled={busy || runs.length === 0}
+                    onClick={clearHistory}
                   >
-                    {t("app.loadMore")}
+                    <Trash aria-hidden="true" size={18} />
                   </button>
+                </div>
+
+                {busy && model.active ? (
+                  <section className="live-run" aria-live="polite">
+                    <span className="status-mark" aria-hidden="true" />
+                    <strong>{t("app.converting")}</strong>
+                    <span>
+                      {t("app.progress", {
+                        completed: model.active.completed,
+                        total: model.active.total,
+                      })}
+                    </span>
+                    <button disabled={model.active.runId === null} type="button" onClick={cancel}>
+                      {t("app.cancel")}
+                    </button>
+                  </section>
                 ) : null}
-                {loadingMoreRuns ? (
-                  <div
-                    aria-hidden="true"
-                    className="run-row run-skeleton pagination-skeleton history-pagination-skeleton"
-                  />
-                ) : null}
-              </div>
-            </aside>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
+                <div className="run-list">
+                  {model.boot === "loading"
+                    ? Array.from({ length: 3 }, (_, index) => (
+                        <div className="run-row run-skeleton" key={`skeleton-${index}`} />
+                      ))
+                    : runs.map((run) => (
+                        <motion.article
+                          className={`run-row status-${run.status}`}
+                          key={run.id}
+                          layoutId={`run-card-${run.id}`}
+                          transition={{ layout: transition.layout }}
+                        >
+                          <button
+                            aria-label={t("app.openDetails", { name: basename(run.inputPath) })}
+                            className="run-detail-button"
+                            type="button"
+                            onClick={() => {
+                              setDirection(1);
+                              setDetailRunId(run.id);
+                            }}
+                          >
+                            <VisibleArtwork
+                              artworkId={run.representativeArtworkId}
+                              title={basename(run.inputPath)}
+                            />
+                            <span className="run-identity">
+                              <strong>{basename(run.inputPath)}</strong>
+                              <span title={run.outputPath}>{run.outputPath}</span>
+                            </span>
+                            <span className="run-count">
+                              <strong>{run.musicCount}</strong>
+                              <small>{t("app.songs")}</small>
+                            </span>
+                            <span className={`run-result result-${run.status}`}>
+                              {t(`app.${run.status}`)}
+                            </span>
+                            <time className="run-date">
+                              {formatTimestamp(run.updatedAtMs, i18n.language)}
+                            </time>
+                          </button>
+                          <div className="run-actions">
+                            <button
+                              aria-label={t("app.revealOutput", { name: basename(run.inputPath) })}
+                              className="icon-button subtle"
+                              title={t("app.revealOutput", { name: basename(run.inputPath) })}
+                              type="button"
+                              onClick={() =>
+                                void desktopApi.revealRunOutput(run.id).catch(reportError)
+                              }
+                            >
+                              <FolderOpen aria-hidden="true" size={18} />
+                            </button>
+                            <button
+                              aria-label={t("app.delete")}
+                              className="icon-button subtle danger"
+                              title={t("app.delete")}
+                              type="button"
+                              onClick={() => removeRun(run.id)}
+                            >
+                              <Trash aria-hidden="true" size={18} />
+                            </button>
+                          </div>
+                        </motion.article>
+                      ))}
+                  {runs.length === 0 && !busy && model.boot !== "loading" ? (
+                    <div className="empty-history">
+                      <span>{t("app.emptyHistory")}</span>
+                    </div>
+                  ) : null}
+                  {model.bootstrap?.history.nextCursor !== null &&
+                  model.bootstrap?.history.nextCursor !== undefined ? (
+                    <button
+                      className="load-more"
+                      disabled={loadingMoreRuns}
+                      type="button"
+                      onClick={() => void loadMoreRuns()}
+                    >
+                      {t("app.loadMore")}
+                    </button>
+                  ) : null}
+                  {loadingMoreRuns ? (
+                    <div aria-hidden="true" className="run-row run-skeleton pagination-skeleton" />
+                  ) : null}
+                </div>
+              </section>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
       {model.error ? (
         <section className="error-banner" role="alert">
           <p>{model.error.message}</p>
@@ -358,9 +393,17 @@ function App() {
               <code>{model.error.detail}</code>
             </details>
           ) : null}
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={t("app.dismiss")}
+            onClick={() => dispatch({ type: "clearError" })}
+          >
+            <X aria-hidden="true" size={17} />
+          </button>
         </section>
       ) : null}
-    </main>
+    </>
   );
 }
 

@@ -27,6 +27,11 @@ pub fn from_json(json: serde_json::Value, image1: Option<Vec<u8>>) -> Metadata {
                 .filter_map(|item| {
                     item.as_str()
                         .or_else(|| item.get("name").and_then(serde_json::Value::as_str))
+                        .or_else(|| {
+                            item.as_array()
+                                .and_then(|values| values.first())
+                                .and_then(serde_json::Value::as_str)
+                        })
                 })
                 .collect::<Vec<_>>()
                 .join(" / ")
@@ -86,11 +91,25 @@ mod tests {
         );
         assert_eq!(music.title.unwrap().text, "Song");
         assert_eq!(music.artists.unwrap().text, "Artist");
+        let nested_artist = from_json(
+            serde_json::json!({"musicName":"Nested","artist":[["Nested Artist",123]]}),
+            None,
+        );
+        assert_eq!(nested_artist.artists.unwrap().text, "Nested Artist");
         let dj = from_json(
             serde_json::json!({"name":"Talk","artists":[{"name":"Host"}],"album":{"name":"Series"},"songId":2}),
             Some(vec![1, 2]),
         );
         assert_eq!(dj.album.unwrap().text, "Series");
         assert_eq!(dj.cover.unwrap().bytes, Some(vec![1, 2]));
+    }
+
+    #[test]
+    fn repository_sample_retains_nested_artist_name() {
+        let sample = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../samples/Claire Rosinkranz - Frankenstein.ncm");
+        let metadata = parse(&sample).unwrap();
+        assert_eq!(metadata.artists.unwrap().text, "Claire Rosinkranz");
+        assert_eq!(metadata.title.unwrap().text, "Frankenstein");
     }
 }

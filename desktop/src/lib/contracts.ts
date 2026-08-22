@@ -6,6 +6,7 @@ export type RunSettings = {
 
 export type Preferences = {
   locale: "en-US" | "zh-CN";
+  theme: "light" | "dark";
   defaultSettings: RunSettings;
 };
 
@@ -35,6 +36,7 @@ export type RunSummary = {
   skipped: number;
   conflicted: number;
   failed: number;
+  musicCount: number;
   representativeArtworkId: number | null;
   terminalErrorCode: string | null;
   terminalErrorDetail: string | null;
@@ -68,6 +70,8 @@ export type MusicSnapshot = {
   artist: string | null;
   album: string | null;
   durationMs: number | null;
+  outputBytes: number | null;
+  outputFormat: string | null;
   artwork: null;
 };
 
@@ -143,6 +147,8 @@ export type HistoryItem = {
   action: string | null;
   outcome: string;
   logicalBytes: number;
+  outputBytes: number | null;
+  outputFormat: string | null;
   errorCode: string | null;
   errorDetail: string | null;
   warnings: ReportWarning[];
@@ -155,7 +161,32 @@ export type HistoryItem = {
 
 export type ItemPage = {
   items: HistoryItem[];
-  nextCursor: number | null;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  filteredTotal: number;
   companionCount: number;
   musicTotal: number;
+};
+
+export type ItemSort = "ordinal" | "title" | "artist" | "album" | "size";
+export type SortDirection = "asc" | "desc";
+export type OutcomeFilter = "converted" | "skipped" | "conflict" | "failed" | "cancelled";
+
+export type ItemQuery = {
+  page: number;
+  pageSize: number;
+  search: string | null;
+  artist: string | null;
+  album: string | null;
+  outcome: OutcomeFilter | null;
+  sort: ItemSort;
+  direction: SortDirection;
+};
+
+export type FacetKind = "artist" | "album";
+
+export type FacetPage = {
+  values: string[];
+  nextCursor: string | null;
 };

@@ -1,8 +1,9 @@
 use crate::{
     PRODUCT_NAME,
     history::{
-        ArtworkInput, ArtworkRecord, CreateRun, InputKind, ItemPage, PersistedItemInput,
-        Preferences, RunPage, RunSettings, RunStatus, StoredItemKind, StoredWarning,
+        ArtworkInput, ArtworkRecord, CreateRun, FacetKind, FacetPage, InputKind, ItemPage,
+        ItemQuery, PersistedItemInput, Preferences, RunPage, RunSettings, RunStatus,
+        StoredItemKind, StoredWarning,
     },
     state::AppState,
 };
@@ -17,9 +18,10 @@ use std::{
     thread::JoinHandle,
 };
 use tauri::{
-    State,
+    AppHandle, State,
     ipc::{Channel, Response},
 };
+use tauri_plugin_opener::OpenerExt;
 use unlockm::{
     app::{
         self, JobOutcome, JobReport, Summary,
@@ -65,6 +67,13 @@ impl CommandError {
                 "state_error"
             },
             detail: error.to_string(),
+        }
+    }
+
+    fn output_unavailable(detail: impl Into<String>) -> Self {
+        Self {
+            code: "output_unavailable",
+            detail: detail.into(),
         }
     }
 }
@@ -281,16 +290,33 @@ pub async fn list_runs(
 }
 
 #[tauri::command]
-pub async fn get_run_items(
+pub async fn query_run_items(
     state: State<'_, AppState>,
     run_id: i64,
-    cursor: Option<u64>,
-    limit: Option<usize>,
+    query: ItemQuery,
 ) -> CommandResult<ItemPage> {
     let history = state.history().clone();
     blocking(move || {
         history
-            .list_music_items(run_id, cursor, limit.unwrap_or(100))
+            .query_music_items(run_id, query)
+            .map_err(CommandError::history)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn list_run_item_facets(
+    state: State<'_, AppState>,
+    run_id: i64,
+    facet: FacetKind,
+    search: Option<String>,
+    cursor: Option<String>,
+    limit: Option<usize>,
+) -> CommandResult<FacetPage> {
+    let history = state.history().clone();
+    blocking(move || {
+        history
+            .list_music_facets(run_id, facet, search, cursor, limit.unwrap_or(50))
             .map_err(CommandError::history)
     })
     .await
@@ -356,6 +382,108 @@ pub async fn set_preferences(
         Ok(preferences)
     })
     .await
+}
+
+fn validated_recorded_directory(path: PathBuf) -> CommandResult<PathBuf> {
+    let metadata = fs::symlink_metadata(&path).map_err(|error| {
+        CommandError::output_unavailable(format!("read {}: {error}", path.display()))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(CommandError::output_unavailable(
+            "recorded output is not a regular directory",
+        ));
+    }
+    path.canonicalize().map_err(|error| {
+        CommandError::output_unavailable(format!("canonicalize {}: {error}", path.display()))
+    })
+}
+
+fn validated_recorded_file(path: PathBuf) -> CommandResult<PathBuf> {
+    let metadata = fs::symlink_metadata(&path).map_err(|error| {
+        CommandError::output_unavailable(format!("read {}: {error}", path.display()))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CommandError::output_unavailable(
+            "recorded output is not a regular file",
+        ));
+    }
+    path.canonicalize().map_err(|error| {
+        CommandError::output_unavailable(format!("canonicalize {}: {error}", path.display()))
+    })
+}
+
+fn invoke_native_action(
+    path: &Path,
+    action: impl FnOnce(&Path) -> Result<(), String>,
+) -> CommandResult<bool> {
+    action(path).map_err(CommandError::output_unavailable)?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn reveal_run_output(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    run_id: i64,
+) -> CommandResult<bool> {
+    let history = state.history().clone();
+    let path = blocking(move || {
+        let path = history
+            .run_output_path(run_id)
+            .map_err(CommandError::history)?
+            .ok_or_else(|| CommandError::output_unavailable("run output does not exist"))?;
+        validated_recorded_directory(path)
+    })
+    .await?;
+    invoke_native_action(&path, |path| {
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<String>)
+            .map_err(|error| error.to_string())
+    })
+}
+
+#[tauri::command]
+pub async fn reveal_run_item(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    item_id: i64,
+) -> CommandResult<bool> {
+    let history = state.history().clone();
+    let path = blocking(move || {
+        let path = history
+            .music_output_path(item_id)
+            .map_err(CommandError::history)?
+            .ok_or_else(|| CommandError::output_unavailable("music output does not exist"))?;
+        validated_recorded_file(path)
+    })
+    .await?;
+    invoke_native_action(&path, |path| {
+        app.opener()
+            .reveal_item_in_dir(path)
+            .map_err(|error| error.to_string())
+    })
+}
+
+#[tauri::command]
+pub async fn open_run_item(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    item_id: i64,
+) -> CommandResult<bool> {
+    let history = state.history().clone();
+    let path = blocking(move || {
+        let path = history
+            .music_output_path(item_id)
+            .map_err(CommandError::history)?
+            .ok_or_else(|| CommandError::output_unavailable("music output does not exist"))?;
+        validated_recorded_file(path)
+    })
+    .await?;
+    invoke_native_action(&path, |path| {
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<String>)
+            .map_err(|error| error.to_string())
+    })
 }
 
 #[tauri::command]
@@ -760,6 +888,8 @@ fn item_for_history(report: &JobReport) -> PersistedItemInput {
         }),
         outcome: outcome_name(report.outcome).into(),
         logical_bytes: report.logical_bytes,
+        output_bytes: music.and_then(|music| music.output_bytes),
+        output_format: music.and_then(|music| music.output_format.clone()),
         preflight_ms: report.timings.preflight.as_millis() as u64,
         decrypt_ms: report.timings.decrypt.as_millis() as u64,
         metadata_resolve_ms: report.timings.metadata_resolve.as_millis() as u64,
@@ -876,6 +1006,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn recorded_output_validation_and_native_adapter_use_only_the_validated_target() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("track.mp3");
+        fs::write(&file, b"audio").unwrap();
+        let validated_file = validated_recorded_file(file.clone()).unwrap();
+        let validated_directory = validated_recorded_directory(directory.path().into()).unwrap();
+        assert_eq!(validated_file, file.canonicalize().unwrap());
+        assert_eq!(
+            validated_directory,
+            directory.path().canonicalize().unwrap()
+        );
+
+        let seen = std::sync::Mutex::new(None);
+        assert!(
+            invoke_native_action(&validated_file, |path| {
+                *seen.lock().unwrap() = Some(path.to_path_buf());
+                Ok(())
+            })
+            .unwrap()
+        );
+        assert_eq!(*seen.lock().unwrap(), Some(validated_file));
+        assert_eq!(
+            invoke_native_action(&file, |_| Err("native open failed".into()))
+                .unwrap_err()
+                .code,
+            "output_unavailable"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recorded_file_validation_rejects_symlink_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("target.mp3");
+        let link = directory.path().join("recorded.mp3");
+        fs::write(&target, b"audio").unwrap();
+        std::os::unix::fs::symlink(target, &link).unwrap();
+        assert_eq!(
+            validated_recorded_file(link).unwrap_err().code,
+            "output_unavailable"
+        );
+    }
+
     fn report(ordinal: u64) -> Box<JobReport> {
         Box::new(JobReport {
             ordinal,
@@ -916,7 +1090,7 @@ mod tests {
         let independent_reader = HistoryStore::open(&database).unwrap();
         assert_eq!(
             independent_reader
-                .list_music_items(run.id, None, 10)
+                .query_music_items(run.id, ItemQuery::default())
                 .unwrap()
                 .items
                 .len(),
@@ -974,7 +1148,7 @@ mod tests {
         coordinator.shutdown();
         assert_eq!(
             history
-                .list_music_items(run.id, None, 10)
+                .query_music_items(run.id, ItemQuery::default())
                 .unwrap()
                 .items
                 .len(),
@@ -1137,15 +1311,14 @@ mod tests {
         .unwrap();
         assert_eq!(run.status, RunStatus::Completed);
         assert!(output.join("single.mp3").is_file());
-        assert_eq!(
-            state
-                .history()
-                .list_music_items(run.id, None, 10)
-                .unwrap()
-                .items
-                .len(),
-            1
-        );
+        let page = state
+            .history()
+            .query_music_items(run.id, ItemQuery::default())
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        let published = fs::metadata(output.join("single.mp3")).unwrap().len();
+        assert_eq!(page.items[0].output_bytes, Some(published));
+        assert_eq!(page.items[0].output_format.as_deref(), Some("mp3"));
     }
 
     #[test]
@@ -1172,7 +1345,10 @@ mod tests {
         assert_eq!(run.status, RunStatus::Completed);
         assert!(output.join("top.mp3").is_file());
         assert!(output.join("nested/track.mp3").is_file());
-        let items = state.history().list_music_items(run.id, None, 10).unwrap();
+        let items = state
+            .history()
+            .query_music_items(run.id, ItemQuery::default())
+            .unwrap();
         assert_eq!(items.items.len(), 2);
         drop(state);
         let reopened = AppState::new(HistoryStore::open(database).unwrap()).unwrap();
@@ -1183,7 +1359,7 @@ mod tests {
         assert_eq!(
             reopened
                 .history()
-                .list_music_items(run.id, None, 10)
+                .query_music_items(run.id, ItemQuery::default())
                 .unwrap()
                 .items
                 .len(),

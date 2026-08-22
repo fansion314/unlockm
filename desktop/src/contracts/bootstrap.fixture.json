@@ -3,6 +3,7 @@
   "supportedLocales": ["zh-CN", "en-US"],
   "preferences": {
     "locale": "en-US",
+    "theme": "light",
     "defaultSettings": {
       "updateMetadata": false,
       "copyPassthrough": true,

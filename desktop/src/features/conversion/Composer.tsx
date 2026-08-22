@@ -1,8 +1,16 @@
+import {
+  ArrowRight,
+  FileAudio,
+  FolderOpen,
+  FolderSimple,
+  ImageSquare,
+  UploadSimple,
+} from "@phosphor-icons/react";
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isTauri } from "@tauri-apps/api/core";
 import type { RunSettings, ValidatedInput } from "../../lib/contracts";
 import { singleDroppedPath } from "./drop";
 
@@ -17,6 +25,10 @@ type ComposerProps = {
   onConvert: (this: void) => void;
   onError: (this: void, detail: string) => void;
 };
+
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
 
 export function Composer({
   selected,
@@ -33,22 +45,14 @@ export function Composer({
   const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
-    if (!isTauri()) {
-      return;
-    }
+    if (!isTauri()) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void getCurrentWindow()
       .onDragDropEvent((event) => {
-        if (disposed) {
-          return;
-        }
-        if (event.payload.type === "enter") {
-          setDragging(true);
-        }
-        if (event.payload.type === "leave") {
-          setDragging(false);
-        }
+        if (disposed) return;
+        if (event.payload.type === "enter") setDragging(true);
+        if (event.payload.type === "leave") setDragging(false);
         if (event.payload.type === "drop") {
           setDragging(false);
           const path = singleDroppedPath(event.payload.paths);
@@ -60,11 +64,8 @@ export function Composer({
         }
       })
       .then((listener) => {
-        if (disposed) {
-          listener();
-        } else {
-          unlisten = listener;
-        }
+        if (disposed) listener();
+        else unlisten = listener;
       })
       .catch((error: unknown) => onError(String(error)));
     return () => {
@@ -76,9 +77,7 @@ export function Composer({
   const choose = async (directory: boolean) => {
     try {
       const path = await open({ directory, multiple: false });
-      if (typeof path === "string") {
-        await onSelectPath(path);
-      }
+      if (typeof path === "string") await onSelectPath(path);
     } catch (error) {
       onError(String(error));
     }
@@ -87,92 +86,94 @@ export function Composer({
   const chooseOutput = async () => {
     try {
       const path = await open({ directory: true, multiple: false });
-      if (typeof path === "string") {
-        onOutputPath(path);
-      }
+      if (typeof path === "string") onOutputPath(path);
     } catch (error) {
       onError(String(error));
     }
   };
 
+  const updateSettings = (next: Partial<RunSettings>) =>
+    onSettings({ ...settings, ...next, overwrite: false });
+
   return (
-    <section className="composer" aria-labelledby="composer-title">
-      <div className="composer-head">
-        <p className="eyebrow">{t("composer.eyebrow")}</p>
-        <h1 id="composer-title">{t("composer.title")}</h1>
-        <p>{t("composer.description")}</p>
-      </div>
+    <section className="composer" aria-label={t("composer.regionLabel")}>
       <div
         className={`drop-field ${dragging ? "is-dragging" : ""} ${selected ? "has-selection" : ""}`}
       >
         <span className="drop-glyph" aria-hidden="true">
-          ↟
+          <UploadSimple size={30} weight="light" />
         </span>
-        <strong>{selected ? selected.path.split(/[\\/]/).pop() : t("composer.drop")}</strong>
-        <span>{selected ? t("composer.selected") : t("composer.description")}</span>
+        <div className="drop-copy">
+          <strong>{selected ? basename(selected.path) : t("composer.drop")}</strong>
+          <span>{selected ? selected.path : t("composer.dropHint")}</span>
+        </div>
         <div className="choice-row">
           <button type="button" onClick={() => void choose(false)} disabled={busy}>
+            <FileAudio aria-hidden="true" size={17} />
             {t("composer.chooseFile")}
           </button>
           <button type="button" onClick={() => void choose(true)} disabled={busy}>
+            <FolderSimple aria-hidden="true" size={17} />
             {t("composer.chooseFolder")}
           </button>
         </div>
       </div>
-      <div className="settings-panel">
-        <div className="settings-title">
-          <span>{t("composer.settings")}</span>
-          <button type="button" onClick={() => void chooseOutput()} disabled={busy}>
-            {t("composer.chooseOutput")}
-          </button>
-        </div>
-        <p className="output-path">{outputPath ?? t("composer.outputDefault")}</p>
-        <label className="setting-row">
-          <input
-            checked={settings.updateMetadata}
-            disabled={busy}
-            type="checkbox"
-            onChange={(event) => onSettings({ ...settings, updateMetadata: event.target.checked })}
-          />
-          <span>
-            {t("composer.metadata")}
-            <small>{t("composer.metadataHint")}</small>
+
+      <div className="composer-actions">
+        <button
+          aria-label={t("composer.chooseOutput")}
+          className="output-button"
+          type="button"
+          onClick={() => void chooseOutput()}
+          disabled={busy}
+        >
+          <FolderOpen aria-hidden="true" size={25} weight="duotone" />
+          <span className="output-copy">
+            <small>{t("composer.output")}</small>
+            <strong>{outputPath ? basename(outputPath) : t("composer.outputDefault")}</strong>
+            {outputPath ? <span>{outputPath}</span> : null}
           </span>
-        </label>
-        {selected?.kind === "directory" ? (
-          <label className="setting-row">
+        </button>
+
+        <div className="settings-panel" aria-label={t("composer.settings")}>
+          <label className="setting-row" title={t("composer.metadataHint")}>
+            <span className="setting-icon" aria-hidden="true">
+              <ImageSquare size={18} />
+            </span>
+            <span>{t("composer.metadata")}</span>
             <input
-              checked={settings.copyPassthrough}
+              checked={settings.updateMetadata}
               disabled={busy}
               type="checkbox"
-              onChange={(event) =>
-                onSettings({ ...settings, copyPassthrough: event.target.checked })
-              }
+              onChange={(event) => updateSettings({ updateMetadata: event.target.checked })}
             />
-            <span>{t("composer.copy")}</span>
           </label>
-        ) : null}
-        <label className="setting-row">
-          <input
-            checked={settings.overwrite}
-            disabled={busy}
-            type="checkbox"
-            onChange={(event) => onSettings({ ...settings, overwrite: event.target.checked })}
-          />
-          <span>
-            {t("composer.overwrite")}
-            <small>{t("composer.overwriteHint")}</small>
-          </span>
-        </label>
+          {selected?.kind === "directory" ? (
+            <label className="setting-row">
+              <span className="setting-icon" aria-hidden="true">
+                <FolderSimple size={18} />
+              </span>
+              <span>{t("composer.copy")}</span>
+              <input
+                checked={settings.copyPassthrough}
+                disabled={busy}
+                type="checkbox"
+                onChange={(event) => updateSettings({ copyPassthrough: event.target.checked })}
+              />
+            </label>
+          ) : null}
+        </div>
+
+        <button
+          className="convert-button"
+          disabled={!selected || busy}
+          type="button"
+          onClick={onConvert}
+        >
+          <span>{busy ? t("composer.busy") : t("composer.convert")}</span>
+          <ArrowRight aria-hidden="true" size={20} weight="bold" />
+        </button>
       </div>
-      <button
-        className="convert-button"
-        disabled={!selected || busy}
-        type="button"
-        onClick={onConvert}
-      >
-        {t("composer.convert")}
-      </button>
     </section>
   );
 }

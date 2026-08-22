@@ -2,13 +2,15 @@
 
 ## Status
 
-In Progress
+Done
 
 ## Objective
 
-Build a polished Tauri v2 desktop application for macOS and Windows that links the existing `unlockm` Rust library directly into the application, converts one selected file or recursively converts one selected directory, supports native file/folder picking and drag-and-drop, exposes a concise set of pre-run options, and persists conversion history across application restarts.
+Build a polished Tauri v2 desktop application for macOS and Windows that links the existing `unlockm` Rust library directly into the application, converts one selected file or recursively converts one selected directory, supports native file/folder picking and drag-and-drop, exposes only a concise set of understandable pre-run options, and persists conversion history across application restarts.
 
-The main view must represent each user-initiated conversion as exactly one history row. Opening a directory run transitions to a full detail view that presents its music items as one flat, virtualized list regardless of source nesting. Each music item shows its terminal outcome, source/output information, captured title/artist/album/duration, and album artwork when available. The first release is bilingual (`zh-CN` and `en-US`), visually modern and youthful, animation-rich without sacrificing accessibility, and distributed by GitHub Actions for macOS and Windows.
+The redesigned shell has a fixed localized product bar, an explicit language menu, and a light/dark toggle whose fresh-install default is light. The home view puts the drop target and action/options column in an approximately golden-ratio composition, then places a full-width one-row-per-run conversion history below it. Opening a run transitions to a compact detail view with a server-backed searchable, filterable, sortable, genuinely paginated flat song list. Each song shows artwork, title, artist, album, converted file type and size, provides one-at-a-time in-app playback with play/pause and seeking, and offers narrow actions to reveal the file or open it in the system player.
+
+The first release is bilingual (`zh-CN` and `en-US`), visually modern and restrained in both themes, motion-rich without sacrificing accessibility, and distributed by GitHub Actions for macOS and Windows.
 
 The desktop application must not start the `unlockm` CLI or any other conversion sidecar. All decryption, path planning, metadata handling, bounded concurrency, and atomic publication remain in the in-process Rust core.
 
@@ -20,22 +22,32 @@ The desktop application must not start the `unlockm` CLI or any other conversion
 - Add a stable, UI-independent batch event/reporting surface to the root Rust library so a desktop host can receive ordered batch and per-file lifecycle data without scraping logs.
 - Support exactly one file or exactly one directory per user-initiated run. Directory input remains recursive and uses the existing mirror path planner; “flat detail view” refers only to presentation, not `--flat` output semantics.
 - Support native input selection, native output-directory selection, and OS-native file/folder drag-and-drop.
-- Offer these initial quick settings before conversion:
+- Offer only these understandable quick settings before conversion:
   - conservatively update metadata and covers (`update_metadata`, off by default),
   - copy ordinary companion files for directory input (`copy_passthrough`, on by default),
-  - atomically replace existing destinations (`overwrite`, off by default),
   - choose an output directory; default to the input file parent or the input directory, matching the CLI.
-- Keep mirror layout, automatic job limits, streaming buffer size, metadata concurrency, and automatic key discovery as fixed core defaults in the initial UI. Do not expose flat output or manual key material in v1.
+- Keep replacement of existing destinations off in the redesigned UI. Keep mirror layout, automatic job limits, streaming buffer size, metadata concurrency, and automatic key discovery as fixed core defaults. Do not expose flat output, manual key material, or implementation terminology such as “atomic replacement” in the primary interface.
 - Allow one active conversion run at a time and provide cancellation as a minimum safety control for large directory runs.
 - Persist runs, per-path outcomes, technical error/warning details, music metadata snapshots, and deduplicated artwork in a local SQLite database located in Tauri's application-data directory.
 - Recover incomplete `planning`/`running` rows as `interrupted` at next startup without touching source or output files.
-- Implement paginated history reads and a virtualized detail list so large directory histories do not require loading or rendering every item at once.
-- Provide Chinese and English UI resources, runtime language switching, locale persistence, translated product/error-code copy, and sensible filename/path fallbacks.
+- Keep newest-first keyset pagination for run history. Replace detail “load more” with SQL-backed page/page-size queries whose search, album filter, artist filter, outcome filter, and sort all apply to the complete run rather than only already-loaded items.
+- Provide Chinese and English UI resources, a proper language dropdown, localized product subtitle (`UnlockM · 音乐解锁` / `UnlockM · Music Unlocker`), locale persistence, translated product/error-code copy, and sensible filename/path fallbacks.
+- Provide complete light and dark token sets, default new users to light, persist an explicit theme choice, and avoid a wrong-theme flash during startup by applying a synchronous cached theme before React mounts and reconciling it with Rust-owned preferences during bootstrap.
+- Use one fixed/sticky title bar on both home and detail views, with icon buttons for language and theme plus localized accessible names/tooltips.
+- Recompose the home conversion area as an approximately `1.6fr / 1fr` desktop split: the drop/select surface is dominant; the right stack contains a large output-directory control, only applicable quick settings, and a large restrained primary conversion action. Stack responsively in narrow windows.
+- Place conversion history below the composer as full-width rows showing input file/directory name, output path, exact music count for terminal history (active progress may retain admitted-item counts), aggregate result, and timestamp. Each row's primary content opens detail, exposes a separate icon action to reveal its output directory, and retains record-only deletion without nesting interactive controls.
+- Make the detail summary card shorter and denser while adding known input/output, time, duration, counts, and result facts. Below it, show a flat song list with artwork, title, artist, album, converted output size/type, compact result when needed, and no expandable raw diagnostic section.
+- Add a shared one-track-at-a-time audio controller behind per-song play/pause and accessible seek controls. Serve only persisted music-item outputs through an item-ID-based, range-aware Tauri custom protocol; do not expose arbitrary filesystem paths or load whole audio files into SQLite/IPC.
+- Add per-song icon actions to reveal the exact converted file in Finder/Explorer and to open it with the platform's default music player. Add the same narrow run-ID-based reveal action for a history row's output directory.
 - Implement whole-view home/detail transitions, shared row/header motion, live progress animation, drag-over feedback, and reduced-motion behavior.
-- Add component, state/reducer, Rust unit/integration, persistence/restart, and cross-platform build validation.
+- Add component, state/reducer, Rust unit/integration, persistence/restart, and macOS-native build/runtime validation for this redesign. Preserve the existing Windows product code, CI, and release definitions, but do not require new Windows execution evidence in this implementation cycle.
 - Add GitHub Actions checks and tagged release packaging for a universal macOS DMG and a Windows x86_64 NSIS `.exe` installer.
 - Publish those tag artifacts automatically as clearly labeled unsigned preview prereleases: macOS uses Tauri ad-hoc signing only, Windows uses no Authenticode certificate, all artifacts include SHA-256 files, and documentation gives least-privilege first-open guidance.
 - Update `ARCHITECTURE.md`, user documentation, license notices, and build instructions when implementation changes the repository boundary.
+- Change the canonical bundle/application identifier from the erroneous `world.fansion.unlockm` to `world.fansionia.unlockm`, and perform a one-time SQLite online backup from the legacy app-data directory when the new history database does not yet exist.
+- Rebalance the compact detail summary so long input names/paths and localized completion timestamps are fully readable at the 1080×760 native window instead of being clipped around oversized metric gaps.
+- Customize the native About panel with bilingual token/recipient credits and `Copyright © Hamlet Fansion (Peilin Fan)` while preserving the standard macOS application/File/Edit/View/Window/Help menus.
+- Populate history display metadata from trusted local NCM container evidence even when `update_metadata` is off; use conservative `Artist - Title` filename parsing only when both final tags and container evidence lack artist/title. This history-only fallback must not cause network access or mutate the converted audio.
 
 ## Non-Goals
 
@@ -45,34 +57,40 @@ The desktop application must not start the `unlockm` CLI or any other conversion
 - Linux, mobile, App Store, or Microsoft Store distribution in the initial release.
 - A raw portable macOS binary outside an `.app` bundle, or a raw portable Windows binary with no installer/runtime assumptions. The release contract is one downloadable installer artifact per platform.
 - Paid/protected-code-signing, macOS notarization, Windows Authenticode reputation, and a claim that preview artifacts are trusted production releases. A future signed channel may be added separately without changing the unsigned-preview contract.
-- Audio playback, waveform display, library management, playlists, search across history, history export/import, cloud sync, accounts, telemetry, auto-update, or background/tray operation.
+- Waveform visualization, audio transcoding for preview compatibility, playlists, queue management, library management, search across separate runs, history export/import, cloud sync, accounts, telemetry, auto-update, or background/tray operation.
 - Multiple simultaneous batch runs, multi-selection of unrelated roots, or queuing several roots from one drag operation.
 - Exposing `--watch`, `--flat`, `--jobs`, `--buffer-size`, `--metadata-jobs`, QMC ekeys/maps/MMKV passwords, or KGM database paths in the initial UI.
 - Audio transcoding, deleting encrypted sources, changing collision policy, weakening atomic publication, or changing metadata confidence rules.
 - Fetching metadata or artwork solely to decorate history. History captures the final/local output state; network access remains gated by `update_metadata`.
-- Full theming or more than `zh-CN` and `en-US` in the first release. The token and resource structure must remain extensible.
+- Theme customization beyond the explicit light/dark pair, automatic system-theme following, or more than `zh-CN` and `en-US` in the first release. The token and resource structure must remain extensible.
+- A generic webview filesystem/opener capability, arbitrary-path audio URL, or arbitrary-path “open with system application” command. All playback/reveal/open operations must resolve a persisted run/item ID in Rust and revalidate the recorded destination.
 
 ## Current Context
 
-- Repository state at planning time is clean at `c2dcb69` on `main`. All existing files under `docs/plans/` are `Done`; there is no competing active desktop/Tauri plan.
-- `Cargo.toml` currently defines one Rust 2024 package, `unlockm`, with both `src/lib.rs` and `src/main.rs`. `rusqlite` with bundled SQLite is already used for KGM key lookup, but there is no application-history store.
-- `src/main.rs` is a thin CLI host. It delegates to `app::run`, which uses `src/app/scan.rs` and `src/app/runner.rs`; this is a sound basis for a second in-process host.
-- `src/config.rs::RunConfig` owns validated/canonical input and output paths plus batch/watch options, but its many-argument constructor and CLI presentation field are awkward for a desktop caller.
-- `src/app/runner.rs` already bounds blocking jobs with a shared semaphore, supports cancellation, performs preflight collision grouping before publication, and records internal `JobReport` values. Its report collector is test-only and reports currently omit absolute source/destination paths, action kind, error/warning details, and metadata snapshots.
-- `src/app/job.rs` performs streaming decrypt/copy and atomic publication. Best-effort metadata warnings are currently emitted through `tracing`, so the desktop cannot reliably associate those warnings with a history item without a structured result.
-- `src/metadata/tags.rs::read` content-probes audio and already returns title, album, artist, duration, and embedded cover bytes. It can be reused after a converted or safely skipped destination is known; history must not reimplement tag parsing in TypeScript.
+- The implemented baseline is at `b9701c3` on the current branch. This file remains the only active desktop/Tauri ExecPlan; M1–M5 baseline work is implemented and reviewed except for the external T5.6 preview/Windows evidence, while M6–M9 are newly planned and open.
+- The root Rust 2024 `unlockm` package and `desktop/src-tauri` workspace child are implemented. The desktop links the library in process; `RunOptions`, bounded structured `BatchObserver` reports, cancellation, collision planning, source retention, and atomic publication are shared with CLI/watch.
+- `src/metadata/tags.rs::read_bounded_snapshot` content-probes final audio and supplies title, album, artist, duration, and bounded artwork only to observers that opt into snapshots. It is the correct seam for adding actual published output length/type without adding a TypeScript parser or changing the no-op CLI/watch path.
 - `src/app/scan.rs` is recursive, rejects symlinks, prunes an output subtree inside the input, and uses the same planner as the CLI. These containment and source-retention semantics remain authoritative.
-- `ARCHITECTURE.md` currently calls a GUI a non-goal and describes a one-package layout. The new app is the concrete second consumer that justifies a workspace child and requires an architecture update during implementation.
-- `.github/workflows/ci.yml` currently runs formatting, Clippy, tests, watch tests, and a release build on Ubuntu, macOS, and Windows. It has no Node/frontend or Tauri package/release jobs.
-- The repository currently has no frontend or Tauri configuration, app icon set, or desktop-specific capability file. The workspace scaffold added during T1.1 intentionally has no Tauri dependency/configuration yet.
-- The verified product icon source is `/Users/peilin/Downloads/UnlockM Icon.png` (512×512 indexed PNG with alpha): a gold unlocked-lock/music-note/scissors composition. It must be copied without modification into the repository before derivative assets are generated.
-- Tauri v2 official guidance supports Rust commands, ordered IPC channels for streamed data, raw IPC responses, native dialog permissions, and webview drag/drop events. Relevant references, verified on 2026-08-21:
+- `desktop/src-tauri/src/history/mod.rs` owns schema-v1 SQLite runs/items/artwork/preferences, restart recovery, record-only deletion, keyset run/item reads, and artwork dedupe. `desktop/src-tauri/src/commands/mod.rs` keeps database and conversion work off the Tauri main thread and exposes typed commands/DTOs.
+- `desktop/src-tauri/capabilities/default.json` currently grants only drag-event listen/unlisten and dialog open. `tauri.conf.json` has no asset protocol or opener capability. Policy tests already reject generic process/sidecar/filesystem/database access and must be extended, not relaxed wholesale.
+- `.github/workflows/ci.yml` and `desktop-release.yml` already cover locked Vite+/Rust desktop builds and the no-secret unsigned-preview packaging contract. `ARCHITECTURE.md`, both READMEs, third-party notices, and bundled license resources describe the implemented baseline and will need incremental redesign updates.
+- The user-supplied icon is preserved at `desktop/src-tauri/icons/source/UnlockM Icon.png`, and the existing generated Tauri derivatives remain authoritative; the redesign does not redraw or replace it.
+- Previously verified Tauri v2 references remain relevant for commands, IPC, dialog, drag/drop, and distribution:
   - <https://v2.tauri.app/develop/calling-rust/>
   - <https://v2.tauri.app/develop/calling-frontend/>
   - <https://v2.tauri.app/reference/javascript/api/namespacewebviewwindow/>
   - <https://v2.tauri.app/plugin/dialog/>
   - <https://v2.tauri.app/distribute/>
   - <https://v2.tauri.app/distribute/pipelines/github/>
+- `desktop/src/App.tsx` now composes the fixed shared `AppHeader`, 1.6:1 `Composer`, and full-width history below it. The primary row-content button opens detail; sibling buttons reveal output and delete only the history record.
+- `desktop/src/features/conversion/Composer.tsx` now contains only operational drop/select/output/settings/action content. The overwrite control is removed and both preferences/request construction normalize it to the safe `false` default; metadata refresh and directory-only companion copy remain.
+- `desktop/src/styles/tokens.css` now defines complete light-default and dark semantic tokens. A synchronous local cache paints before React, then the schema-compatible Rust preference reconciles locale/theme/settings once at bootstrap.
+- `desktop/src/features/history/HistoryDetail.tsx` now queries true 25-song pages with stale-response protection, search, searchable album/artist facets, outcome filter and allowlisted sort. Rows show artwork/metadata/output facts, no raw diagnostics, one shared in-app player with seek, and separate Finder/system-player actions.
+- SQLite schema version 2 stores nullable actual output bytes/content format, while bounded schema-v1 page reads repair only revalidated destinations. `query_run_items` filters/sorts/counts before pagination and `RunSummary.music_count` no longer relabels companion-inclusive totals.
+- `desktop/src-tauri/src/audio_protocol.rs` implements the item-ID-only bounded media protocol; `commands/mod.rs` exposes ID-only native actions through opener 2.5.4. The capability file remains dialog/event-only and the generic asset/opener surfaces stay unavailable to the webview.
+- Follow-up inspection found the canonical identifier is misspelled as `world.fansion.unlockm`; the corrected identifier changes the Tauri app-data directory, so history continuity requires a legacy database backup rather than merely changing `tauri.conf.json`.
+- Native 1080×760 detail evidence shows the summary's title/path column and localized completion timestamp clipped while the four fact columns reserve excessive space between values.
+- `snapshot_music` currently reads only final output tags. NCM container JSON is parsed only inside the optional tag-update pipeline, so metadata-off conversions can persist a correct album/title yet still lose the known artist in desktop history.
 
 ## Design and Decisions
 
@@ -150,7 +168,9 @@ The home composer accepts exactly one root:
 
 The Rust command revalidates and canonicalizes all frontend-provided paths; frontend validation is only UX. The output defaults exactly as the CLI does. Directory output remains mirrored. For a file, selecting an output means a directory, never an arbitrary final filename.
 
-Quick settings are summarized inline and editable in a compact animated panel before the Convert button. `update_metadata` explicitly explains that verified network metadata may be requested. `copy_passthrough` is disabled/hidden for single-file input. `overwrite` warns that replacement remains atomic. Persist the user's locale and quick-setting defaults as app preferences, but snapshot the actual settings into every run record so history remains truthful if defaults later change.
+The redesigned action column shows one large output-directory button above only the settings that have clear user value. `update_metadata` uses concise product copy and an accessible tooltip for the optional verified network request; `copy_passthrough` is visible only for directory input. `overwrite` is no longer editable in the primary UI and new frontend requests always send its safe `false` default. Preserve the backend field and existing historical snapshots for compatibility rather than rewriting old records.
+
+Persist locale, explicit `light`/`dark` theme, and the remaining quick-setting defaults as app preferences, but snapshot actual conversion settings into every run record so history remains truthful if defaults later change. Fresh preferences default to `light`; deserializing a pre-theme preferences value also defaults to `light`. A small localStorage theme cache may be used only to avoid first-paint flashing and must be reconciled with the Rust-owned preference on bootstrap.
 
 Only one run may be active. Starting another returns a typed `busy` error. Cancellation uses the existing core cancellation token, never deletes sources, never publishes an incomplete private stage, and yields a terminal `cancelled` run status after workers stop.
 
@@ -163,10 +183,14 @@ Expose a small command set from `desktop/src-tauri/src/commands/`:
 - `start_conversion(request, on_event: Channel<ConversionEventDto>)`: create the persistent run before work, mark it active, stream ordered progress, and resolve with the terminal run summary.
 - `cancel_conversion(run_id)`: idempotently request cancellation only for the matching active run.
 - `list_runs(cursor, limit)`: newest-first keyset pagination.
-- `get_run_items(run_id, cursor, limit)`: stable ordinal pagination of flattened music items plus aggregate companion counts.
+- `query_run_items(run_id, query)`: one true page of flattened music items plus filtered/total counts and companion counts. `query` contains a clamped page size, page index, trimmed song search, optional artist/album/outcome filters, and an allowlisted sort/direction; filtering and sorting execute in SQLite before pagination.
+- `list_run_item_facets(run_id, facet, search, cursor, limit)`: bounded, deduplicated non-empty artist/album values for accessible searchable filter popovers rather than loading an unbounded facet list into the webview.
 - `get_artwork(artwork_id)` plus `get_artwork_mime(artwork_id)`: return raw bytes and the validated MIME through two narrow Tauri IPC calls, because Tauri's raw `Response` body does not carry a custom MIME header; the frontend creates/revokes object URLs and lazy-loads visible covers.
+- `reveal_run_output(run_id)`: resolve only the stored run output directory in Rust, reject a missing/invalid/symlink target, and reveal/open that directory through the platform opener integration.
+- `reveal_run_item(item_id)`: resolve only a persisted music item's destination in Rust, revalidate a regular non-symlink file, and reveal that exact file in Finder/Explorer.
+- `open_run_item(item_id)`: perform the same item-ID lookup and validation, then ask the operating system to open the converted file with its default audio application.
 - `delete_run(run_id)` and `clear_history`: remove history/artwork references only after explicit confirmation and never touch source/output files.
-- `get_preferences` / `set_preferences`: locale and quick-setting defaults.
+- `get_preferences` / `set_preferences`: locale, explicit theme, and quick-setting defaults.
 
 Use a Tauri IPC `Channel` for ordered run events instead of global event names. DTOs use camelCase at the IPC boundary while core and database types remain idiomatic Rust. Generate or manually maintain one TypeScript contract module and add serialization contract tests to prevent silent field drift.
 
@@ -179,11 +203,13 @@ Initial logical schema:
 | Table | Purpose and required fields |
 | --- | --- |
 | `runs` | Integer id, input kind/path, output path, settings snapshot, status, timestamps, total/completed counts, all `Summary` counters, app/schema version, representative artwork id, terminal error code/detail. |
-| `items` | Integer id, run id, stable ordinal, item kind, source/relative/destination paths, action, outcome, bytes, timings, error code/detail, warning JSON, title, artist, album, duration, artwork id. |
+| `items` | Integer id, run id, stable ordinal, item kind, source/relative/destination paths, action, outcome, source logical bytes, nullable actual output bytes and content-probed output format, timings, error code/detail, warning JSON, title, artist, album, duration, artwork id. |
 | `artwork` | Integer id, SHA-256 digest unique key, validated MIME, original bytes, byte length, created timestamp. Identical covers are stored once. |
-| `preferences` | Key/value settings with schema-versioned JSON for locale and quick-setting defaults. |
+| `preferences` | Key/value settings with schema-versioned JSON for locale, explicit light/dark theme, and quick-setting defaults. |
 
-Write run/item transitions through one blocking database coordinator. Commit terminal item state before forwarding the corresponding terminal UI event so a webview reload cannot display progress that is absent from history. Query commands run with separate short-lived/read connections or a properly serialized store and never block the Tauri main thread.
+Write run/item transitions through one blocking database coordinator. Commit terminal item state before forwarding the corresponding terminal UI event so a webview reload cannot display progress that is absent from history. Add an idempotent schema-v2 migration for nullable `output_bytes` and `output_format` plus query indexes scoped by `run_id`/`item_kind`; do not scan every historical output during startup. Derive terminal `music_count` for `RunSummary` from the indexed item rows rather than relabeling `total_items`, because the latter includes companions. For schema-v1 rows, repair missing output facts only for the bounded page being read and only when the recorded destination still revalidates, then persist the repair best-effort. Query commands run on blocking workers and never block the Tauri main thread.
+
+Detail queries use allowlisted SQL fragments for sort columns/direction and bound parameters for search/facets. The response returns exact filtered and total counts so page controls remain correct after filters change; changing search/filter/sort resets to page 1. Tests must prove filters apply across unloaded rows and page boundaries remain stable under every supported sort.
 
 At startup, atomically convert stale `planning` or `running` runs to `interrupted`, set a recovery timestamp/message, and retain completed item records. Atomic core publication means an item may already have a valid output even if the process stopped before recording its terminal report; v1 does not guess or rescan to upgrade that record.
 
@@ -191,7 +217,7 @@ Deletion uses foreign keys and a post-delete orphan-artwork cleanup transaction.
 
 ### D8. Music metadata and artwork snapshots
 
-Extend terminal reporting so successfully converted audio reads its final destination through `metadata::tags::read` after publication. A safely skipped audio destination may also be read if it exists and content-probes as supported audio. Failed/conflicted items use a filename fallback and placeholder artwork; they must remain visible with their error.
+Extend terminal reporting so successfully converted audio reads its final destination through `metadata::tags::read` after publication. The same bounded snapshot records the actual final file length and a normalized content-probed container label (`MP3`, `FLAC`, `M4A`, and so on), never trusting only the filename suffix. A safely skipped audio destination may also be read if it exists and content-probes as supported audio. Failed/conflicted items use a filename fallback and placeholder artwork; they remain visible with a compact localized outcome but no expandable raw diagnostics in the product list.
 
 Do not show ordinary copied companions as music rows. Persist them for accurate counts/diagnostics with `item_kind = companion`, while the detail query returns music items by default and a compact companion summary. Encrypted candidates that fail before destination planning remain music items when their registered suffix identifies them as such.
 
@@ -199,32 +225,45 @@ Copy only normalized display fields and validated cover bytes into the history s
 
 ### D9. Product UI, visual direction, and motion
 
-Use React function components, a typed reducer/context for conversion state, and feature-local hooks. Avoid a broad state-management framework in v1. Use `motion/react` for shared layout/view transitions and `@tanstack/react-virtual` (or a verified equivalent) for the detail list. Keep all color, typography, spacing, radius, elevation, duration, and easing values in CSS custom-property tokens.
+Use React function components, a typed reducer/context for conversion state, and feature-local hooks. Avoid a broad state-management framework in v1. Use `motion/react` for shared layout/view transitions and retain `@tanstack/react-virtual` only where it still adds value inside a bounded page. Use one consistent icon set rather than Unicode glyphs; icon-only controls require localized accessible names, visible focus, and tooltips. Keep all light/dark color, typography, spacing, radius, elevation, duration, and easing values in CSS custom-property tokens.
 
-Visual direction: a deep graphite/indigo base with restrained electric-violet and cyan accents, a warm coral highlight, high-contrast neutral text, crisp opaque surfaces, and album artwork as the richest color source. Avoid indiscriminate glass blur and gradient-heavy template styling. Use a compact native-app density, generous hit targets, the supplied gold UnlockM lock/music-mark, and visible keyboard focus.
+Visual direction: light mode is the fresh-install default with warm off-white/neutral surfaces, restrained indigo/teal accents, dark readable text, and album artwork as the richest color source. Dark mode adapts the existing graphite/indigo character without the current gold primary-button glare. Both themes use crisp opaque surfaces, minimal gradients, compact native-app density, generous hit targets, the supplied UnlockM lock/music-mark, and visible keyboard focus. Avoid indiscriminate blur, decorative microcopy, oversized marketing headlines, and yellow/gold conversion controls.
+
+Shared shell:
+
+- a fixed/sticky top bar that does not scroll away on home or detail,
+- `UnlockM · 音乐解锁` in Chinese and `UnlockM · Music Unlocker` in English,
+- a globe icon opening an explicit two-language menu with checked selection and full keyboard/menu dismissal behavior,
+- a sun/moon icon toggling persisted light/dark mode,
+- icon-only controls wherever the symbol is conventional, with text retained where an icon alone would be ambiguous.
 
 Home view:
 
-- top brand/status bar with language control,
-- one large but compact drop/select composer,
-- animated quick-settings strip and primary Convert action,
-- one live/recent row per run, newest first, showing input name/type, status, counts/progress, timestamp, and a representative artwork/placeholder,
+- an approximately golden-ratio conversion composition, with the larger left drop/select surface and smaller right action stack,
+- a large output-directory chooser at the top of the right stack, only applicable quick settings beneath it, and a restrained indigo/teal primary Convert action at the bottom,
+- no duplicate eyebrow/title/description copy around the composer; preserve only labels, selected path, actionable validation, and status needed to operate it,
+- a full-width conversion history below the composer, with one readable row per run showing file/folder icon or representative art, source basename, output path, exact terminal music count, aggregate result, and timestamp,
+- separate sibling icon buttons for row detail, output-directory reveal, and record deletion so clicking one action cannot trigger another,
 - empty, bootstrap, validation, busy, and history-error states designed explicitly.
 
 Detail view:
 
 - whole-view slide/fade transition from home with reverse back navigation,
 - shared layout transition from the selected history row into a run summary header,
-- flat virtualized music list with cover, title, artist, album, duration, outcome, and expandable path/error/warning details,
-- skeleton and pagination states that do not shift the entire layout.
+- a shorter summary card showing source, output, start/end or duration, result counters, and output-reveal action without repeating the page title in oversized type,
+- a control row with song search, searchable artist and album facets, optional result filter, allowlisted sort, and a clear-all action; Chinese labels must use “歌曲/全部歌曲”, never “首音乐” as a standalone label,
+- true previous/next and numbered page navigation with a bounded default page size of 25; skeleton and empty states do not shift the layout,
+- flat song rows with cover, title, artist, album, converted format, human-readable converted size, and compact outcome only when it adds information; raw source/output/error/warning diagnostics are not rendered,
+- one shared audio element/controller so only one item plays at a time, with per-row play/pause, elapsed/duration text, and keyboard/pointer-accessible seek slider,
+- per-row icon actions to reveal the converted file and open it in the system player; missing/moved/unsupported files fail locally with translated non-destructive feedback.
 
 Motion guidelines: 180–320 ms for primary transitions, spring/layout motion only where it clarifies continuity, no perpetual decorative animation, and no animation that blocks conversion feedback. Under `prefers-reduced-motion`, remove travel/stagger/parallax and retain only near-instant opacity/state cues. Clean up all event listeners, channels, timers, and artwork URLs on unmount.
 
 ### D10. Internationalization and error presentation
 
-Use `i18next` + `react-i18next` with complete `zh-CN` and `en-US` resources. Detect the platform/browser locale on first launch, fall back to English for unsupported locales, and persist explicit user selection. Keep translation keys semantic and prohibit hard-coded user-facing strings in feature components.
+Use `i18next` + `react-i18next` with complete `zh-CN` and `en-US` resources. Detect the platform/browser locale on first launch, fall back to English for unsupported locales, and persist explicit user selection. The title bar's localized product subtitle changes with locale. Keep translation keys semantic and prohibit hard-coded user-facing strings in feature components.
 
-Rust commands return stable error codes plus interpolation parameters and a separate technical detail. The frontend translates the product message and reveals/copies the technical detail only in expanded diagnostics. Stored history retains both the code and original technical detail so later app versions can retranslate the product copy.
+Rust commands return stable error codes plus interpolation parameters and a separate technical detail. The frontend translates the product message; an app-level failure banner may retain a collapsed technical detail for support, but song rows never expose raw diagnostics. Stored history retains both the code and original technical detail so later app versions can retranslate the product copy.
 
 Test both locales for missing keys, interpolation, plural/count text, long English layout, Chinese punctuation, path truncation, and reduced-motion behavior. Dates/times and durations use `Intl` formatting, not hand-built locale strings.
 
@@ -243,9 +282,9 @@ The tag workflow must require no GitHub environment, identity, certificate, pass
 
 ### D12. Security and privacy boundary
 
-Grant only the Tauri dialog permission and core window/event permissions actually used. Do not enable shell, generic filesystem, SQL, HTTP, updater, clipboard, or opener permissions by default. Rust owns all filesystem/database/network operations and canonicalizes paths again at the command boundary.
+Grant only the Tauri dialog permission and core window/event permissions actually used. Do not expose shell, generic filesystem, SQL, HTTP, updater, clipboard, generic opener, or arbitrary-path commands to the webview. Rust owns all filesystem/database/network and OS-open resolution, accepts only run/item IDs for reveal/open actions, and revalidates the stored destination as an expected regular non-symlink file or directory immediately before use. Use the latest stable compatible official `tauri-plugin-opener` only from these Rust commands; grant none of its generic frontend permissions. The opener is never part of conversion and does not weaken the no-CLI-sidecar invariant.
 
-Set a restrictive CSP that permits packaged frontend assets, Tauri IPC, and local `blob:` URLs needed for artwork, but not arbitrary remote scripts/images. Album art is delivered from stored bytes, never rendered from a provider URL. Keep metadata networking inside the existing allowlisted Rust provider and only when `update_metadata` is true.
+Register a dedicated item-ID audio protocol in Rust. It resolves `/item/<id>` through history, validates the destination, content-probes an allowlisted audio type, supports `HEAD` and bounded byte-range responses needed for seeking, and never accepts a filesystem path. Set a restrictive CSP that permits packaged frontend assets, Tauri IPC, local `blob:` artwork URLs, and only this protocol's platform-specific media origins (`unlockm-audio:` and `http://unlockm-audio.localhost`) in `media-src`; do not enable the generic asset protocol. Album art is delivered from stored bytes, never rendered from a provider URL. Keep metadata networking inside the existing allowlisted Rust provider and only when `update_metadata` is true.
 
 Never log or persist QMC/KGM secret material. History intentionally stores user-selected absolute paths locally; mention this in documentation and ensure no telemetry, analytics, crash upload, or cloud synchronization is introduced.
 
@@ -314,7 +353,7 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 ### M5. Documentation, cross-platform CI, and release artifacts
 
 - Goal: make the desktop app reproducibly buildable and produce the intended primary artifacts on GitHub.
-- Dependencies: M1–M4.
+- Dependencies: baseline implementation depends on M1–M4; final T5.6 evidence also depends on completed/reviewed M6–M9 so released artifacts exercise the redesigned product.
 - Acceptance criteria:
   - `ARCHITECTURE.md` and READMEs describe the desktop boundary, data location/privacy, build commands, supported UI scope, and release artifact semantics.
   - CI validates Rust workspace and frontend on relevant hosts without regressing CLI checks.
@@ -328,6 +367,82 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
   - `rtk vp -C desktop check`
   - Local/native `rtk vp -C desktop exec tauri build` smoke on macOS and Windows or equivalent successful Actions matrix evidence.
   - Inspect artifacts and launch/install on clean test users; verify restart history and conversion smoke.
+
+### M6. Queryable output facts and safe native file actions
+
+- Goal: provide the truthful output metadata, whole-run query semantics, item-scoped media delivery, and OS file actions required by the redesigned UI without broadening the webview's filesystem authority.
+- Dependencies: implemented M1–M4 history/event/IPC boundaries.
+- Acceptance criteria:
+  - Newly terminal music items persist actual published file size and content-probed format; schema-v1 history remains readable and bounded page reads may repair still-valid destinations.
+  - Search, artist/album/outcome filters, allowlisted sorting, exact counts, and page navigation execute before pagination against the complete run.
+  - Audio URLs contain only item identity, support bounded byte ranges and seeking, and reject missing, non-music, failed, unsupported, symlinked, or unknown items without exposing paths.
+  - Run-output reveal, item reveal, and system-player open commands accept IDs only, revalidate the stored target, and expose no generic opener/shell/filesystem capability.
+- Validation:
+  - `rtk cargo test -p unlockm-desktop --all-targets`
+  - Focused schema-v1→v2, filtered-pagination, facet-bound, path-revalidation, protocol `HEAD`/range/invalid-ID, reveal/open adapter, and DTO contract tests.
+  - `rtk cargo clippy -p unlockm-desktop --all-targets -- -D warnings`
+
+### M7. Fixed bilingual shell and home-view redesign
+
+- Goal: match the supplied home-view composition with a fixed localized title bar, light-default theme pair, dominant drop target, compact action column, and full-width conversion history.
+- Dependencies: M6 for history-row output actions; existing composer/run state.
+- Acceptance criteria:
+  - A fresh profile paints light mode by default; explicit dark/light and language selections persist across restart without a wrong-theme startup flash.
+  - The fixed header shows the localized product subtitle and accessible language-menu/theme icon controls on both routes.
+  - At desktop widths the drop/action columns approximate `1.6:1`, with output chooser first and Convert last; the layout stacks without clipping at the supported narrow width.
+  - Explanatory marketing/microcopy and the overwrite option are absent from the primary conversion area; metadata and directory companion copy remain functional.
+  - Conversion records render below the composer as one full-width row with source/output identity, count, result, time, detail, output-reveal, and record-delete actions.
+- Validation:
+  - Frontend preference/bootstrap, menu keyboard, theme, composer request, history-row action-isolation, and responsive-state component tests.
+  - `rtk vp -C desktop check`
+  - `rtk vp -C desktop test`
+  - Visual QA at 920×640, 1024×700, and 1280×800 in both locales/themes, including scroll proof that the header remains fixed.
+
+### M8. Searchable paginated song detail and playback
+
+- Goal: deliver the compact run summary and information-dense flat song list requested in the sketch, including true pagination, filters, in-app playback, and native per-file actions.
+- Dependencies: M6 query/protocol/actions and M7 shared shell/theme tokens.
+- Acceptance criteria:
+  - The compact summary shows known run facts without consuming excessive vertical space.
+  - Search, artist/album/result filters, sort, clear, and numbered previous/next pagination remain mutually consistent and operate on all matching rows, not just a loaded prefix.
+  - Song rows show artwork, title, artist, album, actual converted size/type, and only concise product outcomes; no expandable technical diagnostics are visible.
+  - Exactly one item plays at a time; play/pause and seek work with keyboard and pointer, switching tracks stops the previous item, and navigation/unmount releases playback resources.
+  - Each playable row can reveal the exact file or open it with the system player; unavailable files produce translated feedback without breaking the list.
+- Validation:
+  - Frontend query-state, debounce/stale-response, pagination-reset, facet, formatting, shared-player, seek, cleanup, missing-file, and icon-action accessibility tests.
+  - Rust/webview integration smoke with real MP3/FLAC fixtures for range playback and seeking on macOS.
+  - `rtk vp -C desktop check`
+  - `rtk vp -C desktop test`
+  - `rtk vp -C desktop build`
+
+### M9. Architecture, regression, and macOS redesign closure
+
+- Goal: integrate the redesign without regressing conversion safety, privacy, accessibility, or the established unsigned-preview packaging contract.
+- Dependencies: M6–M8.
+- Acceptance criteria:
+  - `ARCHITECTURE.md` and user docs describe theme semantics, query pagination, item-ID media delivery, and the explicit user-triggered OS opener exception while retaining the no-conversion-sidecar invariant.
+  - Capability/CSP policy tests reject generic filesystem/opener/asset/shell access and allow only the exact new media origins and Rust commands.
+  - The macOS webview passes the home/detail functional and visual matrix in both locales/themes; long lists remain bounded and scrolling/playback stay responsive.
+  - Windows product/CI/release definitions remain present, but Windows runtime, installer, and visual QA are explicitly outside this cycle's completion gate per user direction.
+  - T5.6 macOS package/install evidence is gathered only after the redesign tasks and review findings are resolved.
+- Validation:
+  - Full workspace/frontend validation and platform-native Tauri builds from the Build and release gates below.
+  - Manual light/dark, locale, drag/drop, conversion, history, search/filter/page, playback/seek, reveal, system-open, restart, missing-file, and reduced-motion matrix on macOS.
+  - Reinspect packaged capabilities/resources/processes and confirm no `unlockm` CLI sidecar or generic asset/opener permission was introduced.
+
+### M10. Product identity, About credits, detail fit, and artist correctness
+
+- Goal: close the four user-reported production issues without regressing persisted history, metadata-off privacy, or the completed desktop interaction model.
+- Dependencies: completed M6–M9 implementation and review closure.
+- Acceptance criteria:
+  - Built bundle/Info.plist and app-data paths use `world.fansionia.unlockm`; when only the legacy database exists, an online SQLite backup initializes the new path once without deleting or mutating the old copy.
+  - At the native 1080×760 window, the detail title/source/output block and all four fact values are readable without ellipsis; gaps are visibly tighter and responsive fallback still avoids horizontal overflow.
+  - The native About panel shows the requested bilingual credit naming Additive Cookie, Moxianbao, and vincentlee73 plus `Copyright © Hamlet Fansion (Peilin Fan)`.
+  - A metadata-off NCM conversion persists the known container artist/title/album/duration for history; final embedded tags remain preferred when container data is unavailable, and a strict `Artist - Title` filename fallback prevents avoidable “未知歌手” without network or tag mutation.
+- Validation:
+  - Focused identifier/legacy-backup/About metadata tests and NCM snapshot precedence/no-network regressions.
+  - Full Rust/frontend gates and macOS Tauri app/universal DMG build.
+  - Native macOS screenshots for adjusted detail and About panel, plus a real metadata-off conversion proving a non-empty artist.
 
 ## Task Breakdown
 
@@ -366,7 +481,36 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - [x] T5.3 Extend `.github/workflows/ci.yml` or add a focused desktop CI workflow for locked `vp -C desktop install --frozen-lockfile` checks and Tauri compilation on macOS/Windows while preserving all existing CLI/Linux/watch validation.
 - [x] T5.4 Add `.github/workflows/desktop-release.yml` using pinned official actions, a universal macOS target and Windows x86_64 NSIS target, tag/version checks, checksums, unsigned-preview prerelease/artifact-name assertions, and no-sidecar validation.
 - [x] T5.5 Configure unsigned preview release behavior with no signing-service or user-managed signing-credential cost: ad-hoc macOS signature verification, unsigned Windows app/NSIS verification, no secrets/environment, user-facing SHA-256/first-open guidance, GitHub quota disclosure, and future signing as an optional follow-up.
-- [ ] T5.6 Perform final macOS and Windows install/launch/conversion/restart/history/manual-motion QA, inspect bundles for absence of `unlockm` sidecars and unexpected permissions, record exact commands/artifact hashes/results, and resolve review findings before marking the plan `Done`.
+- [x] T5.6 After T6.1–T9.4 are complete, perform final macOS install/launch/conversion/restart/history/playback/native-file-action/manual-motion QA, inspect the macOS bundle for absence of `unlockm` sidecars and unexpected permissions, record exact commands/artifact hashes/results, and resolve review findings before marking the plan `Done`. Windows runtime/installer QA is explicitly waived for this cycle.
+
+- [x] T6.1 Extend `desktop/src-tauri/src/history/Preferences` and `desktop/src/lib/contracts.ts` with an explicit light/dark theme whose serde/backward-compatible default is light; add preference reopen and schema-v1 JSON compatibility tests.
+- [x] T6.2 Extend the observer-only music snapshot and persistence DTOs with actual published `output_bytes` and content-probed `output_format`; add SQLite schema-v2 nullable columns, indexes, bounded per-page legacy repair, and fixture coverage for converted, skipped, missing, and renamed outputs without changing CLI/watch allocation behavior.
+- [x] T6.3 Replace cursor-only `get_run_items` with typed `query_run_items` plus bounded `list_run_item_facets` in `desktop/src-tauri/src/history/`, `commands/`, `desktop/src/lib/contracts.ts`, and `ipc.ts`; add indexed exact `musicCount` to terminal run summaries without relabeling companion-inclusive `totalItems`; verify search/artist/album/outcome/sort/page/count semantics across unloaded rows and reject non-allowlisted query values.
+- [x] T6.4 Add the latest stable compatible official `tauri-plugin-opener` to `desktop/src-tauri/Cargo.toml`, wrap its Rust API behind a narrow adapter, and add ID-only `reveal_run_output`, `reveal_run_item`, and `open_run_item` commands; revalidate stored file kinds/symlinks immediately before use, mock the native side effect in tests, and keep all generic opener/shell/filesystem frontend permissions absent from `desktop/src-tauri/capabilities/default.json`.
+- [x] T6.5 Register an `unlockm-audio` item-ID custom protocol under `desktop/src-tauri/`, implement content-type, `HEAD`, `Accept-Ranges`, bounded single-range `206`, `416`, and missing/unsupported/symlink rejection behavior, and update CSP/policy tests for only the custom media origins without enabling `assetProtocol`.
+
+- [x] T7.1 Refactor `desktop/src/styles/tokens.css`, `index.css`, and theme bootstrap code into complete light-default and dark token sets; apply the cached theme before React mount, reconcile it from Rust preferences, and test fresh/migrated/restart behavior plus contrast/focus tokens.
+- [x] T7.2 Add the latest stable compatible `@phosphor-icons/react` through the Vite+-only workflow, then build a shared fixed `AppHeader` with the supplied app icon, localized `UnlockM · 音乐解锁` / `UnlockM · Music Unlocker` title, accessible language dropdown, and Phosphor globe/sun/moon controls; test focus order, checked language, Escape/outside dismissal, persistence, and stickiness on home/detail.
+- [x] T7.3 Recompose `desktop/src/features/conversion/Composer.tsx` into an approximately `1.6fr / 1fr` drop/action layout, put the large output-directory control first and restrained primary action last, remove redundant explanatory copy and Unicode glyphs, hide overwrite while sending `false`, and retain metadata plus directory-only companion-copy request semantics.
+- [x] T7.4 Move `history-panel` below the composer and redesign it as full-width single-line records with input basename/kind, output path, exact terminal music count, aggregate result, timestamp, representative art, a primary row-content detail target, run-output reveal, and record deletion; preserve live progress/cancel, pagination, skeleton/error/empty states, sibling-control semantics, and narrow-window wrapping.
+
+- [x] T8.1 Compact `desktop/src/features/history/HistoryDetail.tsx` summary card and add known source/output, start/finish/duration, counters/result, and output-reveal facts without reintroducing raw diagnostics or oversized title treatment.
+- [x] T8.2 Add debounced song search, searchable artist/album facets, optional result filter, allowlisted sort, clear-all, and true numbered previous/next pagination backed by `query_run_items`; cancel/ignore stale responses, reset page on query changes, and preserve stable skeleton/empty/error layouts.
+- [x] T8.3 Redesign each song row to show lazy artwork, title, artist, album, converted format, human-readable converted size, and only a concise exceptional outcome; remove expandable source/output/error/warning diagnostics and correct all “首音乐” copy to contextually grammatical “歌曲/全部歌曲/{{count}} 首歌曲”.
+- [x] T8.4 Add one detail-owned audio controller and per-row play/pause, elapsed/duration, and seek controls using item-ID protocol URLs; prove single-track ownership, seek/range behavior, track switching, ended/error states, keyboard slider semantics, and cleanup on page/filter/navigation/unmount.
+- [x] T8.5 Add per-row icon buttons for exact-file reveal and system-player open, with localized tooltips/accessible names, click isolation, unavailable-file feedback, and disabled/loading states; do not make external system playback part of in-app player state.
+- [x] T8.6 Complete both locale resources and component tests for the redesigned shell/detail, including long Chinese/English text, paths, byte/type formatting, light/dark themes, reduced motion, icon-only controls, and page/facet/player states.
+
+- [x] T9.1 Add end-to-end Rust/frontend contract and regression fixtures covering a large multi-artist/multi-album run, schema-v1 history, filtered later-page matches, output facts, playback range requests, reveal/system-open adapters, missing files, and unchanged record-only deletion/source retention.
+- [x] T9.2 Update `ARCHITECTURE.md`, `README.md`, `README.zh.md`, third-party notices, and policy checks for the new icon dependency if used, light/dark preferences, SQL-backed detail queries, custom media protocol, and explicit user-triggered OS reveal/open boundary.
+- [x] T9.3 Run the full validation matrix and visual QA at supported window sizes in both themes/locales on macOS; record exact commands, screenshots/findings, playback/seek and Finder/system-player evidence, memory/DOM bounds, and the explicit Windows-test waiver in this plan.
+- [x] T9.4 Perform implementation review against this updated ExecPlan, fix all material findings, rerun affected validation, and record review closure before starting T5.6 external preview-release evidence.
+
+- [x] T10.1 Change all bundle/app-data documentation and configuration to `world.fansionia.unlockm`; add a schema-safe online SQLite legacy-history backup with first-run/idempotence tests.
+- [x] T10.2 Rebalance `detail-header`, `detail-title-block`, and `detail-facts` CSS so long names/paths and localized timestamps display fully at 1080×760 and narrow responsive layouts remain bounded.
+- [x] T10.3 Build the standard native menu with custom About metadata containing bilingual credits for Additive Cookie, Moxianbao, and vincentlee73 and `Copyright © Hamlet Fansion (Peilin Fan)`; add metadata/menu contract tests.
+- [x] T10.4 Merge trusted local NCM container metadata into observer-only history snapshots regardless of `update_metadata`, add conservative `Artist - Title` fallback, and prove metadata-off artist correctness without network/tag mutation.
+- [x] T10.5 Review T10.1–T10.4, fix findings, re-review, rerun full gates/native macOS QA, and replace final DMG hash/evidence before returning this plan to `Done`.
 
 ## Validation Strategy
 
@@ -376,6 +520,7 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - Add table-driven tests ensuring one terminal report per admitted path and exact agreement between report outcomes and `Summary` counters.
 - Test destination/error/warning presence for preflight failure, collision, skip, copy, conversion, metadata fallback, and cancellation.
 - Test metadata snapshot extraction from extensionless staged/final audio by content, not filename extension, and prove it does not initiate provider traffic when metadata update is off.
+- Test observer-enabled output snapshots capture final published byte length and content-probed container format for converted/skipped music while the default CLI/watch observer remains allocation-free and behavior-compatible.
 - Test the typed config builder against existing CLI defaults and invalid combinations.
 
 ### Persistence and coordinator
@@ -385,23 +530,33 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - Simulate a frontend channel closing mid-run: conversion must remain safe, persistence must complete or the run must cancel with an explicit app-level error, and active state must always clear.
 - Simulate process restart with an active row and completed items; only the run status changes to `interrupted`.
 - Validate that history deletion changes only the app-data database and never stats/removes recorded source/output paths.
+- Migrate a copied schema-v1 database to v2, preserve every run/item/artwork/preference, and verify theme deserialization defaults to light when the old JSON has no theme.
+- Populate thousands of multi-artist/multi-album items and prove trimmed search, each filter combination, allowlisted sort/direction, exact filtered totals, stable page boundaries, and bounded facet reads operate across the full SQL result rather than a frontend prefix.
+- Verify actual output facts are captured for new items and legacy repair touches only the requested bounded page; missing/moved outputs remain nullable rather than blocking detail reads.
+- Exercise item-ID audio protocol `HEAD`, valid/suffix/open-ended range, chunk cap, `416`, MIME, unknown ID, non-music, nonterminal/missing, unsupported, and symlink cases without returning a recorded path in response bodies.
+- Mock the native opener adapter and prove run/item commands derive their targets only from history IDs, distinguish directory reveal/file reveal/system open, and reject changed filesystem types before the side effect.
 
 ### Frontend
 
 - Unit-test request construction and event reducers independently of React.
-- Component-test picker/drop validation, quick setting visibility/defaults, busy/cancel states, one-row-per-run history, navigation, paginated detail rendering, diagnostics expansion, and deletion confirmation with mocked Tauri APIs.
+- Component-test picker/drop validation, applicable quick-setting visibility/defaults, busy/cancel states, full-width one-row-per-run history, action isolation, navigation, output reveal, true detail pagination, search/facets/sort, compact outcomes, native item actions, and deletion confirmation with mocked Tauri APIs.
 - Run all tests once per locale and enforce a no-missing-translation-key check.
 - Mock artwork raw responses and assert lazy load, object URL revocation, placeholder fallback, and bounded visible image requests under virtualization.
-- Test keyboard navigation, visible focus, accessible names/live regions, contrast, and reduced-motion media queries.
+- Test fresh light default, cached prepaint, persisted theme reconciliation, complete token coverage, and both-theme contrast/focus states.
+- Test one shared audio controller with protocol URLs: one active track, play/pause, pointer and keyboard seek, page/filter/track transitions, ended/error recovery, and cleanup on unmount.
+- Test keyboard navigation, language-menu semantics, icon tooltips/accessibility, visible focus, accessible names/live regions, contrast, and reduced-motion media queries.
 
 ### Manual functional matrix
 
-- macOS Intel/Apple Silicon universal build: pick one file, drag one file, pick a nested folder, drag a folder, cancel mid-folder, run with each quick-setting combination, reopen app, open history detail, delete history without deleting output.
-- Windows x86_64: repeat the same matrix, including a machine/user without a preexisting output directory and a system where WebView2 bootstrap behavior can be observed.
+- macOS Intel/Apple Silicon universal build: pick one file, drag one file, pick a nested folder, drag a folder, cancel mid-folder, run with each visible quick-setting combination, reopen app, open history detail, reveal run output, reveal a song, open a song with the system player, and delete history without deleting output.
 - Inputs: supported encrypted audio, invalid encrypted-looking file, standard audio, companion files, duplicate flat-looking basenames in separate directories, output inside input, existing destination with overwrite off/on, unicode/long paths, and missing/renamed output after history capture.
 - Verify directory details are visually flat while output remains mirrored.
 - Verify source files remain untouched and no half-written final destination is visible after cancellation/failure.
 - Verify metadata-off makes no provider request; metadata-on provider/tag failures remain warnings with playable decrypted output.
+- Verify the header stays fixed during long home/detail scrolling; fresh state is light; theme/locale survive restart; the home ratio/history placement and compact detail remain usable at 920×640, 1024×700, and 1280×800.
+- Use a run whose target song exists only on a later page to prove search/artist/album filters query the complete dataset. Change sort/filter while on a later page and confirm the UI resets to a valid first page with correct total/page labels.
+- Play MP3 and FLAC fixtures, pause/resume, seek forward/back, switch rows, change page during playback, and leave detail. Confirm at most one track plays and no stale playback/object URL/listener remains.
+- Rename/remove one recorded output and replace another path with a symlink; playback/reveal/system-open must fail safely with translated feedback while unaffected rows continue working.
 
 ### Build and release gates
 
@@ -415,7 +570,7 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
   - `rtk vp -C desktop build`
 - Native packaging:
   - macOS universal `rtk vp -C desktop exec tauri build --target universal-apple-darwin` producing a DMG, followed by architecture, bundle-content, explicit ad-hoc signature, launch, and checksum inspection; no notarization is expected for a preview.
-  - Windows x86_64 `rtk vp -C desktop exec tauri build --target x86_64-pc-windows-msvc` producing one NSIS `.exe`, followed by explicit `NotSigned` app/installer state, install/uninstall, WebView2 behavior, launch, bundle-content, and checksum inspection.
+- Existing Windows x86_64 CI/release packaging remains configured, but no new local/remote Windows build, installer, WebView2, runtime, or visual test is required for this cycle.
 - GitHub `v*` prerelease must attach exactly the two `unsigned` preview installers and their checksums; the title/body must explain platform warnings and SHA-256 verification.
 
 ## Risks and Mitigations
@@ -432,6 +587,12 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - **Universal macOS and WebView2 choices affect artifact size.** Build/test both Apple architectures in one universal DMG. Use the normal Windows WebView2 bootstrap strategy initially; switch to the large offline bundle only through a recorded decision if offline install is required.
 - **History stores privacy-sensitive absolute paths.** Keep storage local, expose clear/delete controls that never delete outputs, add no telemetry/cloud sync, and document the data location and semantics.
 - **Animation can harm accessibility or performance.** Limit durations and animated properties, virtualize large lists, honor reduced motion, and include webview-specific visual/performance QA rather than relying only on browser mocks.
+- **Dynamic filters and sorting can make pagination inconsistent or unsafe.** Keep sort columns/directions as Rust enums mapped to static SQL, bind all user text, return exact filtered totals, reset page state on query changes, and test matches that occur only beyond the former first cursor page.
+- **Audio playback can accidentally broaden filesystem access or allocate whole songs.** Address media by persisted item ID, revalidate the exact destination on every request, content-probe an allowlisted type, implement bounded `HEAD`/range responses, expose only the custom media origin in CSP, and keep generic Tauri asset/filesystem access disabled.
+- **Webview media behavior differs across WebKit and WebView2.** Validate MP3 and FLAC play/pause/seek, range requests, ended/error handling, page changes, and cleanup in both native webviews; treat unsupported container playback as a localized unavailable state rather than transcoding or weakening validation.
+- **OS reveal/default-player integration is an intentional process boundary exception.** Keep it behind explicit user gestures and run/item-ID Rust commands, use a narrow platform adapter, and update architecture wording so no one mistakes it for permission to spawn the conversion CLI, a shell, or arbitrary programs.
+- **Theme persistence can flash or become split-brain.** Treat Rust preferences as durable truth and localStorage only as a synchronous prepaint cache; default missing/invalid values to light, reconcile during bootstrap, and test first install, upgraded preferences, restart, and storage mismatch.
+- **Removing overwrite from the UI changes repeat-run expectations.** Always send `overwrite = false`, keep existing destinations safe/skipped, retain old setting snapshots for historical truth, and state this behavior with concise result copy rather than an advanced pre-run toggle.
 
 ## Progress
 
@@ -494,6 +655,31 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - [x] 2026-08-21: Completed local DMG smoke evidence for the unsigned arm64 artifact `target/release/bundle/dmg/UnlockM_0.1.0_aarch64.dmg`: 9,098,799 bytes, SHA-256 `d1a52da9e7fee412ae48f056f0b3e93468a7e496a1cdb39a82e0367c449f1a71`, and `hdiutil verify` checksum `VALID`. A read-only mount contained only `UnlockM.app`, the `Applications` symlink, `.DS_Store`, and `.VolumeIcon`; the app bundle had only `Info.plist`, `Resources/icon.icns`, and `MacOS/unlockm-desktop`. The `MacOS` directory contained exactly one executable, which `file` identified as Mach-O arm64; no `unlockm` CLI/sidecar was present. The image was detached and its temporary mount directory cleared after inspection. This is a local unsigned arm64 smoke only, not a protected universal signed/notarized release claim.
 - [x] 2026-08-22: Completed local universal DMG packaging evidence after installing the x86_64 Apple target: `target/universal-apple-darwin/release/bundle/dmg/UnlockM_0.1.0_universal.dmg` is 15,574,710 bytes with SHA-256 `15e891cde44724bc6cd76ca47ad40c8d03c31a6a45384ed1a0d79ef29f21dd6a`; `hdiutil verify` returned `VALID`. A read-only mount contained only `UnlockM.app`, `Applications`, `.DS_Store`, and `.VolumeIcon`. The app binary’s `lipo -archs` output was `x86_64 arm64`; the bundle contained only `Info.plist`, icon, SIL OFL, third-party notice, and the single `unlockm-desktop` executable, with no sidecar. `codesign --verify` reported `not signed at all`; the image was detached and mount directory cleared. This proves unsigned universal local packaging only—not protected signing/notarization—so T5.6 remains open.
 - [ ] 2026-08-22: T5.6 remains pending the external no-secret preview matrix only: a real Actions `v*` unsigned prerelease, published artifact SHA-256 values, and a Windows x86_64 NSIS install/launch/conversion/restart inspection. Signing/notarization credentials are no longer a completion condition. M5 remains In Progress/reviewable until that Actions/Windows evidence is recorded.
+- [x] 2026-08-22: Reopened this active plan for the user-supplied home/detail redesign instead of creating a duplicate plan. Read the sketch only as design evidence, inspected the implemented frontend, DTO/IPC, SQLite schema-v1 queries, current Tauri capability/CSP, core music snapshot path, and the locally installed Tauri 2.11.5 custom/asset protocol range implementation. Added M6–M9 and T6.1–T9.4; no production source, test, build, or configuration file changed in this Plan phase.
+- [x] 2026-08-22: Planning checkpoint recorded that M6–M9 were not yet implemented. This historical state is superseded by the implementation/validation entries below; T9.3, T9.4, and T5.6 remain the active closure tasks.
+- [x] 2026-08-22: Began M6 implementation. Per the user's latest validation scope, macOS is the only required complete native/runtime/visual platform for this cycle; Windows product code and existing CI/release definitions remain, but Windows testing is waived rather than left as a blocker. The redesign uses Phosphor rather than Lucide so all new interface icons come from one approved family.
+- [x] 2026-08-22: Completed T6.1–T6.5. Preferences now deserialize missing themes as light; observer-only snapshots capture final output bytes/content format; schema-v2 migration adds nullable output facts and bounded legacy page repair; run summaries distinguish exact music count from companion-inclusive totals; SQL-backed detail queries apply search/facets/outcome/allowlisted sort before page slicing; the official opener sits behind ID-only Rust commands; and `unlockm-audio` serves only validated music-item `HEAD`/bounded ranges. Focused desktop Rust tests passed before the full workspace gate.
+- [x] 2026-08-22: Completed T7.1–T8.6. The fixed bilingual header, light-default/dark themes, Phosphor actions, 1.6:1 composer, concise safe settings, blue primary action, full-width history rows, compact detail facts, true 25-song pages, search/artist/album/result/sort controls, actual FLAC/MP3 size/type facts, one shared player, seek controls, Finder reveal, and default-player open actions are implemented. `rtk vp -C desktop check`, 33 frontend tests across 12 suites, production build, and Tauri debug no-bundle/app bundle builds passed.
+- [x] 2026-08-22: BrowserOS visual QA passed at a 1527×824 viewport in light/dark and at the narrow supported layout: desktop composer columns measured about 733.5/458.5 px, history begins below the composer, `scrollWidth <= innerWidth`, narrow layout collapses to one column, and the sticky header remained at top 0 after scrolling. The native macOS WebKit app displayed the same light/dark home and compact detail hierarchy with no Diagnostics banner.
+- [x] 2026-08-22: Native macOS functional QA passed against the persisted 80-song/246-companion run and a new single-file conversion. The old schema history lazily exposed four 25-song pages with artwork, album values, content-probed FLAC and real sizes; search reduced the complete run to one “Frankenstein” result. In-app playback advanced from 0 to 24.7 seconds, seeking jumped to 2:57, and pause returned the row to “播放”. Finder selected the exact converted FLAC, while the system-open action launched IINA with the same 3:22 track. Dark theme, Chinese locale, and history survived close/relaunch.
+- [x] 2026-08-22: New conversion smoke selected `samples/Claire Rosinkranz - Frankenstein.ncm`, wrote `/private/tmp/unlockm-redesign-qa.82xPTM/Claire Rosinkranz - Frankenstein.flac`, and persisted a new one-song history/detail row with FLAC and 22.5 MiB. `file` reported 16-bit stereo 44.1 kHz with 8,919,168 samples; output size is 23,548,419 bytes; the source SHA-256 remains `098f5f4c8a869b27cfd8c50efe54a914aa3652664848bc8f0b6d47feb8020b25`. Temporarily moving the QA output produced translated non-destructive playback failure feedback; the file was restored.
+- [x] 2026-08-22: Completed T9.1–T9.2 implementation/documentation. Security policy retains the exact dialog/event capability allowlist, rejects generic asset/opener/shell/filesystem access, and asserts only the custom media origins. Architecture, both READMEs, notices, and license audit now describe theme/query/playback/native-action boundaries plus Phosphor 2.1.10 and opener 2.5.4. Full strict Rust validation passed at this checkpoint: workspace Clippy clean and 171 tests across 18 suites; a later final gate will include the added 1,001-item regression.
+- [x] 2026-08-22: Pre-review gates passed after the 1,001-item regression and typed playback error update: Rust formatting, strict workspace Clippy, and 172 tests across 18 suites; Vite+ 45-file format check, lint/type check, 33 tests across 12 suites, production build; and `rtk git diff --check`. Status moved to `In Review`; T9.3 final package evidence and T9.4 review closure remain open.
+- [x] 2026-08-22 review-plan first pass (`Needs Changes`, resolved): Major - normal player cleanup no longer calls `audio.load()` after source removal, and a regression proves unmount adds no reload beyond the intentional track load. Minor - the ARIA menu now has selected-item focus, ArrowUp/ArrowDown/Home/End roving focus, Escape focus restoration, tests, and semantic `app.localName` lookup. Plan - `Current Context` and completion evidence now describe the implemented state and remaining closure only. Vite+ format/check and 35 tests passed before re-review.
+- [x] 2026-08-22 review-plan re-review (`Pass`): no blocker, major, or meaningful minor findings remain. The implementation matches M6–M9 scope and security/architecture decisions; task checkboxes and validation claims are accurate. Required code/plan updates: none. Remaining gaps are intentionally limited to T9.3 final macOS validation/package evidence and T5.6 universal DMG closure, so status returns to `In Progress` for those gates.
+- [x] 2026-08-22: Completed T9.3 and T5.6. Final gates are Rust formatter, strict workspace Clippy, 172 tests across 18 suites; Vite+ 45-file format check, lint/type check, 35 tests across 12 suites, and production build; Tauri debug no-bundle/app build; BrowserOS responsive light/dark QA; native macOS conversion/restart/history/search/page/play/pause/seek/Finder/IINA/missing-output QA; and `rtk git diff --check`. WebKit memory logging during the 80-song paged detail remained 47–53 MiB, and the UI rendered at most one 25-song page.
+- [x] 2026-08-22: Pre-M10 universal package evidence (superseded) recorded a 15,855,746-byte DMG with SHA-256 `14c4ab58283f17ed3e9eaaadbbeb12593e0802110bfb2d77dd74e2634c2d0c4b`, VALID checksum, dual architectures, ad-hoc signature, resources, and no sidecar under the erroneous `world.fansion.unlockm` identifier. M10 replaces this artifact and identifier; it is retained only as chronological evidence.
+- [x] 2026-08-22 completion audit: every Task Breakdown item is checked; M6–M9 acceptance and macOS validation evidence are present; first-pass review findings are resolved and re-review passed; documentation matches the implementation; source/output safety and no-sidecar invariants passed existing/full regressions. Windows runtime/installer/visual testing is not claimed and is explicitly waived by user direction for this cycle. Status moved to `Done`.
+- [x] 2026-08-22: Reopened the completed plan for four explicit follow-ups: canonical `world.fansionia.unlockm` identity with history continuity, corrected detail summary fit, native About credits/copyright, and severe metadata-off artist loss. Added M10/T10.1–T10.5 before implementation; previous M6–M9 evidence remains valid but the old DMG hash is superseded once M10 ships.
+- [x] 2026-08-22: Completed T10.1. Tauri configuration and current docs use `world.fansionia.unlockm`; schema-safe SQLite online backup initializes only an absent new database from the legacy identifier and preserves the old copy. First-run/idempotence tests passed, and native launch under the new identifier opened a migrated 4-run/83-song database at `~/Library/Application Support/world.fansionia.unlockm/history.sqlite`.
+- [x] 2026-08-22: Completed T10.2 native QA. At the 1080×760 macOS window, `Claire Rosinkranz - Frankenstein.ncm`, the full wrapped source path, output path, all four facts, and `2026年8月22日 14:37` rendered without ellipsis; the metric gap is visibly tighter and the card remains compact.
+- [x] 2026-08-22: Completed T10.3 native QA through a uniquely named temporary copy of the exact corrected app binary (only its QA display name differed to bypass stale LaunchServices cache). The standard File/Edit/View/Window/Help menus remained. About displayed the requested Chinese credit, English Additive Cookie/Moxianbao/vincentlee73 lines, and `Copyright © Hamlet Fansion (Peilin Fan)` with the UnlockM icon/version.
+- [x] 2026-08-22: Completed T10.4. Root cause was twofold: output-tag reads replaced filename fallback with `None`, and real NCM `artist` uses nested arrays such as `[[name,id]]`, which the parser ignored. Final-tag snapshots now retain fallbacks, NCM nested arrays are parsed, trusted container fields merge into observer-only snapshots even when metadata update is off, and bounded detail reads repair existing null artist/title rows. The real repository sample and native detail now show `Claire Rosinkranz`; focused core, parser, desktop repair, no-audio-mutation, About, and identifier-backup tests pass.
+- [x] 2026-08-22 M10 review-plan first pass (`Needs Changes`, resolved): Minor - custom About metadata now exposes the bilingual text through both macOS `credits` and non-macOS `comments`, with standard File/Edit/Window/Help actions retained. Minor - a failed final migration rename now removes the owned temporary backup. Focused tests and strict desktop Clippy passed.
+- [x] 2026-08-22 M10 re-review (`Pass`): all four user-visible requirements and both first-pass review findings are implemented with accurate plan state. No blocker, major, or meaningful minor remains. T10.5 now requires only final full gates, corrected universal DMG identity/hash inspection, and completion audit.
+- [x] 2026-08-22: Completed T10.5 final gates: Rust formatting, strict workspace Clippy, and 178 tests across 18 suites; Vite+ 45-file format check, lint/type check, 35 tests across 12 suites, production build; `rtk git diff --check`; native macOS M10 screenshots/About interaction; and universal Tauri packaging. Windows execution remains explicitly waived.
+- [x] 2026-08-22: Corrected final artifact `target/universal-apple-darwin/release/bundle/dmg/UnlockM_0.1.0_universal.dmg` is 15,870,044 bytes with SHA-256 `0a8ed33d4f454799f4fdf8b61f3f097651638c972060fa59b40717ffdc26335f`; `hdiutil verify` returned VALID. Read-only inspection proved `world.fansionia.unlockm` in Info.plist/codesign, `Copyright © Hamlet Fansion (Peilin Fan)`, `x86_64 arm64`, `Signature=adhoc`, complete license/icon resources, requested About strings in the binary, and exactly one sidecar-free executable. The final universal app replaced the temporary debug installation at `/Applications/UnlockM.app` and LaunchServices was refreshed.
+- [x] 2026-08-22 M10 completion audit: all T10 tasks and review findings are closed. Native evidence shows the long title/full paths/full completion timestamp without clipping, About displays all requested Chinese/English names and copyright, migrated history is present under `world.fansionia.unlockm`, and existing/new Claire rows display `Claire Rosinkranz`. The real sample parser/no-write tests prove metadata-off artist correctness. Status returned to `Done`.
 
 ## Discoveries
 
@@ -531,6 +717,15 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - **2026-08-21 release evidence gap (superseded by D26):** The initial protected-signing release approach required external credentials. The unsigned-preview policy replaces that scope; the remaining gap is a real Actions preview prerelease and Windows install/launch evidence, not paid signing/notarization.
 - **2026-08-21 native bundle discovery:** Tauri's `getCurrentWindow().onDragDropEvent` is backed by the core event listener API, not only the dialog plugin. A dialog-only capability lets the app compile but produces an `event.listen not allowed` banner at runtime. The smallest correct grant is listener plus unlistener—never `core:event:default` or event emit.
 - **2026-08-21 M5 review findings (resolved):** Tagged package jobs repeat the full locked Rust quality gate before signing, Windows NSIS payload inspection uses `7z` to check the real archived contents, and the complete OFL plus third-party notice are shipped through Tauri resources and checked in CI/release. Independent M5 review passed with no remaining implementation findings; T5.6 remains the separate real-release/Windows-install evidence gap.
+- **2026-08-22 redesign discovery:** The current top-level `app-grid` makes Composer and history peers, while the requested hierarchy needs a composer-internal golden-ratio split followed by history at full width. This is a structural `App.tsx`/Composer/CSS change, not a token-only restyle.
+- **2026-08-22 query discovery:** Current `get_run_items` keysets by ordinal and `HistoryDetail` filters only the already loaded array. True search/facet/sort pagination therefore belongs in Rust/SQLite and must return exact filtered totals; a client-only filter would silently miss later-page matches.
+- **2026-08-22 output-fact discovery:** `logical_bytes` is sourced from the input during runner admission and cannot be labeled as converted file size. The observer-enabled final snapshot must capture actual destination length and content-probed output format, with nullable schema-v2 fields for migration safety.
+- **2026-08-22 playback discovery:** Tauri 2.11.5 supports asynchronous custom protocols, and its bundled asset protocol demonstrates `HEAD`, `Accept-Ranges`, `206`, `416`, MIME probing, and bounded range chunks. A dedicated history-item protocol can reuse those semantics without granting the generic asset protocol or accepting raw paths.
+- **2026-08-22 native-action discovery:** “In-app playback”, “reveal in Finder/Explorer”, and “open with the system player” are three separate actions. The first uses one shared controlled audio element; the latter two are explicit OS side effects behind separate item-ID commands and must not be inferred as in-app playback state.
+- **2026-08-22 preference discovery:** The current preference JSON has locale and quick settings only. Adding theme requires backward-compatible deserialization; a localStorage value can prevent first-paint flash but cannot replace Rust-owned persistence.
+- **2026-08-22 custom-URL discovery:** Tauri `convertFileSrc` percent-encodes embedded slashes, so the frontend passes the bare numeric item ID and the protocol accepts `/ID` (while tests also accept `/item/ID`). This preserves the ID-only boundary and avoids accidentally parsing an encoded path segment.
+- **2026-08-22 native playback evidence:** macOS WebKit issued the custom-scheme range requests successfully for persisted FLAC files; playback, time updates, seeking, pause, page/query transitions, and missing-output `FormatError` all stayed inside the product error boundary. Unified logs contained no panic/abort/crash evidence during QA.
+- **2026-08-22 opener evidence:** The exact-file reveal action selected `Claire Rosinkranz - Frankenstein.flac` in Finder, and system open launched the user's associated IINA player with the same 3:22 track. These are distinct from the in-app audio controller, as planned.
 
 ## Decision Log
 
@@ -562,21 +757,40 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - **2026-08-22 — D26:** Default tag releases to no-secret unsigned preview prereleases with no signing-service or user-managed signing-credential cost. macOS receives only a declared/verified Tauri ad-hoc signature; Windows app/NSIS are declared/verified `NotSigned`; both assets carry `unsigned` names and SHA-256 files. First-open documentation must use narrow per-app platform UX and never recommend disabling system-wide protections. GitHub-hosted runner minutes and artifact storage remain subject to the owner's plan/quota. Future paid signing/notarization is optional and does not block T5.6 completion.
 - **2026-08-22 — D27:** Verify the macOS preview app only after read-only mounting the final DMG at a unique `$RUNNER_TEMP` directory. A shell trap must detach the image and remove the mount directory even after validation failure; the success path explicitly performs the same cleanup and disables the trap. Do not trust the post-bundle build-tree `.app` path.
 - **2026-08-22 — D28:** Treat cross-platform checksum manifests as byte-level release artifacts: generate Windows manifests as BOM-free ASCII with one LF terminator, assert no carriage returns before `shasum -c`, and retain the exact four-asset contract.
+- **2026-08-22 — D29:** Supersede D4's UI exposure of overwrite. The redesigned primary interface exposes metadata refresh and directory-only companion copy, always sends `overwrite = false`, and leaves output layout/performance/key settings at core defaults. Existing run snapshots and backend compatibility fields remain intact.
+- **2026-08-22 — D30:** Supersede D8's dark-only visual direction with a complete manually toggled light/dark pair whose fresh/missing-preference default is light. Use `UnlockM · 音乐解锁` and `UnlockM · Music Unlocker` as localized title-bar labels while retaining `UnlockM` as the product name.
+- **2026-08-22 — D31:** Treat the supplied sketch as a layout reference: fixed shared header; roughly `1.6:1` drop/action composer; output control first, Convert last; full-width history below; compact detail summary; flat song rows. Do not copy sketch annotations as runtime instructions or add unspecified product behavior.
+- **2026-08-22 — D32:** Replace detail cursor accumulation/client-only filtering with Rust-owned SQL query pagination. Search, artist/album/outcome filters, sort, exact counts, and page size apply before pagination; run history itself retains newest-first keyset pagination.
+- **2026-08-22 — D33:** Persist actual published output length and content-probed container label as nullable schema-v2 item facts. Never relabel input `logical_bytes` as output size; repair legacy rows only on bounded page reads when their destinations still validate.
+- **2026-08-22 — D34:** Implement in-app playback through one shared frontend audio controller and a Rust `unlockm-audio` custom protocol keyed only by history item ID. Support bounded byte ranges and narrow `media-src`; do not enable Tauri's generic asset protocol, return audio through SQLite/IPC, or add transcoding.
+- **2026-08-22 — D35:** Permit explicit run-output reveal, exact-item reveal, and default-system-player open as narrow user-triggered desktop actions. Rust commands accept only persisted IDs and revalidate targets; no generic opener permission, shell command surface, or conversion subprocess is introduced. This is the sole documented OS-open exception to the existing process boundary.
+- **2026-08-22 — D36:** Complete this redesign through full macOS validation only, as explicitly requested. Preserve Windows support code, CI, and release definitions without claiming new Windows runtime evidence. Use one Phosphor icon family for all new interface actions; this supersedes the planning-time Lucide choice.
+- **2026-08-22 — D37:** Correct the canonical identifier to `world.fansionia.unlockm`. Preserve legacy history by using SQLite's online backup API only when the new database is absent; retain the legacy database as a recoverable copy and never merge/overwrite a non-empty new database.
+- **2026-08-22 — D38:** History display metadata may use trusted local NCM container evidence independently of `update_metadata`; this does not authorize network access or audio-tag mutation. Text uses container evidence over final tags when present, while embedded output artwork remains preferred over container artwork.
+- **2026-08-22 — D39:** Keep the native standard menu structure and customize only About metadata. Credits are bilingual in one panel so they remain correct regardless of current webview locale.
 
 ## Completion Evidence
 
-### Complete implementation and local validation
+### Baseline evidence before the 2026-08-22 redesign
 
-The desktop implementation/configuration, documentation, no-secret unsigned-preview CI/release definitions, licensing resources, and all local validation are complete. The Progress log records the locked 162-test/18-suite workspace evidence, 35 frontend tests, policy/license contracts, Vite+-only workflow guards, BrowserOS visual QA, native macOS debug-app conversion/restart/history QA, and read-only unsigned arm64 plus universal DMG content/checksum smokes. The final local universal app verifies as `Signature=adhoc`, dual-architecture, resource-complete, and sidecar-free; this is intentionally not a notarized/trusted production signature.
+The pre-redesign desktop implementation/configuration, documentation, no-secret unsigned-preview CI/release definitions, licensing resources, and baseline local validation were complete. The Progress log records the locked 162-test/18-suite workspace evidence, 35 frontend tests, policy/license contracts, Vite+-only workflow guards, BrowserOS visual QA, native macOS debug-app conversion/restart/history QA, and read-only unsigned arm64 plus universal DMG content/checksum smokes. The final baseline local universal app verified as `Signature=adhoc`, dual-architecture, resource-complete, and sidecar-free; this is intentionally not a notarized/trusted production signature.
 
-### External preview-release gaps (T5.6 remains open)
+This baseline evidence alone does not validate M6–M9. The current Progress entries now add implementation gates, BrowserOS visual results, macOS WebKit playback/seek, Finder/IINA actions, restart persistence, schema-v1 repair, and a new conversion smoke. Final review/package evidence is still recorded separately below.
 
-No real Actions-created unsigned preview prerelease, Windows x86_64 NSIS install/launch run, or published preview artifact hash has been claimed. Those require a tag-triggered workflow run and a Windows host—not signing/notarization credentials. During that external validation, record:
+### Redesign completion evidence
+
+M6–M10 and T5.6 are complete. The previous `world.fansion.unlockm` DMG remains historical redesign evidence only and is superseded for release purposes by the corrected M10 artifact below.
+
+### Final macOS preview evidence
+
+Windows runtime/installer evidence is waived for this cycle by explicit user direction and is not a completion gap. Final macOS evidence includes:
 
 - task/milestone completion dates and commit hashes,
 - exact Rust/frontend/native packaging commands and outcomes,
-- macOS and Windows artifact names, architectures, sizes, SHA-256 checksums, and bundle-content inspection,
-- macOS ad-hoc and Windows `NotSigned` verification output,
-- manual QA results for file/folder picker and drag/drop, quick settings, cancellation, partial failure, restart persistence, detail metadata/artwork, both locales, and reduced motion,
+- macOS artifact name, architectures, size, SHA-256 checksum, and bundle-content inspection,
+- macOS ad-hoc verification output,
+- manual QA results for file/folder picker and drag/drop, visible quick settings, cancellation, partial failure, restart persistence, light/dark and both locales, fixed header/home/history layout, detail metadata/artwork/search/filter/sort/pages, playback/seek, run/item reveal, system-player open, and reduced motion,
 - confirmation that source files were retained, outputs were atomically published, metadata-off made no provider request, and no `unlockm` CLI sidecar/process was present,
 - review findings and their resolution or explicit acceptance.
+
+The authoritative final artifact is `UnlockM_0.1.0_universal.dmg`, 15,870,044 bytes, SHA-256 `0a8ed33d4f454799f4fdf8b61f3f097651638c972060fa59b40717ffdc26335f`, verified VALID, ad-hoc signed, universal, resource-complete, and sidecar-free. Its identifier is `world.fansionia.unlockm`; the native About metadata, full detail layout, legacy history backup, and metadata-off artist fix are included.

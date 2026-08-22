@@ -35,9 +35,14 @@ fn capabilities_and_csp_exclude_broad_plugins_and_external_assets() {
         );
     }
     let config: Value = serde_json::from_str(&workspace_file("tauri.conf.json")).unwrap();
+    assert_eq!(config["identifier"], "world.fansionia.unlockm");
     let csp = config["app"]["security"]["csp"].as_str().unwrap();
     assert!(!csp.contains("https://"));
     assert!(!csp.contains("data: script"));
+    assert!(csp.contains("media-src 'self' unlockm-audio: http://unlockm-audio.localhost"));
+    assert!(!csp.contains("asset:"));
+    assert!(!csp.contains("http://asset.localhost"));
+    assert!(config["app"]["security"].get("assetProtocol").is_none());
     let config_text = config.to_string();
     for forbidden in [
         "sidecar",
@@ -69,6 +74,9 @@ fn desktop_host_never_spawns_unlockm_or_a_helper_process() {
     for forbidden in ["tauri-plugin-shell", "tauri-plugin-fs", "tauri-plugin-sql"] {
         assert!(!cargo.contains(forbidden));
     }
+    assert!(cargo.contains("tauri-plugin-opener = \"=2.5.4\""));
+    let capabilities = workspace_file("capabilities/default.json");
+    assert!(!capabilities.contains("opener:"));
 }
 
 fn rust_sources(directory: &Path) -> Vec<String> {

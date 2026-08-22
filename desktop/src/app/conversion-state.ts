@@ -35,6 +35,7 @@ export type AppAction =
   | { type: "booted"; bootstrap: BootstrapResponse }
   | { type: "bootFailed"; message: string; detail: string | null }
   | { type: "uiError"; message: string; detail: string | null }
+  | { type: "clearError" }
   | { type: "runsAppended"; page: RunPage }
   | { type: "conversionStarted"; requestId: number }
   | { type: "conversionEvent"; event: ConversionEvent }
@@ -70,6 +71,8 @@ export function appReducer(state: AppModel, action: AppAction): AppModel {
       return { ...state, boot: "error", error: { message: action.message, detail: action.detail } };
     case "uiError":
       return { ...state, error: { message: action.message, detail: action.detail } };
+    case "clearError":
+      return { ...state, error: null };
     case "runsAppended":
       if (!state.bootstrap) {
         return state;

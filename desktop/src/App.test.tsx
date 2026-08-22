@@ -8,13 +8,17 @@ const { api } = vi.hoisted(() => ({
     bootstrap: vi.fn(),
     validateInput: vi.fn(),
     listRuns: vi.fn(),
-    getRunItems: vi.fn(),
+    queryRunItems: vi.fn(),
+    listRunItemFacets: vi.fn(),
     startConversion: vi.fn(),
     cancelConversion: vi.fn(),
     getPreferences: vi.fn(),
     setPreferences: vi.fn(),
     deleteRun: vi.fn(),
     clearHistory: vi.fn(),
+    revealRunOutput: vi.fn(),
+    revealRunItem: vi.fn(),
+    openRunItem: vi.fn(),
     getArtwork: vi.fn(),
     getArtworkMime: vi.fn(),
   },
@@ -42,10 +46,23 @@ const partialRun = {
   skipped: 0,
   conflicted: 0,
   failed: 1,
+  musicCount: 2,
   representativeArtworkId: null,
   terminalErrorCode: null,
   terminalErrorDetail: null,
 };
+
+function emptyItemPage() {
+  return {
+    items: [],
+    page: 1,
+    pageSize: 25,
+    pageCount: 0,
+    filteredTotal: 0,
+    companionCount: 0,
+    musicTotal: 0,
+  };
+}
 
 function bootstrap(overrides = {}) {
   return {
@@ -53,6 +70,7 @@ function bootstrap(overrides = {}) {
     supportedLocales: ["zh-CN", "en-US"] as ["zh-CN", "en-US"],
     preferences: {
       locale: "en-US" as const,
+      theme: "light" as const,
       defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
     },
     history: { runs: [], nextCursor: null },
@@ -65,16 +83,23 @@ afterEach(async () => {
   cleanup();
   vi.restoreAllMocks();
   await i18n.changeLanguage("en-US");
+  document.documentElement.dataset.theme = "light";
+  window.localStorage.clear();
   for (const method of Object.values(api)) method.mockReset();
 });
 
-test("long partial row", async () => {
+test("history row exposes full record facts and output action", async () => {
+  const user = userEvent.setup();
   api.bootstrap.mockResolvedValue(bootstrap({ history: { runs: [partialRun], nextCursor: null } }));
+  api.revealRunOutput.mockResolvedValue(true);
   render(<App />);
+
   expect(await screen.findByText("Completed with issues")).toBeTruthy();
   expect(screen.getByText(longPath.split(/[\\/]/).pop() ?? "")).toBeTruthy();
-  expect(screen.getByText("2/2")).toBeTruthy();
-  expect(screen.getByText(/Jan 1, 1970/)).toBeTruthy();
+  expect(screen.getByText("/output")).toBeTruthy();
+  expect(screen.getByText("2")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: /Reveal the output folder/ }));
+  expect(api.revealRunOutput).toHaveBeenCalledWith(partialRun.id);
 });
 
 test("bootstrap history reserves stable rows while local history is loading", async () => {
@@ -92,7 +117,76 @@ test("bootstrap history reserves stable rows while local history is loading", as
   await waitFor(() => expect(document.querySelectorAll(".run-skeleton")).toHaveLength(0));
 });
 
-test("bootstrap error separates product message from technical detail", async () => {
+test("fresh light theme, dark toggle, and language menu persist one preference snapshot", async () => {
+  const user = userEvent.setup();
+  api.bootstrap.mockResolvedValue(bootstrap());
+  api.setPreferences.mockImplementation(async (value) => value);
+  render(<App />);
+  await screen.findByText("Your finished conversions will live here.");
+  expect(document.documentElement.dataset.theme).toBe("light");
+
+  await user.click(screen.getByRole("button", { name: "Use dark theme" }));
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect(api.setPreferences).toHaveBeenLastCalledWith({
+    locale: "en-US",
+    theme: "dark",
+    defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
+  });
+
+  await user.click(screen.getByRole("button", { name: "Choose language" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "简体中文" }));
+  await waitFor(() => expect(screen.getByText("音乐解锁")).toBeTruthy());
+  expect(api.setPreferences).toHaveBeenLastCalledWith({
+    locale: "zh-CN",
+    theme: "dark",
+    defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
+  });
+});
+
+test("language menu uses roving arrow focus and restores the trigger on Escape", async () => {
+  const user = userEvent.setup();
+  api.bootstrap.mockResolvedValue(bootstrap());
+  render(<App />);
+  await screen.findByText("Your finished conversions will live here.");
+  const trigger = screen.getByRole("button", { name: "Choose language" });
+  await user.click(trigger);
+  const english = screen.getByRole("menuitemradio", { name: "English" });
+  const chinese = screen.getByRole("menuitemradio", { name: "简体中文" });
+  await waitFor(() => expect(document.activeElement).toBe(english));
+  await user.keyboard("{ArrowUp}");
+  expect(document.activeElement).toBe(chinese);
+  await user.keyboard("{End}");
+  expect(document.activeElement).toBe(english);
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(screen.queryByRole("menu")).toBeNull();
+});
+
+test("dedicated row controls keep detail, reveal, and deletion isolated", async () => {
+  const user = userEvent.setup();
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  api.bootstrap.mockResolvedValue(bootstrap({ history: { runs: [partialRun], nextCursor: null } }));
+  api.queryRunItems.mockResolvedValue(emptyItemPage());
+  api.listRunItemFacets.mockResolvedValue({ values: [], nextCursor: null });
+  api.deleteRun.mockResolvedValue(undefined);
+  render(<App />);
+  await screen.findByText("Completed with issues");
+
+  const detail = screen.getByRole("button", {
+    name: `Open details for ${longPath.split(/[\\/]/).pop()}`,
+  });
+  detail.focus();
+  await user.keyboard("{Enter}");
+  expect(await screen.findByRole("button", { name: /Back to conversions/ })).toBeTruthy();
+  expect(api.deleteRun).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: /Back to conversions/ }));
+  await user.click(await screen.findByRole("button", { name: "Remove record" }));
+  expect(confirm).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(api.deleteRun).toHaveBeenCalledWith(partialRun.id));
+});
+
+test("bootstrap errors keep product and technical messages separate", async () => {
   api.bootstrap.mockRejectedValue({ code: "history_error", detail: "sqlite busy timeout" });
   render(<App />);
   expect(await screen.findByText("Local history is temporarily unavailable.")).toBeTruthy();
@@ -101,70 +195,7 @@ test("bootstrap error separates product message from technical detail", async ()
   expect(screen.getByText("sqlite busy timeout")).toBeTruthy();
 });
 
-test("locale switch persists local preference defaults", async () => {
-  const user = userEvent.setup();
-  api.bootstrap.mockResolvedValue(bootstrap());
-  api.setPreferences.mockImplementation(async (value) => value);
-  render(<App />);
-  await screen.findByText("Your finished conversions will live here.");
-  await user.click(screen.getByRole("button", { name: "中文" }));
-  await waitFor(() => expect(api.setPreferences).toHaveBeenCalled());
-  expect(api.setPreferences).toHaveBeenCalledWith({
-    locale: "zh-CN",
-    defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
-  });
-});
-
-test("keyboard activation of the dedicated detail button navigates only to detail", async () => {
-  const user = userEvent.setup();
-  api.bootstrap.mockResolvedValue(bootstrap({ history: { runs: [partialRun], nextCursor: null } }));
-  api.getRunItems.mockResolvedValue({
-    items: [],
-    nextCursor: null,
-    companionCount: 0,
-    musicTotal: 0,
-  });
-  render(<App />);
-  await screen.findByText("Completed with issues");
-  const openDetails = screen.getByRole("button", {
-    name: `Open details for ${longPath.split(/[\\/]/).pop()}`,
-  });
-  openDetails.focus();
-  await user.keyboard("{Enter}");
-  expect(await screen.findByRole("button", { name: /Back to conversions/ })).toBeTruthy();
-  expect(api.deleteRun).not.toHaveBeenCalled();
-});
-
-test("the detail-control accessible name follows the current locale", async () => {
-  api.bootstrap.mockResolvedValue(bootstrap({ history: { runs: [partialRun], nextCursor: null } }));
-  render(<App />);
-  const filename = longPath.split(/[\\/]/).pop();
-  await screen.findByRole("button", { name: `Open details for ${filename}` });
-  await i18n.changeLanguage("zh-CN");
-  expect(await screen.findByRole("button", { name: `打开 ${filename} 的详情` })).toBeTruthy();
-});
-
-test("keyboard activation of the sibling delete control does not navigate to detail", async () => {
-  const user = userEvent.setup();
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-  api.bootstrap.mockResolvedValue(bootstrap({ history: { runs: [partialRun], nextCursor: null } }));
-  api.deleteRun.mockResolvedValue(undefined);
-  render(<App />);
-  await screen.findByText("Completed with issues");
-  const openDetails = screen.getByRole("button", {
-    name: `Open details for ${longPath.split(/[\\/]/).pop()}`,
-  });
-  const remove = screen.getByRole("button", { name: "Remove record" });
-  openDetails.focus();
-  await user.tab();
-  expect(document.activeElement).toBe(remove);
-  await user.keyboard("{Enter}");
-  expect(confirm).toHaveBeenCalledTimes(1);
-  await waitFor(() => expect(api.deleteRun).toHaveBeenCalledWith(partialRun.id));
-  expect(screen.queryByRole("button", { name: /Back to conversions/ })).toBeNull();
-});
-
-test("loading another history page reserves a stable history-row skeleton", async () => {
+test("loading another history page reserves a row-shaped skeleton", async () => {
   const user = userEvent.setup();
   let resolvePage:
     | ((page: { runs: (typeof partialRun)[]; nextCursor: number | null }) => void)
@@ -179,7 +210,7 @@ test("loading another history page reserves a stable history-row skeleton", asyn
   render(<App />);
   await screen.findByText("Completed with issues");
   await user.click(screen.getByRole("button", { name: "Load more" }));
-  await waitFor(() => expect(document.querySelector(".history-pagination-skeleton")).toBeTruthy());
+  await waitFor(() => expect(document.querySelector(".pagination-skeleton")).toBeTruthy());
   resolvePage?.({ runs: [], nextCursor: null });
-  await waitFor(() => expect(document.querySelector(".history-pagination-skeleton")).toBeNull());
+  await waitFor(() => expect(document.querySelector(".pagination-skeleton")).toBeNull());
 });

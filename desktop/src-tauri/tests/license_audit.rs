@@ -14,6 +14,7 @@ fn bundled_font_license_and_notices_are_complete_and_declared_as_resources() {
     assert!(ofl.contains("THE FONT SOFTWARE IS PROVIDED \"AS IS\""));
 
     let package: Value = serde_json::from_str(&desktop_file("../package.json")).unwrap();
+    assert_eq!(package["dependencies"]["@phosphor-icons/react"], "2.1.10");
     for dependency in [
         "@fontsource-variable/bricolage-grotesque",
         "@fontsource-variable/manrope",
@@ -26,6 +27,7 @@ fn bundled_font_license_and_notices_are_complete_and_declared_as_resources() {
     let lockfile = desktop_file("../pnpm-lock.yaml");
     assert!(lockfile.contains("'@fontsource-variable/bricolage-grotesque@5.3.0'"));
     assert!(lockfile.contains("'@fontsource-variable/manrope@5.3.0'"));
+    assert!(lockfile.contains("'@phosphor-icons/react@2.1.10'"));
     let entry = desktop_file("../src/main.tsx");
     assert!(entry.contains("@fontsource-variable/bricolage-grotesque"));
     assert!(entry.contains("@fontsource-variable/manrope"));
@@ -47,6 +49,9 @@ fn bundled_font_license_and_notices_are_complete_and_declared_as_resources() {
         "Bricolage Grotesque",
         "Manrope",
         "SIL OFL-1.1",
+        "@phosphor-icons/react",
+        "tauri-plugin-opener",
+        "Apache-2.0 OR MIT",
     ] {
         assert!(
             notices.contains(required),

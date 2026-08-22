@@ -11,7 +11,7 @@ The repository implements the layout and invariants below. Its pinned behavioral
 - Go CLI `../cli` at `d0d3647d615c8624abf27e30ade07d23da757041`, especially its resilient recursive processing and passthrough behavior.
 - Rust crypto workspace `../lib_um_crypto_rust` at `5dad838c33c3e4aab198d995160d3fbb9968470f` (`v0.1.12`) as the pinned source reference for the crate-private cipher and audio-sniffing primitives in `src/crypto/`.
 
-Non-goals are audio transcoding, library-management features, automatic source deletion, a desktop watch mode, and writing metadata obtained from an ambiguous network search. The desktop host is intentionally not a wrapper that starts the CLI: it never launches `unlockm`, a sidecar, a shell command, or a conversion daemon.
+Non-goals are audio transcoding, library-management features, automatic source deletion, a desktop watch mode, and writing metadata obtained from an ambiguous network search. The desktop host is intentionally not a wrapper that starts the CLI: it never launches `unlockm`, a sidecar, a shell command, or a conversion daemon. Explicit reveal/open controls are a separate user-triggered boundary: Rust resolves a persisted run/item ID, revalidates that recorded output, then asks the operating system to show it or open it with the default application.
 
 ## 2. High-Level Architecture
 
@@ -66,9 +66,10 @@ The workspace keeps a reusable library surface in `src/lib.rs`, a small CLI exec
 - `benches/`: streaming and multi-file throughput benchmarks used to tune buffers and default concurrency.
 - `desktop/`: Vite + React frontend and its `src-tauri/` Rust package.
   - `src-tauri/src/commands/`: narrow Tauri commands, DTOs, bounded persistence coordinator, and ordered IPC `Channel` forwarding.
-  - `src-tauri/src/history/`: Rust-owned SQLite migrations, run/item/artwork/preferences store, keyset reads, and record-only deletion.
+  - `src-tauri/src/history/`: Rust-owned SQLite migrations, run/item/artwork/preferences store, keyset run reads, SQL-backed song queries/facets, output/display-metadata fact repair, online legacy-identifier backup, and record-only deletion.
+  - `src-tauri/src/audio_protocol.rs`: item-ID-only content probing plus bounded `HEAD`/byte-range media responses for in-app playback; it never accepts a filesystem path.
   - `src-tauri/src/state.rs`: one-active-run ownership and cancellation state.
-  - `src/`: bilingual composer/history/detail UI. The webview receives typed DTOs and raw artwork bytes only; it has no SQL, generic filesystem, process, or shell capability.
+  - `src/`: bilingual, light/dark composer/history/detail UI. The webview receives typed DTOs, raw artwork bytes, and item-ID media URLs only; it has no SQL, generic filesystem, process, shell, asset-protocol, or opener capability.
 
 ## 4. Main Execution Flow
 
@@ -81,7 +82,8 @@ The workspace keeps a reusable library surface in `src/lib.rs`, a small CLI exec
 7. Without `--update-metadata`, decrypted audio bytes and any existing embedded tags are retained. With it, `metadata` resolves and validates all evidence before mutating the unpublished stage. FLAC metadata blocks are rewritten with bounded memory and 1 MiB audio-frame shifting; other containers use Lofty. A post-mutation failure discards the stage and regenerates clean audio only if the source fingerprint is unchanged and the job is not cancelled.
 8. `atomic` publishes the completed temporary file. Existing outputs are skipped unless `--overwrite` is set. A failure leaves the source and any pre-existing output untouched.
 9. Batch mode continues after per-file failures and returns a non-zero status after printing a summary. Watch mode logs per-file failures and stays alive until cancellation or a fatal watcher/configuration error.
-10. The desktop command reserves a persistent `planning` run before scanning, then streams ordered lifecycle events through a bounded coordinator. Each terminal item commits to SQLite before the matching IPC event. A run can be cancelled but sources and incomplete private stages are never published. On startup, stale planning/running rows become `interrupted`; the webview reads paginated history and lazily obtains artwork bytes.
+10. The desktop command reserves a persistent `planning` run before scanning, then streams ordered lifecycle events through a bounded coordinator. Each terminal item, trusted local NCM/filename display snapshot, final output byte length, and content-probed format commit to SQLite before the matching IPC event. A run can be cancelled but sources and incomplete private stages are never published. On startup, stale planning/running rows become `interrupted`; the webview keyset-pages runs, executes filtered/sorted song queries before page slicing, and lazily obtains artwork bytes. Schema-v1/older rows repair missing output facts and local display metadata only when their bounded detail page is read.
+11. In-app playback uses one frontend audio controller and `unlockm-audio://` item identities. Rust maps the ID back to a successful persisted music output, rejects changed/symlink/unsupported targets, and returns at most a bounded byte range. Reveal and system-open commands follow the same ID-only lookup and validation boundary.
 
 Watch mode performs the same initial scan, then converts normalized create, modify, and rename-to events through steps 3-8. Events are debounced and a file must have stable size and modification time across consecutive checks before it enters the runner. Rename-from/remove cancels queued work (and prevents a running job from publishing); a low-frequency reconciliation resubmits visible sources to cover notification loss without creating a second processing pipeline.
 
@@ -95,7 +97,7 @@ Watch mode performs the same initial scan, then converts normalized create, modi
 - `pathing` is pure apart from filesystem normalization. It does not probe file content.
 - Only `io::atomic` may replace a destination. Adapters must write to the provided temporary sink and must not create final paths.
 - `desktop/src-tauri` links `unlockm` directly and owns local history/IPC. It may construct validated desktop defaults but cannot duplicate format logic, the path planner, metadata rules, or publication.
-- The desktop webview cannot access generic filesystem, database, shell, process, sidecar, or plugin capabilities. Its only core grants are event `listen`/`unlisten` for native drag/drop plus dialog open for choosing roots; Rust revalidates every selected path. It cannot emit arbitrary events or use broad core event/path/menu/tray/webview defaults.
+- The desktop webview cannot access generic filesystem, database, shell, process, sidecar, asset-protocol, or opener capabilities. Its only core grants are event `listen`/`unlisten` for native drag/drop plus dialog open for choosing roots; Rust revalidates every selected path. ID-only custom commands may reveal/open previously persisted outputs, and the custom audio protocol may read bounded ranges from a validated persisted music item. Neither surface accepts a path from JavaScript.
 - Production modules must not import test fixtures or benchmark helpers.
 
 ## 6. Architectural Invariants
@@ -109,9 +111,11 @@ Watch mode performs the same initial scan, then converts normalized create, modi
 - The destination becomes visible only after decryption, optional metadata updates, and validation succeed.
 - Sources are never removed in the first release.
 - Network failure cannot make decryption fail. It can only leave metadata unchanged and produce a warning.
-- Desktop history is local-only SQLite data: it stores conversion facts, paths, bounded metadata snapshots, and deduplicated artwork—not audio payloads—and record deletion never touches source/output paths.
+- Desktop history is local-only SQLite data: it stores conversion facts, paths, bounded metadata snapshots, actual output byte/type facts, explicit theme/preferences, and deduplicated artwork, not audio payloads. Record deletion never touches source/output paths.
+- The canonical application identifier is `world.fansionia.unlockm`. On first launch after the earlier misspelling, SQLite's online backup API copies the legacy history into the new app-data directory only when no new database exists; it keeps the old database recoverable and never merges over new data.
+- Observer-only desktop display snapshots may read trusted local NCM container metadata regardless of the tag-update preference. This has no network or audio-write side effect. NCM nested artist arrays are supported; strict `Artist - Title` filenames are a final display fallback when both container/output tags omit those fields.
 - Desktop event persistence is commit-before-IPC and one-active-run. A coordinator/database failure requests cancellation and releases active ownership; it cannot make an already published output unsafe.
-- No conversion host may spawn the CLI, invoke a process/shell, or package an `unlockm` sidecar. Tauri/webview implementation processes are outside this conversion-process boundary.
+- No conversion host may spawn the CLI, invoke a conversion process/shell, or package an `unlockm` sidecar. Tauri/webview implementation processes are outside this conversion-process boundary. The narrow opener adapter is allowed only after an explicit user gesture and ID-based Rust validation of an existing history output.
 - Ambiguous metadata is never committed. Existing tags and covers win over guesses.
 - Watch events for a path are coalesced; if a file changes during processing, exactly one follow-up run is scheduled. Watch jobs share the batch runner's job semaphore, key indexes, metadata cache, and output reservations.
 
@@ -148,7 +152,7 @@ Image magic/MIME, byte limit, and decodability are checked before embedding. Nat
 
 ### Testing and release
 
-Unit tests cover path planning, suffix precedence, metadata merging, output reservations, key lookup, event coalescing, and one-terminal-report contracts. Integration tests use temporary trees and deterministic local HTTP fixtures. Watch tests wait on observable outputs rather than fixed sleeps. Desktop tests cover SQLite recovery/pagination/commit ordering, one-active-run/cancellation, IPC DTOs, React state, accessibility, i18n, bounded virtual rendering, and lazy artwork. Release checks include locked Vite+ frontend validation through `vp`, Rust checks, and no-bundle Tauri compilation on macOS/Windows. The tag channel has no signing-service or user-managed signing-credential cost and emits checksum-backed unsigned preview prereleases: macOS uses only an ad-hoc app signature, Windows artifacts are explicitly `NotSigned`, and neither channel contains a conversion sidecar. GitHub-hosted runner and artifact usage remains subject to the repository owner's plan and quota.
+Unit tests cover path planning, suffix precedence, metadata merging, output reservations, key lookup, event coalescing, and one-terminal-report contracts. Integration tests use temporary trees and deterministic local HTTP fixtures. Watch tests wait on observable outputs rather than fixed sleeps. Desktop tests cover SQLite recovery/migration/query pagination/commit ordering, one-active-run/cancellation, output facts, ID-only byte ranges and native actions, IPC DTOs, React state, theme/i18n/accessibility, bounded paged rendering, playback ownership, and lazy artwork. Release checks include locked Vite+ frontend validation through `vp`, Rust checks, and no-bundle Tauri compilation on macOS/Windows. The current redesign's complete native/runtime/visual evidence is macOS-only by explicit scope; existing Windows CI/release definitions remain. The tag channel has no signing-service or user-managed signing-credential cost and emits checksum-backed unsigned preview prereleases: macOS uses only an ad-hoc app signature, Windows artifacts are explicitly `NotSigned`, and neither channel contains a conversion sidecar. GitHub-hosted runner and artifact usage remains subject to the repository owner's plan and quota.
 
 ## 8. Extension Points
 
@@ -174,9 +178,9 @@ Unit tests cover path planning, suffix precedence, metadata merging, output rese
 ## 10. External Dependencies
 
 - `src/crypto/` owns the cipher primitives, footer/header parsing, and audio type detection selectively ported from pinned `lib_um_crypto_rust` revision `5dad838...`. `Cargo.toml` and `Cargo.lock` contain no dependency on that repository; provenance is retained in source headers and `THIRD_PARTY_NOTICES.md`.
-- Tauri v2 owns the desktop window/runtime and dialog bridge. The child crate depends on the root `unlockm` library rather than any `unlockm` executable.
+- Tauri v2 owns the desktop window/runtime, standard native menu with custom About metadata, dialog bridge, and custom audio protocol. The official opener plugin is called only from ID-validating Rust commands and has no generic frontend permission. The child crate depends on the root `unlockm` library rather than any `unlockm` executable.
 - The desktop `rusqlite` store owns local history. It is separate from KGM key extraction and is never exposed to JavaScript as a database connection or path.
-- Vite+, React, i18next, Motion, TanStack Virtual, and locally bundled Fontsource fonts belong only to the desktop UI; frontend setup/install/check/test/build/Tauri invocation use the `vp` entry point with the locked pnpm backend. `bundle.resources` ships `THIRD_PARTY_NOTICES.md` and the complete SIL OFL-1.1 text alongside Fontsource's Bricolage Grotesque and Manrope assets.
+- Vite+, React, i18next, Motion, TanStack Virtual, Phosphor Icons, and locally bundled Fontsource fonts belong only to the desktop UI; frontend setup/install/check/test/build/Tauri invocation use the `vp` entry point with the locked pnpm backend. `bundle.resources` ships `THIRD_PARTY_NOTICES.md` and the complete SIL OFL-1.1 text alongside Fontsource's Bricolage Grotesque and Manrope assets.
 - Tokio owns async orchestration, cancellation, and HTTP/watch integration; it does not run blocking decrypt loops directly.
 - Clap owns the public CLI grammar.
 - `notify` (with a debouncer layer) owns platform filesystem notifications. Application code supplies stability and deduplication semantics.
