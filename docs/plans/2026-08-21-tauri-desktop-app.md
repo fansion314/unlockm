@@ -2,7 +2,7 @@
 
 ## Status
 
-In Progress
+Done
 
 ## Objective
 
@@ -530,7 +530,7 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - [x] T11.2 Extend Rust and TypeScript bootstrap locale contracts and fixtures to advertise `ja-JP`; run the focused contract suites.
 - [x] T11.3 Bump all authoritative package/application versions and workspace lock entries from `0.1.0` to `0.2.0`; verify the release tag guard accepts only `v0.2.0`.
 - [x] T11.4 Run full Rust/frontend validation, review the M11 diff against this ExecPlan, fix all material findings, and return the plan to `In Progress` for publication after re-review passes; `Done` still requires T11.5 remote evidence.
-- [ ] T11.5 Create the validated conventional commit and annotated `v0.2.0` tag, push `main` and the tag to GitHub, then record the completed Actions prerelease URL, conclusion, assets, and remote commit/tag identity.
+- [x] T11.5 Create the validated conventional commit and annotated `v0.2.0` tag, push `main` and the tag to GitHub, then record the completed Actions prerelease URL, conclusion, assets, and remote commit/tag identity.
 
 ## Validation Strategy
 
@@ -707,6 +707,7 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - [x] 2026-08-22 M11 re-review (`Pass`): no blocker, major, or meaningful minor findings remain. Scope, locale/key/interpolation behavior, keyboard selection/persistence, IPC fixtures, version metadata, security boundary, local artifact evidence, and plan state are accurate. T11.4 is complete; status returns to `In Progress` solely for commit/tag/push and live GitHub prerelease evidence under T11.5.
 - [x] 2026-08-22 first GitHub v0.2.0 run (`32564012836`, superseded): `main` and annotated tag `v0.2.0` were atomically pushed at `957a9d7`, but the macOS package job failed in `Run complete Rust workspace tests` with exit 101 before packaging; publish did not run. BrowserOS inspection and source audit traced the clean-checkout-only failure to three M10 regressions reading an unversioned sibling path under `../samples`, which exists locally but not in GitHub Actions.
 - [x] 2026-08-22 release-blocker fix and re-review: the NCM parser, metadata-off snapshot, and bounded history-repair regressions now synthesize inputs from the committed deterministic `tests/support/ncm_fixture.rs` plus the committed silent MP3 fixture. Exact nested-array parsing remains asserted separately, propagation expectations derive from parsed container evidence, and audio immutability remains asserted. No production path changed. `rg` finds no remaining sibling-sample dependency; formatter, strict locked workspace Clippy, and all 178 Rust tests across 18 suites pass. Re-review status: `Pass`; the failed tag/run must be replaced with an exact new tag at the fix commit before republishing.
+- [x] 2026-08-22 T11.5 publication complete. Commit `957a9d7` added Japanese/v0.2.0, commit `239c710` made the release regressions hermetic, and the failed unpublished tag was narrowly replaced. Remote `github/main` and peeled annotated `v0.2.0` both resolve to `239c7103753fe43c5d65d9dd13c4027f58b27679`. GitHub Actions run `32564666408` completed successfully in 19m31s: macOS universal and Windows x86_64 package jobs passed all locked Rust/frontend/security/license/build/signature/payload/checksum gates, then the publish job succeeded. The resulting prerelease is `UnlockM v0.2.0 — Unsigned Preview` at `https://github.com/fansion314/unlockm/releases/tag/v0.2.0` with exactly the four planned installer/checksum assets (plus GitHub's two automatic source archives). Remote installer checksums are macOS `a243eac1af2e776a6aafceb02303929994b66f268239c31a876799d57c724611` and Windows `55128300c11f4ce4f6c8c90b887fdb3cd6d17d0dd263ddd6aaa3d5aa8417f86a`. All M11 tasks and review/release findings are closed; status returned to `Done`.
 
 ## Discoveries
 
@@ -811,7 +812,17 @@ This baseline evidence alone does not validate M6–M9. The current Progress ent
 
 M6–M10 and T5.6 are complete. The previous `world.fansion.unlockm` DMG remains historical redesign evidence only and is superseded for release purposes by the corrected M10 artifact below.
 
-M11 is in progress for complete `ja-JP` localization, consistent `0.2.0` package metadata, validated commit/tag creation, and the real GitHub `v0.2.0` prerelease. The authoritative v0.2.0 remote workflow and artifact evidence will be recorded after publication; no successful release is claimed before then.
+M11 is complete. `ja-JP` has full semantic-key parity, first-launch detection, persistence, keyboard-accessible selection, and Rust/TypeScript bootstrap coverage; every authoritative package/application version is `0.2.0`. The reviewed release commit is `239c7103753fe43c5d65d9dd13c4027f58b27679`, and both `github/main` and peeled annotated tag `v0.2.0` resolved to it at publication.
+
+### v0.2.0 GitHub release evidence
+
+- Actions: `https://github.com/fansion314/unlockm/actions/runs/32564666408` completed successfully in 19m31s with successful macOS universal, Windows x86_64, and publish jobs.
+- Prerelease: `https://github.com/fansion314/unlockm/releases/tag/v0.2.0`, title `UnlockM v0.2.0 — Unsigned Preview`, prerelease marker present, commit `239c710`.
+- `UnlockM-0.2.0-macos-universal-unsigned.dmg` (15.5 MB), SHA-256 `a243eac1af2e776a6aafceb02303929994b66f268239c31a876799d57c724611`.
+- `UnlockM-0.2.0-macos-universal-unsigned.dmg.sha256` (109 bytes), published asset digest `270ef1e71b39f9347998ea3892420b09137a7d089473304d895b5691004fd507`.
+- `UnlockM-0.2.0-windows-x64-unsigned-setup.exe` (5.05 MB), SHA-256 `55128300c11f4ce4f6c8c90b887fdb3cd6d17d0dd263ddd6aaa3d5aa8417f86a`.
+- `UnlockM-0.2.0-windows-x64-unsigned-setup.exe.sha256` (111 bytes), published asset digest `331c3d873a60df99594d31f3bed98ac6d75b7e221f7f3f695991a7333f9f5c9c`.
+- Workflow assertions independently confirmed the macOS DMG as VALID/ad-hoc/universal/resource-complete/sidecar-free and both the Windows application and NSIS installer as `NotSigned`; exact asset and checksum verification passed before publish.
 
 ### Final macOS preview evidence
 
