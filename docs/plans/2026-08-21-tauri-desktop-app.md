@@ -2,7 +2,7 @@
 
 ## Status
 
-Done
+In Progress
 
 ## Objective
 
@@ -10,7 +10,7 @@ Build a polished Tauri v2 desktop application for macOS and Windows that links t
 
 The redesigned shell has a fixed localized product bar, an explicit language menu, and a light/dark toggle whose fresh-install default is light. The home view puts the drop target and action/options column in an approximately golden-ratio composition, then places a full-width one-row-per-run conversion history below it. Opening a run transitions to a compact detail view with a server-backed searchable, filterable, sortable, genuinely paginated flat song list. Each song shows artwork, title, artist, album, converted file type and size, provides one-at-a-time in-app playback with play/pause and seeking, and offers narrow actions to reveal the file or open it in the system player.
 
-The first release is bilingual (`zh-CN` and `en-US`), visually modern and restrained in both themes, motion-rich without sacrificing accessibility, and distributed by GitHub Actions for macOS and Windows.
+The v0.2.0 release is multilingual (`zh-CN`, `en-US`, and `ja-JP`), visually modern and restrained in both themes, motion-rich without sacrificing accessibility, and distributed by GitHub Actions for macOS and Windows.
 
 The desktop application must not start the `unlockm` CLI or any other conversion sidecar. All decryption, path planning, metadata handling, bounded concurrency, and atomic publication remain in the in-process Rust core.
 
@@ -31,7 +31,7 @@ The desktop application must not start the `unlockm` CLI or any other conversion
 - Persist runs, per-path outcomes, technical error/warning details, music metadata snapshots, and deduplicated artwork in a local SQLite database located in Tauri's application-data directory.
 - Recover incomplete `planning`/`running` rows as `interrupted` at next startup without touching source or output files.
 - Keep newest-first keyset pagination for run history. Replace detail “load more” with SQL-backed page/page-size queries whose search, album filter, artist filter, outcome filter, and sort all apply to the complete run rather than only already-loaded items.
-- Provide Chinese and English UI resources, a proper language dropdown, localized product subtitle (`UnlockM · 音乐解锁` / `UnlockM · Music Unlocker`), locale persistence, translated product/error-code copy, and sensible filename/path fallbacks.
+- Provide complete Chinese, English, and Japanese UI resources, a proper language dropdown, localized product subtitles (`UnlockM · 音乐解锁` / `UnlockM · Music Unlocker` / `UnlockM · 音楽ロック解除`), locale persistence/detection, translated product/error-code copy, and sensible filename/path fallbacks.
 - Provide complete light and dark token sets, default new users to light, persist an explicit theme choice, and avoid a wrong-theme flash during startup by applying a synchronous cached theme before React mounts and reconciling it with Rust-owned preferences during bootstrap.
 - Use one fixed/sticky title bar on both home and detail views, with icon buttons for language and theme plus localized accessible names/tooltips.
 - Recompose the home conversion area as an approximately `1.6fr / 1fr` desktop split: the drop/select surface is dominant; the right stack contains a large output-directory control, only applicable quick settings, and a large restrained primary conversion action. Stack responsively in narrow windows.
@@ -62,7 +62,7 @@ The desktop application must not start the `unlockm` CLI or any other conversion
 - Exposing `--watch`, `--flat`, `--jobs`, `--buffer-size`, `--metadata-jobs`, QMC ekeys/maps/MMKV passwords, or KGM database paths in the initial UI.
 - Audio transcoding, deleting encrypted sources, changing collision policy, weakening atomic publication, or changing metadata confidence rules.
 - Fetching metadata or artwork solely to decorate history. History captures the final/local output state; network access remains gated by `update_metadata`.
-- Theme customization beyond the explicit light/dark pair, automatic system-theme following, or more than `zh-CN` and `en-US` in the first release. The token and resource structure must remain extensible.
+- Theme customization beyond the explicit light/dark pair, automatic system-theme following, or locales beyond `zh-CN`, `en-US`, and `ja-JP` in v0.2.0. The token and resource structure must remain extensible.
 - A generic webview filesystem/opener capability, arbitrary-path audio URL, or arbitrary-path “open with system application” command. All playback/reveal/open operations must resolve a persisted run/item ID in Rust and revalidate the recorded destination.
 
 ## Current Context
@@ -111,7 +111,7 @@ desktop/
 │   ├── components/
 │   ├── features/conversion/
 │   ├── features/history/
-│   ├── i18n/locales/{zh-CN,en-US}.json
+│   ├── i18n/locales/{zh-CN,en-US,ja-JP}.json
 │   ├── lib/
 │   ├── styles/
 │   └── test/
@@ -233,7 +233,7 @@ Shared shell:
 
 - a fixed/sticky top bar that does not scroll away on home or detail,
 - `UnlockM · 音乐解锁` in Chinese and `UnlockM · Music Unlocker` in English,
-- a globe icon opening an explicit two-language menu with checked selection and full keyboard/menu dismissal behavior,
+- a globe icon opening an explicit three-language menu with checked selection and full keyboard/menu dismissal behavior,
 - a sun/moon icon toggling persisted light/dark mode,
 - icon-only controls wherever the symbol is conventional, with text retained where an icon alone would be ambiguous.
 
@@ -261,11 +261,11 @@ Motion guidelines: 180–320 ms for primary transitions, spring/layout motion on
 
 ### D10. Internationalization and error presentation
 
-Use `i18next` + `react-i18next` with complete `zh-CN` and `en-US` resources. Detect the platform/browser locale on first launch, fall back to English for unsupported locales, and persist explicit user selection. The title bar's localized product subtitle changes with locale. Keep translation keys semantic and prohibit hard-coded user-facing strings in feature components.
+Use `i18next` + `react-i18next` with complete `zh-CN`, `en-US`, and `ja-JP` resources. Detect Chinese and Japanese platform/browser locales on first launch, fall back to English for unsupported locales, and persist explicit user selection. The title bar's localized product subtitle changes with locale. Keep translation keys semantic and prohibit hard-coded user-facing strings in feature components.
 
 Rust commands return stable error codes plus interpolation parameters and a separate technical detail. The frontend translates the product message; an app-level failure banner may retain a collapsed technical detail for support, but song rows never expose raw diagnostics. Stored history retains both the code and original technical detail so later app versions can retranslate the product copy.
 
-Test both locales for missing keys, interpolation, plural/count text, long English layout, Chinese punctuation, path truncation, and reduced-motion behavior. Dates/times and durations use `Intl` formatting, not hand-built locale strings.
+Test all three locales for missing keys, interpolation, plural/count text, long English layout, Chinese/Japanese punctuation, path truncation, and reduced-motion behavior. Dates/times and durations use `Intl` formatting, not hand-built locale strings.
 
 ### D11. Packaging and release interpretation
 
@@ -444,6 +444,20 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
   - Full Rust/frontend gates and macOS Tauri app/universal DMG build.
   - Native macOS screenshots for adjusted detail and About panel, plus a real metadata-off conversion proving a non-empty artist.
 
+### M11. Japanese localization and v0.2.0 release
+
+- Goal: add complete Japanese product copy and publish the resulting desktop release as `v0.2.0` through the existing no-secret unsigned-preview workflow.
+- Dependencies: completed and reviewed M1–M10 implementation, current release workflow, and both configured Git remotes.
+- Acceptance criteria:
+  - `ja-JP` has exact semantic-key parity with `zh-CN` and `en-US`, natural Japanese product/error copy, Japanese first-launch detection, persistence, and full keyboard-accessible language-menu behavior.
+  - The Rust/TypeScript bootstrap contract advertises all three locales without widening any unrelated IPC or capability surface.
+  - Root Cargo, desktop Cargo, frontend package, Tauri configuration, and workspace lockfile consistently report `0.2.0`; the `v0.2.0` tag resolves to the validated release commit.
+  - `main` and `v0.2.0` are pushed to GitHub, the tag workflow completes, and the GitHub prerelease exposes the exact macOS/Windows unsigned installers plus SHA-256 manifests.
+- Validation:
+  - Focused locale parity/detection/menu/persistence and Rust/TypeScript bootstrap contract tests.
+  - Full Rust/frontend build and release gates listed below.
+  - Remote branch/tag identity, GitHub Actions conclusion, prerelease state/title, exact asset list, and checksum metadata inspection.
+
 ## Task Breakdown
 
 - [x] T1.1 Add the root Cargo workspace/member/default-member configuration and scaffold `desktop/src-tauri/Cargo.toml` so the desktop crate links `unlockm` by path; verify the existing default CLI build still selects only the root package.
@@ -511,6 +525,12 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - [x] T10.3 Build the standard native menu with custom About metadata containing bilingual credits for Additive Cookie, Moxianbao, and vincentlee73 and `Copyright © Hamlet Fansion (Peilin Fan)`; add metadata/menu contract tests.
 - [x] T10.4 Merge trusted local NCM container metadata into observer-only history snapshots regardless of `update_metadata`, add conservative `Artist - Title` fallback, and prove metadata-off artist correctness without network/tag mutation.
 - [x] T10.5 Review T10.1–T10.4, fix findings, re-review, rerun full gates/native macOS QA, and replace final DMG hash/evidence before returning this plan to `Done`.
+
+- [x] T11.1 Add complete `desktop/src/i18n/locales/ja-JP.json`, register/detect `ja-JP`, add it to the accessible language menu, and extend parity/interpolation/menu/persistence tests.
+- [x] T11.2 Extend Rust and TypeScript bootstrap locale contracts and fixtures to advertise `ja-JP`; run the focused contract suites.
+- [x] T11.3 Bump all authoritative package/application versions and workspace lock entries from `0.1.0` to `0.2.0`; verify the release tag guard accepts only `v0.2.0`.
+- [x] T11.4 Run full Rust/frontend validation, review the M11 diff against this ExecPlan, fix all material findings, and return the plan to `In Progress` for publication after re-review passes; `Done` still requires T11.5 remote evidence.
+- [ ] T11.5 Create the validated conventional commit and annotated `v0.2.0` tag, push `main` and the tag to GitHub, then record the completed Actions prerelease URL, conclusion, assets, and remote commit/tag identity.
 
 ## Validation Strategy
 
@@ -680,6 +700,11 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - [x] 2026-08-22: Completed T10.5 final gates: Rust formatting, strict workspace Clippy, and 178 tests across 18 suites; Vite+ 45-file format check, lint/type check, 35 tests across 12 suites, production build; `rtk git diff --check`; native macOS M10 screenshots/About interaction; and universal Tauri packaging. Windows execution remains explicitly waived.
 - [x] 2026-08-22: Corrected final artifact `target/universal-apple-darwin/release/bundle/dmg/UnlockM_0.1.0_universal.dmg` is 15,870,044 bytes with SHA-256 `0a8ed33d4f454799f4fdf8b61f3f097651638c972060fa59b40717ffdc26335f`; `hdiutil verify` returned VALID. Read-only inspection proved `world.fansionia.unlockm` in Info.plist/codesign, `Copyright © Hamlet Fansion (Peilin Fan)`, `x86_64 arm64`, `Signature=adhoc`, complete license/icon resources, requested About strings in the binary, and exactly one sidecar-free executable. The final universal app replaced the temporary debug installation at `/Applications/UnlockM.app` and LaunchServices was refreshed.
 - [x] 2026-08-22 M10 completion audit: all T10 tasks and review findings are closed. Native evidence shows the long title/full paths/full completion timestamp without clipping, About displays all requested Chinese/English names and copyright, migrated history is present under `world.fansionia.unlockm`, and existing/new Claire rows display `Claire Rosinkranz`. The real sample parser/no-write tests prove metadata-off artist correctness. Status returned to `Done`.
+- [x] 2026-08-22: Reopened the completed plan for M11 at the user's request. The repository was clean at `c659fb9`, `main` was one commit ahead of both `origin/main` and `github/main`, `v0.2.0` was unused locally, and the existing tag workflow requires matching Tauri/Cargo versions before producing the four unsigned preview assets. Japanese localization, the `0.2.0` version bump, validation/review, commit/tag, GitHub push, and live prerelease evidence remain in progress.
+- [x] 2026-08-22: Completed T11.1–T11.3 implementation. Added complete Japanese semantic-key parity, `ja`/`ja-JP` detection, three-item roving-focus language selection and persisted Japanese product title; extended Rust/TypeScript bootstrap fixtures to three locales; and updated root Cargo, desktop Cargo, frontend package, Tauri config, and both workspace lock entries to `0.2.0`. Focused Vite+ locale/App tests passed (10 tests), the Rust bootstrap contract test passed, `cargo metadata --locked` reports both workspace packages at 0.2.0, and the local release version guard accepts `v0.2.0`.
+- [x] 2026-08-22: M11 pre-review gates passed: `cargo fmt --check`, strict locked workspace Clippy, 178 Rust tests across 18 suites, frozen Vite+ install, 46-file frontend format/lint/type check, 36 frontend tests across 12 suites, production build, and `git diff --check`. A local ad-hoc-signed universal package produced `UnlockM_0.2.0_universal.dmg`; `hdiutil verify` returned VALID, and read-only inspection confirmed version `0.2.0`, identifier `world.fansionia.unlockm`, `x86_64 arm64`, `Signature=adhoc`, and exactly one executable. The 15,873,310-byte candidate SHA-256 is `a198a9a7c779c9caea9a5e17f86eae3346e3e3d7753dc8efd824a495bc4e94d9`. Status moved to `In Review`; commit/tag/push/live Actions evidence remains pending.
+- [x] 2026-08-22 M11 review-plan first pass (`Pass with Notes`, resolved): Minor - the frontend header and Rust bootstrap construction repeated the three-locale allowlist, creating an avoidable drift risk. The header now reuses exported `supportedLocales`, and Rust uses one `SUPPORTED_LOCALES` constant. Affected Vite+ format/check and 10 locale/App tests plus desktop Rust format/strict Clippy/bootstrap contract tests passed.
+- [x] 2026-08-22 M11 re-review (`Pass`): no blocker, major, or meaningful minor findings remain. Scope, locale/key/interpolation behavior, keyboard selection/persistence, IPC fixtures, version metadata, security boundary, local artifact evidence, and plan state are accurate. T11.4 is complete; status returns to `In Progress` solely for commit/tag/push and live GitHub prerelease evidence under T11.5.
 
 ## Discoveries
 
@@ -768,6 +793,7 @@ Never log or persist QMC/KGM secret material. History intentionally stores user-
 - **2026-08-22 — D37:** Correct the canonical identifier to `world.fansionia.unlockm`. Preserve legacy history by using SQLite's online backup API only when the new database is absent; retain the legacy database as a recoverable copy and never merge/overwrite a non-empty new database.
 - **2026-08-22 — D38:** History display metadata may use trusted local NCM container evidence independently of `update_metadata`; this does not authorize network access or audio-tag mutation. Text uses container evidence over final tags when present, while embedded output artwork remains preferred over container artwork.
 - **2026-08-22 — D39:** Keep the native standard menu structure and customize only About metadata. Credits are bilingual in one panel so they remain correct regardless of current webview locale.
+- **2026-08-22 — D40:** Ship Japanese as the third complete locale under `ja-JP`. Japanese platform locales select it on first launch, unsupported locales continue to fall back to English, and the persisted preference/bootstrap contract remains the authoritative explicit selection. Publish this increment as the existing checksum-backed unsigned-preview channel at `v0.2.0`.
 
 ## Completion Evidence
 
@@ -780,6 +806,8 @@ This baseline evidence alone does not validate M6–M9. The current Progress ent
 ### Redesign completion evidence
 
 M6–M10 and T5.6 are complete. The previous `world.fansion.unlockm` DMG remains historical redesign evidence only and is superseded for release purposes by the corrected M10 artifact below.
+
+M11 is in progress for complete `ja-JP` localization, consistent `0.2.0` package metadata, validated commit/tag creation, and the real GitHub `v0.2.0` prerelease. The authoritative v0.2.0 remote workflow and artifact evidence will be recorded after publication; no successful release is claimed before then.
 
 ### Final macOS preview evidence
 

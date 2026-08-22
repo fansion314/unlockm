@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import unlockmIcon from "../../src-tauri/icons/source/UnlockM Icon.png";
+import { supportedLocales } from "../i18n";
 import type { Preferences } from "../lib/contracts";
 
 type AppHeaderProps = {
@@ -47,12 +48,12 @@ export function AppHeader({ locale, theme, onLocale, onTheme }: AppHeaderProps) 
 
   useEffect(() => {
     if (!languageOpen) return;
-    const selected = locale === "zh-CN" ? 0 : 1;
+    const selected = supportedLocales.indexOf(locale);
     window.requestAnimationFrame(() => optionRefs.current[selected]?.focus());
   }, [languageOpen, locale]);
 
   const moveLanguageFocus = (event: ReactKeyboardEvent, index: number) => {
-    const last = 1;
+    const last = supportedLocales.length - 1;
     let next = index;
     if (event.key === "ArrowDown") next = index === last ? 0 : index + 1;
     else if (event.key === "ArrowUp") next = index === 0 ? last : index - 1;
@@ -88,7 +89,7 @@ export function AppHeader({ locale, theme, onLocale, onTheme }: AppHeaderProps) 
             </button>
             {languageOpen ? (
               <div className="language-menu" role="menu" aria-label={t("app.chooseLanguage")}>
-                {(["zh-CN", "en-US"] as const).map((value, index) => (
+                {supportedLocales.map((value, index) => (
                   <button
                     ref={(element) => {
                       optionRefs.current[index] = element;

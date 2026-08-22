@@ -36,6 +36,7 @@ use unlockm::{
 mod desktop_ncm_fixture;
 
 pub type CommandResult<T> = Result<T, CommandError>;
+const SUPPORTED_LOCALES: [&str; 3] = ["zh-CN", "en-US", "ja-JP"];
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,7 +94,7 @@ async fn blocking<T: Send + 'static>(
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapResponse {
     pub product_name: &'static str,
-    pub supported_locales: [&'static str; 2],
+    pub supported_locales: [&'static str; 3],
     pub preferences: Preferences,
     pub history: RunPage,
     pub active_run: Option<ActiveRunResponse>,
@@ -169,7 +170,7 @@ pub async fn bootstrap(state: State<'_, AppState>) -> CommandResult<BootstrapRes
         let history = state.history();
         Ok(BootstrapResponse {
             product_name: PRODUCT_NAME,
-            supported_locales: ["zh-CN", "en-US"],
+            supported_locales: SUPPORTED_LOCALES,
             preferences: history.preferences().map_err(CommandError::history)?,
             history: history.list_runs(None, 30).map_err(CommandError::history)?,
             active_run: state
@@ -1160,7 +1161,7 @@ mod tests {
     fn typescript_bootstrap_fixture_matches_rust_camel_case_contract() {
         let actual = serde_json::to_value(BootstrapResponse {
             product_name: PRODUCT_NAME,
-            supported_locales: ["zh-CN", "en-US"],
+            supported_locales: SUPPORTED_LOCALES,
             preferences: Preferences::default(),
             history: RunPage {
                 runs: Vec::new(),

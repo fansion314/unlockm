@@ -67,7 +67,7 @@ function emptyItemPage() {
 function bootstrap(overrides = {}) {
   return {
     productName: "UnlockM" as const,
-    supportedLocales: ["zh-CN", "en-US"] as ["zh-CN", "en-US"],
+    supportedLocales: ["zh-CN", "en-US", "ja-JP"] as ["zh-CN", "en-US", "ja-JP"],
     preferences: {
       locale: "en-US" as const,
       theme: "light" as const,
@@ -141,6 +141,15 @@ test("fresh light theme, dark toggle, and language menu persist one preference s
     theme: "dark",
     defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
   });
+
+  await user.click(screen.getByRole("button", { name: "选择语言" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "日本語" }));
+  await waitFor(() => expect(screen.getByText("音楽ロック解除")).toBeTruthy());
+  expect(api.setPreferences).toHaveBeenLastCalledWith({
+    locale: "ja-JP",
+    theme: "dark",
+    defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
+  });
 });
 
 test("language menu uses roving arrow focus and restores the trigger on Escape", async () => {
@@ -152,11 +161,12 @@ test("language menu uses roving arrow focus and restores the trigger on Escape",
   await user.click(trigger);
   const english = screen.getByRole("menuitemradio", { name: "English" });
   const chinese = screen.getByRole("menuitemradio", { name: "简体中文" });
+  const japanese = screen.getByRole("menuitemradio", { name: "日本語" });
   await waitFor(() => expect(document.activeElement).toBe(english));
   await user.keyboard("{ArrowUp}");
   expect(document.activeElement).toBe(chinese);
   await user.keyboard("{End}");
-  expect(document.activeElement).toBe(english);
+  expect(document.activeElement).toBe(japanese);
   await user.keyboard("{Escape}");
   await waitFor(() => expect(document.activeElement).toBe(trigger));
   expect(screen.queryByRole("menu")).toBeNull();

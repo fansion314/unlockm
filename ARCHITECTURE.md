@@ -69,7 +69,7 @@ The workspace keeps a reusable library surface in `src/lib.rs`, a small CLI exec
   - `src-tauri/src/history/`: Rust-owned SQLite migrations, run/item/artwork/preferences store, keyset run reads, SQL-backed song queries/facets, output/display-metadata fact repair, online legacy-identifier backup, and record-only deletion.
   - `src-tauri/src/audio_protocol.rs`: item-ID-only content probing plus bounded `HEAD`/byte-range media responses for in-app playback; it never accepts a filesystem path.
   - `src-tauri/src/state.rs`: one-active-run ownership and cancellation state.
-  - `src/`: bilingual, light/dark composer/history/detail UI. The webview receives typed DTOs, raw artwork bytes, and item-ID media URLs only; it has no SQL, generic filesystem, process, shell, asset-protocol, or opener capability.
+  - `src/`: Chinese/English/Japanese, light/dark composer/history/detail UI. The webview receives typed DTOs, raw artwork bytes, and item-ID media URLs only; it has no SQL, generic filesystem, process, shell, asset-protocol, or opener capability.
 
 ## 4. Main Execution Flow
 

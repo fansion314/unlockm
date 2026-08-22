@@ -104,7 +104,7 @@ test("late bootstrap preserves a locally owned conversion request", () => {
     type: "booted",
     bootstrap: {
       productName: "UnlockM",
-      supportedLocales: ["zh-CN", "en-US"],
+      supportedLocales: ["zh-CN", "en-US", "ja-JP"],
       preferences: {
         locale: "en-US",
         theme: "light",
@@ -123,7 +123,7 @@ test("reconciles a reload-recovered active run once bootstrap shows it terminal"
     type: "booted",
     bootstrap: {
       productName: "UnlockM",
-      supportedLocales: ["zh-CN", "en-US"],
+      supportedLocales: ["zh-CN", "en-US", "ja-JP"],
       preferences: {
         locale: "en-US",
         theme: "light",
@@ -137,7 +137,7 @@ test("reconciles a reload-recovered active run once bootstrap shows it terminal"
     type: "booted",
     bootstrap: {
       productName: "UnlockM",
-      supportedLocales: ["zh-CN", "en-US"],
+      supportedLocales: ["zh-CN", "en-US", "ja-JP"],
       preferences: {
         locale: "en-US",
         theme: "light",

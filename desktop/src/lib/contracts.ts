@@ -5,7 +5,7 @@ export type RunSettings = {
 };
 
 export type Preferences = {
-  locale: "en-US" | "zh-CN";
+  locale: "en-US" | "zh-CN" | "ja-JP";
   theme: "light" | "dark";
   defaultSettings: RunSettings;
 };
@@ -49,7 +49,7 @@ export type RunPage = {
 
 export type BootstrapResponse = {
   productName: "UnlockM";
-  supportedLocales: ["zh-CN", "en-US"];
+  supportedLocales: ["zh-CN", "en-US", "ja-JP"];
   preferences: Preferences;
   history: RunPage;
   activeRun: { runId: number } | null;

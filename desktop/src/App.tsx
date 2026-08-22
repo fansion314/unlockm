@@ -15,7 +15,7 @@ import { desktopApi } from "./lib/ipc";
 import { persistPreferences } from "./lib/preferences";
 import { applyTheme, cachedTheme } from "./lib/theme";
 import "./App.css";
-import "./i18n";
+import { localeFromLanguage } from "./i18n";
 
 const defaultSettings: RunSettings = {
   updateMetadata: false,
@@ -24,7 +24,7 @@ const defaultSettings: RunSettings = {
 };
 
 function currentLocale(language: string): Preferences["locale"] {
-  return language === "zh-CN" ? "zh-CN" : "en-US";
+  return localeFromLanguage(language);
 }
 
 function basename(path: string): string {
