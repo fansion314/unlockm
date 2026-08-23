@@ -7,16 +7,28 @@ use lofty::{
 };
 use std::{
     fs::{self, OpenOptions},
+    io::Read,
     path::Path,
 };
 
 pub const MAX_COVER_BYTES: usize = 10 * 1024 * 1024;
+
+/// Three-state tag edits used by desktop history: `None` keeps the existing
+/// field, `Some(Some(value))` sets it, and `Some(None)` removes it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct MetadataPatch {
+    pub title: Option<Option<String>>,
+    pub artist: Option<Option<String>>,
+    pub album: Option<Option<String>>,
+    pub cover: Option<Vec<u8>>,
+}
 
 /// A local final-output snapshot that keeps useful tag text even when the
 /// artwork is malformed or exceeds the bounded history payload limit.
 #[derive(Debug, Default)]
 pub struct BoundedTagSnapshot {
     pub metadata: Metadata,
+    pub bitrate_kbps: Option<u32>,
     pub artwork_warning: Option<String>,
 }
 
@@ -67,9 +79,15 @@ pub fn read_bounded_snapshot(path: &Path) -> std::result::Result<BoundedTagSnaps
         duration_ms: u32::try_from(file.properties().duration().as_millis()).ok(),
         ..Default::default()
     };
+    let bitrate_kbps = file
+        .properties()
+        .audio_bitrate()
+        .or_else(|| file.properties().overall_bitrate())
+        .filter(|value| *value > 0);
     let Some(tag) = file.primary_tag().or_else(|| file.first_tag()) else {
         return Ok(BoundedTagSnapshot {
             metadata,
+            bitrate_kbps,
             artwork_warning: None,
         });
     };
@@ -96,6 +114,7 @@ pub fn read_bounded_snapshot(path: &Path) -> std::result::Result<BoundedTagSnaps
     metadata.cover = cover;
     Ok(BoundedTagSnapshot {
         metadata,
+        bitrate_kbps,
         artwork_warning,
     })
 }
@@ -138,6 +157,323 @@ pub fn write(
         },
     )?;
     Ok(path.to_path_buf())
+}
+
+pub fn write_patch(
+    path: &Path,
+    patch: &MetadataPatch,
+) -> std::result::Result<std::path::PathBuf, String> {
+    let parent = path.parent().ok_or("audio output has no parent")?;
+    let candidate = tempfile::Builder::new()
+        .prefix(".unlockm-metadata-")
+        .tempfile_in(parent)
+        .map_err(|error| format!("create metadata candidate: {error}"))?
+        .into_temp_path()
+        .keep()
+        .map_err(|error| format!("keep metadata candidate: {}", error.error))?;
+    if let Err(error) = fs::copy(path, &candidate) {
+        let _ = fs::remove_file(&candidate);
+        return Err(format!("copy audio to metadata candidate: {error}"));
+    }
+    let result = write_patch_candidate(&candidate, patch);
+    if let Err(error) = result {
+        let _ = fs::remove_file(&candidate);
+        return Err(error);
+    }
+    Ok(candidate)
+}
+
+fn write_patch_candidate(path: &Path, patch: &MetadataPatch) -> std::result::Result<(), String> {
+    if let Some(bytes) = patch.cover.as_deref() {
+        validate_cover(bytes)?;
+    }
+    let before_len = fs::metadata(path).map_err(|error| error.to_string())?.len();
+    let mut magic = [0_u8; 4];
+    OpenOptions::new()
+        .read(true)
+        .open(path)
+        .map_err(|error| error.to_string())?
+        .read_exact(&mut magic)
+        .map_err(|error| error.to_string())?;
+    if &magic == b"fLaC" {
+        let mut metadata = read(path)?;
+        apply_metadata_patch(&mut metadata, patch);
+        super::flac::write_in_place(path, &metadata, patch.cover.as_deref())?;
+        return verify_patch_written(path, before_len, patch);
+    }
+    let mut file = probe(path)?;
+    let tag_type = file.primary_tag_type();
+    if file.primary_tag_mut().is_none() {
+        file.insert_tag(Tag::new(tag_type));
+    }
+    let tag = if file.primary_tag().is_some() {
+        file.primary_tag_mut().expect("primary tag was checked")
+    } else {
+        file.first_tag_mut().ok_or("format has no writable tag")?
+    };
+    apply_patch_text(tag, ItemKey::TrackTitle, &patch.title);
+    apply_patch_text(tag, ItemKey::TrackArtist, &patch.artist);
+    apply_patch_text(tag, ItemKey::AlbumTitle, &patch.album);
+    if let Some(bytes) = patch.cover.as_deref() {
+        let mut picture = parse_cover(bytes)?;
+        picture.set_pic_type(PictureType::CoverFront);
+        tag.remove_picture_type(PictureType::CoverFront);
+        tag.push_picture(picture);
+    }
+    let mut output = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    file.save_to(&mut output, WriteOptions::default())
+        .map_err(|error| error.to_string())?;
+    verify_patch_written(path, before_len, patch)
+}
+
+fn apply_metadata_patch(metadata: &mut Metadata, patch: &MetadataPatch) {
+    let value = |patch: &Option<Option<String>>| {
+        patch.as_ref().map(|value| {
+            value
+                .as_ref()
+                .map(|text| MetadataValue::new(text.clone(), Provenance::ExistingTag))
+        })
+    };
+    if let Some(value) = value(&patch.title) {
+        metadata.title = value;
+    }
+    if let Some(value) = value(&patch.artist) {
+        metadata.artists = value;
+    }
+    if let Some(value) = value(&patch.album) {
+        metadata.album = value;
+    }
+}
+
+fn verify_patch_written(
+    path: &Path,
+    before_len: u64,
+    patch: &MetadataPatch,
+) -> std::result::Result<(), String> {
+    if before_len == 0 || fs::metadata(path).map_err(|error| error.to_string())?.len() == 0 {
+        return Err("tag patch produced empty audio".into());
+    }
+    let snapshot = read_bounded_snapshot(path)?;
+    for (name, expected, actual) in [
+        (
+            "title",
+            &patch.title,
+            snapshot.metadata.title.map(|value| value.text),
+        ),
+        (
+            "artist",
+            &patch.artist,
+            snapshot.metadata.artists.map(|value| value.text),
+        ),
+        (
+            "album",
+            &patch.album,
+            snapshot.metadata.album.map(|value| value.text),
+        ),
+    ] {
+        match expected {
+            Some(Some(value)) if actual.as_deref() != Some(value) => {
+                return Err(format!("tag {name} did not round-trip"));
+            }
+            Some(None) if actual.is_some() => return Err(format!("tag {name} was not cleared")),
+            _ => {}
+        }
+    }
+    if let Some(expected) = patch.cover.as_deref() {
+        let actual = snapshot.metadata.cover.and_then(|cover| cover.bytes);
+        if actual.as_deref() != Some(expected) {
+            return Err("front cover did not round-trip".into());
+        }
+    }
+    crate::formats::audio::probe_path(path)?.ok_or("tag patch invalidated audio container")?;
+    Ok(())
+}
+
+fn apply_patch_text(tag: &mut Tag, key: ItemKey, patch: &Option<Option<String>>) {
+    match patch {
+        None => {}
+        Some(Some(value)) => {
+            tag.insert_text(key, value.clone());
+        }
+        Some(None) => {
+            tag.remove_key(key);
+        }
+    }
+}
+
+#[cfg(test)]
+mod patch_tests {
+    use super::*;
+    use base64::Engine;
+
+    fn fixture(name: &str) -> Vec<u8> {
+        base64::engine::general_purpose::STANDARD
+            .decode(
+                fs::read_to_string(format!(
+                    "{}/tests/fixtures/{name}",
+                    env!("CARGO_MANIFEST_DIR")
+                ))
+                .unwrap()
+                .trim(),
+            )
+            .unwrap()
+    }
+
+    fn png() -> Vec<u8> {
+        base64::engine::general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLq6QAAAABJRU5ErkJggg==")
+            .unwrap()
+    }
+
+    fn flac_frames(bytes: &[u8]) -> &[u8] {
+        let mut offset = 4;
+        loop {
+            let last = bytes[offset] & 0x80 != 0;
+            let len =
+                u32::from_be_bytes([0, bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
+                    as usize;
+            offset += 4 + len;
+            if last {
+                return &bytes[offset..];
+            }
+        }
+    }
+
+    fn mp3_frames(bytes: &[u8]) -> &[u8] {
+        let offset = bytes
+            .windows(2)
+            .position(|window| window[0] == 0xff && window[1] & 0xe0 == 0xe0)
+            .unwrap();
+        &bytes[offset..]
+    }
+
+    #[test]
+    fn metadata_patch_sets_then_clears_text_on_a_candidate() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("track.mp3");
+        let audio = base64::engine::general_purpose::STANDARD
+            .decode(include_str!("../../tests/fixtures/lofty-silent.mp3.b64").trim())
+            .unwrap();
+        fs::write(&path, audio).unwrap();
+        let candidate = write_patch(
+            &path,
+            &MetadataPatch {
+                title: Some(Some("Set title".into())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::io::atomic::AtomicOutput::publish_existing_temp(candidate, &path, true).unwrap();
+        assert_eq!(read(&path).unwrap().title.unwrap().text, "Set title");
+        let candidate = write_patch(
+            &path,
+            &MetadataPatch {
+                title: Some(None),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::io::atomic::AtomicOutput::publish_existing_temp(candidate, &path, true).unwrap();
+        assert!(read(&path).unwrap().title.is_none());
+    }
+
+    #[test]
+    fn metadata_patch_replaces_cover_and_bad_cover_keeps_original_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cover.mp3");
+        let audio = base64::engine::general_purpose::STANDARD
+            .decode(include_str!("../../tests/fixtures/lofty-silent.mp3.b64").trim())
+            .unwrap();
+        fs::write(&path, audio).unwrap();
+        let png = base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLq6QAAAABJRU5ErkJggg==").unwrap();
+        let candidate = write_patch(
+            &path,
+            &MetadataPatch {
+                cover: Some(png),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::io::atomic::AtomicOutput::publish_existing_temp(candidate, &path, true).unwrap();
+        assert!(read(&path).unwrap().cover.is_some());
+        let before = fs::read(&path).unwrap();
+        assert!(
+            write_patch(
+                &path,
+                &MetadataPatch {
+                    cover: Some(b"not-image".to_vec()),
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert!(
+            fs::read_dir(&directory)
+                .unwrap()
+                .filter_map(Result::ok)
+                .all(|entry| !entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".unlockm-metadata-"))
+        );
+    }
+
+    #[test]
+    fn patch_candidates_verify_mp3_and_flac_without_mutating_audio_payload() {
+        for (name, is_flac) in [
+            ("lofty-silent.mp3.b64", false),
+            ("lofty-full_test.flac.b64", true),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory
+                .path()
+                .join(if is_flac { "track.flac" } else { "track.mp3" });
+            fs::write(&path, fixture(name)).unwrap();
+            let before = fs::read(&path).unwrap();
+            let candidate = write_patch(
+                &path,
+                &MetadataPatch {
+                    title: Some(Some("Title".into())),
+                    artist: Some(Some("Artist".into())),
+                    album: Some(Some("Album".into())),
+                    cover: Some(png()),
+                },
+            )
+            .unwrap();
+            crate::io::atomic::AtomicOutput::publish_existing_temp(candidate, &path, true).unwrap();
+            let metadata = read(&path).unwrap();
+            assert_eq!(metadata.title.unwrap().text, "Title");
+            assert_eq!(metadata.artists.unwrap().text, "Artist");
+            assert_eq!(metadata.album.unwrap().text, "Album");
+            assert!(metadata.cover.is_some());
+            let after = fs::read(&path).unwrap();
+            if is_flac {
+                assert_eq!(flac_frames(&before), flac_frames(&after));
+            } else {
+                assert_eq!(mp3_frames(&before), mp3_frames(&after));
+            }
+            let candidate = write_patch(
+                &path,
+                &MetadataPatch {
+                    title: Some(None),
+                    artist: Some(None),
+                    album: Some(None),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            crate::io::atomic::AtomicOutput::publish_existing_temp(candidate, &path, true).unwrap();
+            let cleared = read(&path).unwrap();
+            assert!(
+                cleared.title.is_none() && cleared.artists.is_none() && cleared.album.is_none()
+            );
+        }
+    }
 }
 
 pub(crate) fn prepare_write(

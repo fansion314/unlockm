@@ -5,6 +5,7 @@
   background: var(--surface-app);
   color: var(--text-primary);
   font-family: var(--font-body);
+  font-size: calc(16px * var(--native-density, 1));
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;

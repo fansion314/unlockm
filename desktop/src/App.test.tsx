@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import i18n from "./i18n";
@@ -15,6 +15,8 @@ const { api } = vi.hoisted(() => ({
     getPreferences: vi.fn(),
     setPreferences: vi.fn(),
     deleteRun: vi.fn(),
+    renameRun: vi.fn(),
+    rerunConversion: vi.fn(),
     clearHistory: vi.fn(),
     revealRunOutput: vi.fn(),
     revealRunItem: vi.fn(),
@@ -102,6 +104,46 @@ test("history row exposes full record facts and output action", async () => {
   expect(api.revealRunOutput).toHaveBeenCalledWith(partialRun.id);
 });
 
+test("home/detail navigation resets scroll position", async () => {
+  const user = userEvent.setup();
+  const scrollTo = vi.fn();
+  vi.stubGlobal("scrollTo", scrollTo);
+  api.bootstrap.mockResolvedValue(bootstrap({ history: { runs: [partialRun], nextCursor: null } }));
+  api.queryRunItems.mockResolvedValue(emptyItemPage());
+  api.listRunItemFacets.mockResolvedValue({ values: [], nextCursor: null });
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: /Open details/ }));
+  expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }));
+});
+
+test("home omits rename while detail owns rename and rerun stays on the row", async () => {
+  const user = userEvent.setup();
+  api.bootstrap.mockResolvedValue(bootstrap({ history: { runs: [partialRun], nextCursor: null } }));
+  api.renameRun.mockResolvedValue({ ...partialRun, displayName: "Downloads" });
+  api.rerunConversion.mockResolvedValue({ ...partialRun, id: 5, displayName: "Downloads" });
+  api.queryRunItems.mockResolvedValue(emptyItemPage());
+  api.listRunItemFacets.mockResolvedValue({ values: [], nextCursor: null });
+  render(<App />);
+  await screen.findByText("Completed with issues");
+
+  expect(screen.queryByRole("button", { name: "Rename conversion" })).toBeNull();
+  await user.click(
+    screen.getByRole("button", {
+      name: `Open details for ${longPath.split(/[\\/]/).pop()}`,
+    }),
+  );
+  await screen.findByRole("button", { name: "Rename conversion" });
+  await user.click(screen.getByRole("button", { name: "Rename conversion" }));
+  const input = screen.getByRole("textbox", { name: "Rename conversion" });
+  await user.clear(input);
+  await user.type(input, "Downloads");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(api.renameRun).toHaveBeenCalledWith(partialRun.id, "Downloads");
+  await user.click(screen.getByRole("button", { name: "Back to conversions" }));
+  await user.click(await screen.findByRole("button", { name: "Run conversion again" }));
+  expect(api.rerunConversion).toHaveBeenCalledWith(partialRun.id, expect.any(Function));
+});
+
 test("bootstrap history reserves stable rows while local history is loading", async () => {
   let resolveBootstrap: ((value: ReturnType<typeof bootstrap>) => void) | undefined;
   api.bootstrap.mockImplementation(
@@ -130,6 +172,8 @@ test("fresh light theme, dark toggle, and language menu persist one preference s
   expect(api.setPreferences).toHaveBeenLastCalledWith({
     locale: "en-US",
     theme: "dark",
+    palette: "blue",
+    playerVolume: 0.6,
     defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
   });
 
@@ -139,6 +183,8 @@ test("fresh light theme, dark toggle, and language menu persist one preference s
   expect(api.setPreferences).toHaveBeenLastCalledWith({
     locale: "zh-CN",
     theme: "dark",
+    palette: "blue",
+    playerVolume: 0.6,
     defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
   });
 
@@ -148,6 +194,8 @@ test("fresh light theme, dark toggle, and language menu persist one preference s
   expect(api.setPreferences).toHaveBeenLastCalledWith({
     locale: "ja-JP",
     theme: "dark",
+    palette: "blue",
+    playerVolume: 0.6,
     defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
   });
 });
@@ -170,6 +218,48 @@ test("language menu uses roving arrow focus and restores the trigger on Escape",
   await user.keyboard("{Escape}");
   await waitFor(() => expect(document.activeElement).toBe(trigger));
   expect(screen.queryByRole("menu")).toBeNull();
+});
+
+test("palette menu is collapsed by default, persists selection, and supports keyboard dismissal", async () => {
+  const user = userEvent.setup();
+  api.bootstrap.mockResolvedValue(bootstrap());
+  api.setPreferences.mockImplementation(async (value) => value);
+  render(<App />);
+  await screen.findByText("Your finished conversions will live here.");
+  const trigger = screen.getByRole("button", { name: "Choose color palette" });
+  expect(screen.queryByRole("menu", { name: "Choose color palette" })).toBeNull();
+  await user.click(trigger);
+  expect(screen.getAllByRole("menuitemradio")).toHaveLength(4);
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("menuitemradio", { name: "Blue palette" }),
+    ),
+  );
+  await user.keyboard("{ArrowDown}");
+  expect(document.activeElement).toBe(
+    screen.getByRole("menuitemradio", { name: "Emerald palette" }),
+  );
+  await user.keyboard("{End}");
+  expect(document.activeElement).toBe(screen.getByRole("menuitemradio", { name: "Amber palette" }));
+  await user.keyboard("{Home}");
+  expect(document.activeElement).toBe(screen.getByRole("menuitemradio", { name: "Blue palette" }));
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(screen.queryByRole("menu", { name: "Choose color palette" })).toBeNull();
+
+  await user.click(trigger);
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByRole("menu", { name: "Choose color palette" })).toBeNull();
+  await user.click(trigger);
+  await user.click(screen.getByRole("menuitemradio", { name: "Emerald palette" }));
+  expect(document.documentElement.dataset.palette).toBe("emerald");
+  expect(api.setPreferences).toHaveBeenLastCalledWith({
+    locale: "en-US",
+    theme: "light",
+    palette: "emerald",
+    playerVolume: 0.6,
+    defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
+  });
 });
 
 test("dedicated row controls keep detail, reveal, and deletion isolated", async () => {

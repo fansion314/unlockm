@@ -14,7 +14,7 @@
 .topbar-inner {
   align-items: center;
   display: flex;
-  height: 64px;
+  height: 68px;
   justify-content: space-between;
   margin: 0 auto;
   max-width: 1320px;
@@ -34,13 +34,13 @@
 
 .brand img {
   border-radius: 9px;
-  height: 34px;
-  width: 34px;
+  height: 38px;
+  width: 38px;
 }
 
 .brand-product {
   font-family: var(--font-display);
-  font-size: 1.05rem;
+  font-size: 1.12rem;
   font-weight: 750;
   letter-spacing: -0.035em;
 }
@@ -53,12 +53,43 @@
 
 .brand-localized {
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: 0.88rem;
   font-weight: 600;
 }
 
 .topbar-actions {
   gap: 8px;
+}
+
+.palette-control {
+  position: relative;
+}
+.palette-swatch {
+  border: 2px solid var(--surface-card);
+  border-radius: 50%;
+  display: inline-block;
+  height: 14px;
+  width: 14px;
+}
+.palette-swatch.blue {
+  background: #365fc7;
+}
+.palette-swatch.emerald {
+  background: #16785d;
+}
+.palette-swatch.violet {
+  background: #7352c7;
+}
+.palette-swatch.amber {
+  background: #a85e12;
+}
+.palette-menu {
+  min-width: 190px;
+}
+.palette-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  text-align: left;
 }
 
 .icon-button {
@@ -69,14 +100,14 @@
   color: var(--text-primary);
   cursor: pointer;
   display: inline-flex;
-  height: 38px;
+  height: 42px;
   justify-content: center;
   padding: 0;
   transition:
     background var(--motion-fast) var(--ease-standard),
     border-color var(--motion-fast) var(--ease-standard),
     transform var(--motion-fast) var(--ease-standard);
-  width: 38px;
+  width: 42px;
 }
 
 .icon-button:hover:not(:disabled) {
@@ -130,7 +161,7 @@
   color: var(--text-primary);
   cursor: pointer;
   display: flex;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   justify-content: space-between;
   padding: 10px 11px;
 }
@@ -143,13 +174,13 @@
 .app-shell {
   margin: 0 auto;
   max-width: 1320px;
-  min-height: calc(100dvh - 64px);
-  padding: clamp(24px, 4vw, 44px) clamp(20px, 4vw, 48px) 56px;
+  min-height: calc(100dvh - 68px);
+  padding: clamp(20px, 3vw, 36px) clamp(20px, 4vw, 48px) 52px;
 }
 
 .home-view {
   display: grid;
-  gap: 42px;
+  gap: 30px;
 }
 
 .view-motion {
@@ -175,8 +206,8 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-height: 330px;
-  padding: clamp(28px, 5vw, 56px);
+  min-height: 240px;
+  padding: clamp(20px, 3vw, 34px);
   text-align: center;
   transition:
     background var(--motion-standard) var(--ease-standard),
@@ -184,6 +215,20 @@
     transform var(--motion-standard) var(--ease-standard);
 }
 
+.scroll-top {
+  background: var(--color-accent);
+  border: 0;
+  border-radius: 50%;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  color: var(--text-on-accent);
+  cursor: pointer;
+  font-size: 1.25rem;
+  height: 46px;
+  position: fixed;
+  right: max(22px, env(safe-area-inset-right));
+  width: 46px;
+  z-index: 41;
+}
 .drop-field.is-dragging {
   background: var(--surface-selected);
   border-color: var(--border-accent);
@@ -304,7 +349,7 @@
 
 .output-copy small {
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .output-copy strong,
@@ -321,7 +366,7 @@
 .output-copy span {
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: 0.75rem;
 }
 
 .settings-panel {
@@ -419,7 +464,7 @@ button:disabled {
 
 .history-heading span {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 
 .live-run {
@@ -521,7 +566,7 @@ button:disabled {
 .run-identity span {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.75rem;
 }
 
 .run-count {
@@ -537,12 +582,12 @@ button:disabled {
 .run-count small,
 .run-date {
   color: var(--text-muted);
-  font-size: 0.66rem;
+  font-size: 0.75rem;
 }
 
 .run-result {
   color: var(--text-secondary);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 
@@ -623,7 +668,7 @@ button:disabled {
 
 .error-banner details {
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   grid-column: 1 / -1;
 }
 

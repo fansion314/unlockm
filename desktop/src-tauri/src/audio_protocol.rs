@@ -47,12 +47,11 @@ fn try_response(
     if len == 0 {
         return Err(StatusCode::RANGE_NOT_SATISFIABLE);
     }
-    let mut file = fs::File::open(&path).map_err(|_| StatusCode::FORBIDDEN)?;
-    let mut header = vec![0_u8; len.min(8192) as usize];
-    file.read_exact(&mut header)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let format = unlockm::formats::extension(&header).ok_or(StatusCode::UNSUPPORTED_MEDIA_TYPE)?;
+    let format = unlockm::formats::audio::probe_path(&path)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNSUPPORTED_MEDIA_TYPE)?;
     let mime = audio_mime(&format).ok_or(StatusCode::UNSUPPORTED_MEDIA_TYPE)?;
+    let mut file = fs::File::open(&path).map_err(|_| StatusCode::FORBIDDEN)?;
 
     if request.method() == Method::HEAD {
         return response_builder(StatusCode::OK)
@@ -204,6 +203,7 @@ mod tests {
                     logical_bytes: 1,
                     output_bytes: Some(audio.len() as u64),
                     output_format: Some("mp3".into()),
+                    bitrate_kbps: None,
                     preflight_ms: 0,
                     decrypt_ms: 0,
                     metadata_resolve_ms: 0,
@@ -284,5 +284,71 @@ mod tests {
             assert_eq!(response.status(), expected);
             assert!(response.body().is_empty());
         }
+    }
+
+    #[test]
+    fn copied_music_is_playable_but_deleted_or_unknown_output_is_not() {
+        let (directory, history, item_id, _audio) = history_with_audio();
+        history
+            .execute_test_sql(&format!(
+                "UPDATE items SET outcome = 'copied' WHERE id = {item_id}"
+            ))
+            .unwrap();
+        let request = Request::builder()
+            .method(Method::HEAD)
+            .uri(format!("unlockm-audio://localhost/item/{item_id}"))
+            .body(Vec::new())
+            .unwrap();
+        assert_eq!(response(&history, request).status(), StatusCode::OK);
+
+        let output = directory.path().join("track-without-extension");
+        fs::write(&output, b"not music").unwrap();
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(format!("unlockm-audio://localhost/item/{item_id}"))
+            .body(Vec::new())
+            .unwrap();
+        assert_eq!(
+            response(&history, request).status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE
+        );
+
+        fs::remove_file(&output).unwrap();
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(format!("unlockm-audio://localhost/item/{item_id}"))
+            .body(Vec::new())
+            .unwrap();
+        assert_eq!(response(&history, request).status(), StatusCode::NOT_FOUND);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_recorded_outputs_are_forbidden() {
+        use std::os::unix::fs::symlink;
+
+        let (directory, history, item_id, _audio) = history_with_audio();
+        let output = directory.path().join("track-without-extension");
+        fs::remove_file(&output).unwrap();
+        symlink(directory.path().join("history.sqlite"), &output).unwrap();
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(format!("unlockm-audio://localhost/item/{item_id}"))
+            .body(Vec::new())
+            .unwrap();
+        assert_eq!(response(&history, request).status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn deleted_history_record_immediately_revokes_audio_access() {
+        let (_directory, history, item_id, _audio) = history_with_audio();
+        let run_id = history.list_runs(None, 1).unwrap().runs[0].id;
+        history.delete_run(run_id).unwrap();
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(format!("unlockm-audio://localhost/item/{item_id}"))
+            .body(Vec::new())
+            .unwrap();
+        assert_eq!(response(&history, request).status(), StatusCode::NOT_FOUND);
     }
 }

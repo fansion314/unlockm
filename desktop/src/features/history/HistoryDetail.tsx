@@ -7,11 +7,10 @@ import {
   MagnifyingGlass,
   Pause,
   Play,
-  X,
+  PencilSimple,
 } from "@phosphor-icons/react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { pageTransition } from "../../app/page-motion";
 import type {
@@ -24,12 +23,15 @@ import type {
 } from "../../lib/contracts";
 import { formatBytes, formatDuration, formatTimestamp } from "../../lib/format";
 import { desktopApi } from "../../lib/ipc";
+import { usePlayback } from "../playback/PlaybackProvider";
+import { MetadataEditor } from "../metadata/MetadataEditor";
 
 type HistoryDetailProps = {
   layoutId: string;
   reducedMotion?: boolean;
   run: RunSummary;
   onBack: (this: void) => void;
+  onRename: (runId: number, displayName: string) => Promise<void>;
   onError: (this: void, error: unknown) => void;
 };
 
@@ -103,15 +105,12 @@ function itemTitle(item: HistoryItem): string {
   return item.title || item.relativePath.split(/[\\/]/).pop() || item.relativePath;
 }
 
-function audioUrl(itemId: number): string {
-  return convertFileSrc(String(itemId), "unlockm-audio");
-}
-
 export function HistoryDetail({
   layoutId,
   reducedMotion = false,
   run,
   onBack,
+  onRename,
   onError,
 }: HistoryDetailProps) {
   const { i18n, t } = useTranslation();
@@ -133,13 +132,25 @@ export function HistoryDetail({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const [repairPending, setRepairPending] = useState(false);
+  const [editing, setEditing] = useState<HistoryItem | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(
+    run.displayName || run.inputPath.split(/[\\/]/).pop() || run.inputPath,
+  );
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const requestSequence = useRef(0);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const playback = usePlayback();
 
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [activeItemId, setActiveItemId] = useState<number | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [audioDuration, setAudioDuration] = useState(0);
+  useEffect(() => {
+    if (!renaming) return;
+    window.requestAnimationFrame(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    });
+  }, [renaming]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -194,6 +205,7 @@ export function HistoryDetail({
         setFilteredTotal(result.filteredTotal);
         setMusicTotal(result.musicTotal);
         setCompanionCount(result.companionCount);
+        setRepairPending(result.repairPending ?? false);
       })
       .catch(() => {
         if (requestSequence.current === sequence) setLoadError(true);
@@ -203,65 +215,11 @@ export function HistoryDetail({
       });
   }, [query, reloadToken, run.id]);
 
-  const stopAudio = useCallback(() => {
-    const audio = audioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.removeAttribute("src");
-    }
-    setActiveItemId(null);
-    setPlaying(false);
-    setCurrentTime(0);
-    setAudioDuration(0);
-  }, []);
-
-  useEffect(() => stopAudio, [stopAudio]);
-
   useEffect(() => {
-    if (activeItemId !== null && !items.some((item) => item.id === activeItemId)) stopAudio();
-  }, [activeItemId, items, stopAudio]);
-
-  const togglePlayback = useCallback(
-    async (item: HistoryItem) => {
-      const audio = audioRef.current;
-      if (!audio) return;
-      if (activeItemId === item.id) {
-        if (audio.paused) {
-          await audio.play();
-          setPlaying(true);
-        } else {
-          audio.pause();
-          setPlaying(false);
-        }
-        return;
-      }
-      audio.pause();
-      audio.src = audioUrl(item.id);
-      audio.load();
-      setActiveItemId(item.id);
-      setCurrentTime(0);
-      setAudioDuration((item.durationMs ?? 0) / 1_000);
-      try {
-        await audio.play();
-        setPlaying(true);
-      } catch (error) {
-        setPlaying(false);
-        onError({ code: "playback_unavailable", detail: String(error) });
-      }
-    },
-    [activeItemId, onError],
-  );
-
-  const resetFilters = () => {
-    setSearchInput("");
-    setSearch("");
-    setArtist("");
-    setAlbum("");
-    setOutcome("");
-    setSort("ordinal");
-    setDirection("asc");
-    setPage(1);
-  };
+    if (!repairPending) return;
+    const timer = window.setTimeout(() => setReloadToken((value) => value + 1), 250);
+    return () => window.clearTimeout(timer);
+  }, [repairPending]);
 
   const pages = useMemo(() => {
     if (pageCount <= 1) return [];
@@ -271,6 +229,34 @@ export function HistoryDetail({
   }, [page, pageCount]);
 
   const runDuration = run.finishedAtMs === null ? null : run.finishedAtMs - run.createdAtMs;
+  const startRename = () => {
+    setRenameValue(run.displayName || run.inputPath.split(/[\\/]/).pop() || run.inputPath);
+    setRenameError(null);
+    setRenaming(true);
+  };
+  const cancelRename = () => {
+    if (renameBusy) return;
+    setRenameError(null);
+    setRenaming(false);
+  };
+  const saveRename = async () => {
+    const next = renameValue.trim();
+    if (!next) {
+      setRenameError(t("app.renameRequired"));
+      return;
+    }
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      await onRename(run.id, next);
+      setRenaming(false);
+    } catch (error) {
+      setRenameError(t("app.renameFailed"));
+      onError(error);
+    } finally {
+      setRenameBusy(false);
+    }
+  };
 
   return (
     <section className="detail-view" aria-labelledby="detail-title">
@@ -285,7 +271,42 @@ export function HistoryDetail({
         transition={{ layout: pageTransition(reducedMotion).layout }}
       >
         <div className="detail-title-block">
-          <h1 id="detail-title">{run.inputPath.split(/[\\/]/).pop()}</h1>
+          {renaming ? (
+            <form
+              className="detail-title-edit"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveRename();
+              }}
+            >
+              <input
+                ref={renameInputRef}
+                id="detail-title"
+                aria-label={t("app.rename")}
+                disabled={renameBusy}
+                maxLength={120}
+                value={renameValue}
+                onChange={(event) => setRenameValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelRename();
+                  }
+                }}
+              />
+              <div>
+                <button type="submit" disabled={renameBusy}>
+                  {t("app.save")}
+                </button>
+                <button type="button" disabled={renameBusy} onClick={cancelRename}>
+                  {t("app.cancelEdit")}
+                </button>
+              </div>
+              {renameError ? <span role="alert">{renameError}</span> : null}
+            </form>
+          ) : (
+            <h1 id="detail-title">{run.displayName || run.inputPath.split(/[\\/]/).pop()}</h1>
+          )}
           <span title={run.inputPath}>
             {t("app.source")}: {run.inputPath}
           </span>
@@ -311,15 +332,28 @@ export function HistoryDetail({
             <dd>{formatTimestamp(run.updatedAtMs, i18n.language)}</dd>
           </div>
         </dl>
-        <button
-          aria-label={t("app.revealRunOutput")}
-          className="icon-button detail-reveal"
-          title={t("app.revealRunOutput")}
-          type="button"
-          onClick={() => void desktopApi.revealRunOutput(run.id).catch(onError)}
-        >
-          <FolderOpen aria-hidden="true" size={19} />
-        </button>
+        <div className="detail-header-actions">
+          {!renaming ? (
+            <button
+              aria-label={t("app.rename")}
+              className="icon-button detail-reveal"
+              title={t("app.rename")}
+              type="button"
+              onClick={startRename}
+            >
+              <PencilSimple aria-hidden="true" size={19} />
+            </button>
+          ) : null}
+          <button
+            aria-label={t("app.revealRunOutput")}
+            className="icon-button detail-reveal"
+            title={t("app.revealRunOutput")}
+            type="button"
+            onClick={() => void desktopApi.revealRunOutput(run.id).catch(onError)}
+          >
+            <FolderOpen aria-hidden="true" size={19} />
+          </button>
+        </div>
       </motion.header>
 
       <div className="detail-toolbar">
@@ -332,6 +366,19 @@ export function HistoryDetail({
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
           />
+          {searchInput ? (
+            <button
+              aria-label={t("app.clearSearch")}
+              type="button"
+              onClick={() => {
+                setSearchInput("");
+                setSearch("");
+                setPage(1);
+              }}
+            >
+              ×
+            </button>
+          ) : null}
         </label>
         <label>
           <span>{t("app.artist")}</span>
@@ -349,6 +396,18 @@ export function HistoryDetail({
               <option key={value} value={value} />
             ))}
           </datalist>
+          {artist ? (
+            <button
+              aria-label={t("app.clearArtist")}
+              type="button"
+              onClick={() => {
+                setArtist("");
+                setPage(1);
+              }}
+            >
+              ×
+            </button>
+          ) : null}
         </label>
         <label>
           <span>{t("app.album")}</span>
@@ -366,6 +425,18 @@ export function HistoryDetail({
               <option key={value} value={value} />
             ))}
           </datalist>
+          {album ? (
+            <button
+              aria-label={t("app.clearAlbum")}
+              type="button"
+              onClick={() => {
+                setAlbum("");
+                setPage(1);
+              }}
+            >
+              ×
+            </button>
+          ) : null}
         </label>
         <label>
           <span>{t("app.result")}</span>
@@ -377,12 +448,26 @@ export function HistoryDetail({
             }}
           >
             <option value="">{t("app.allResults")}</option>
-            {(["converted", "skipped", "failed", "conflict", "cancelled"] as const).map((value) => (
-              <option key={value} value={value}>
-                {t(`app.${value}`)}
-              </option>
-            ))}
+            {(["converted", "copied", "skipped", "failed", "conflict", "cancelled"] as const).map(
+              (value) => (
+                <option key={value} value={value}>
+                  {t(`app.${value}`)}
+                </option>
+              ),
+            )}
           </select>
+          {outcome ? (
+            <button
+              aria-label={t("app.clearOutcome")}
+              type="button"
+              onClick={() => {
+                setOutcome("");
+                setPage(1);
+              }}
+            >
+              ×
+            </button>
+          ) : null}
         </label>
         <label>
           <span>{t("app.sort")}</span>
@@ -405,38 +490,12 @@ export function HistoryDetail({
             <option value="size:desc">{t("app.sortSize")}</option>
           </select>
         </label>
-        <button
-          aria-label={t("app.clearFilters")}
-          className="icon-button toolbar-clear"
-          title={t("app.clearFilters")}
-          type="button"
-          onClick={resetFilters}
-        >
-          <X aria-hidden="true" size={17} />
-        </button>
       </div>
 
       <div className="list-summary" aria-live="polite">
         <span>{t("app.filteredSongs", { count: filteredTotal })}</span>
         {companionCount > 0 ? <span>{t("app.companions", { count: companionCount })}</span> : null}
       </div>
-
-      <audio
-        className="audio-engine"
-        ref={audioRef}
-        onDurationChange={(event) => setAudioDuration(event.currentTarget.duration || 0)}
-        onEnded={() => setPlaying(false)}
-        onError={() => {
-          setPlaying(false);
-          onError({
-            code: "playback_unavailable",
-            detail: t("app.playbackUnavailable"),
-          });
-        }}
-        onPause={() => setPlaying(false)}
-        onPlay={() => setPlaying(true)}
-        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-      />
 
       <div className="song-list" aria-busy={loading}>
         {loading ? (
@@ -460,13 +519,11 @@ export function HistoryDetail({
         {!loading && !loadError
           ? items.map((item) => {
               const title = itemTitle(item);
-              const active = activeItemId === item.id;
+              const active = playback.activeItemId === item.id;
               const playable =
                 item.destinationPath !== null &&
                 item.outputFormat !== null &&
-                ["converted", "skipped"].includes(item.outcome);
-              const duration = active ? audioDuration : (item.durationMs ?? 0) / 1_000;
-              const elapsed = active ? currentTime : 0;
+                ["converted", "copied", "skipped"].includes(item.outcome);
               return (
                 <article className="music-item" key={item.id}>
                   <Artwork artworkId={item.artworkId} title={title} />
@@ -478,6 +535,7 @@ export function HistoryDetail({
                   <div className="file-facts">
                     <strong>{item.outputFormat?.toUpperCase() || t("app.unknownFormat")}</strong>
                     <span>{formatBytes(item.outputBytes, i18n.language)}</span>
+                    {item.bitrateKbps ? <small>{item.bitrateKbps} kbps</small> : null}
                     {!(["converted", "skipped"] as string[]).includes(item.outcome) ? (
                       <small className={`outcome outcome-${item.outcome}`}>
                         {t(`app.${item.outcome}`)}
@@ -487,47 +545,37 @@ export function HistoryDetail({
                   <div className="track-player">
                     <button
                       aria-label={
-                        active && playing
+                        active && playback.playing
                           ? t("app.pauseSong", { title })
                           : t("app.playSong", { title })
                       }
                       className="play-button"
                       disabled={!playable}
                       title={
-                        active && playing
+                        active && playback.playing
                           ? t("app.pauseSong", { title })
                           : t("app.playSong", { title })
                       }
                       type="button"
-                      onClick={() => void togglePlayback(item)}
+                      onClick={() => void playback.toggle(item).catch(onError)}
                     >
-                      {active && playing ? (
+                      {active && playback.playing ? (
                         <Pause aria-hidden="true" size={17} weight="fill" />
                       ) : (
                         <Play aria-hidden="true" size={17} weight="fill" />
                       )}
                     </button>
-                    <input
-                      aria-label={t("app.seekSong", { title })}
-                      className="seek-control"
-                      disabled={!active || duration <= 0}
-                      max={Math.max(duration, 1)}
-                      min={0}
-                      step={0.1}
-                      type="range"
-                      value={Math.min(elapsed, Math.max(duration, 1))}
-                      onChange={(event) => {
-                        const value = Number(event.target.value);
-                        if (audioRef.current && active) audioRef.current.currentTime = value;
-                        setCurrentTime(value);
-                      }}
-                    />
-                    <span>
-                      {formatDuration(elapsed * 1_000, i18n.language)} /{" "}
-                      {formatDuration(duration * 1_000, i18n.language)}
-                    </span>
                   </div>
                   <div className="song-actions">
+                    <button
+                      aria-label={t("app.editSong", { title })}
+                      className="icon-button subtle"
+                      disabled={!playable}
+                      type="button"
+                      onClick={() => setEditing(item)}
+                    >
+                      <PencilSimple aria-hidden="true" size={17} />
+                    </button>
                     <button
                       aria-label={t("app.revealSong", { title })}
                       className="icon-button subtle"
@@ -585,6 +633,16 @@ export function HistoryDetail({
             <CaretRight aria-hidden="true" size={17} />
           </button>
         </nav>
+      ) : null}
+      {editing ? (
+        <MetadataEditor
+          item={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(updated) => {
+            playback.refreshTrack(updated);
+            setReloadToken((value) => value + 1);
+          }}
+        />
       ) : null}
     </section>
   );

@@ -13,7 +13,7 @@ use crate::{
 };
 use std::{
     fs,
-    io::{Read, Write},
+    io::Write,
     path::Path,
     sync::{Arc, Mutex},
     time::{Instant, SystemTime},
@@ -21,7 +21,10 @@ use std::{
 
 #[derive(Debug)]
 pub enum PlannedAction {
-    Copy,
+    Copy {
+        is_music: bool,
+    },
+    SkipMusic,
     Decrypt {
         prepared: formats::adapter::PreparedDecrypt,
         extension: String,
@@ -119,6 +122,7 @@ fn snapshot_music(
         });
     }
     let metadata = bounded.metadata;
+    snapshot.bitrate_kbps = bounded.bitrate_kbps;
     snapshot.title = metadata.title.map(|value| value.text).or(snapshot.title);
     snapshot.artist = metadata.artists.map(|value| value.text).or(snapshot.artist);
     snapshot.album = metadata.album.map(|value| value.text).or(snapshot.album);
@@ -163,14 +167,8 @@ fn output_facts(destination: &Path) -> Result<(u64, Option<String>), String> {
     let output_bytes = fs::metadata(destination)
         .map_err(|error| format!("stat {}: {error}", destination.display()))?
         .len();
-    let mut file = fs::File::open(destination)
-        .map_err(|error| format!("open {} for format probe: {error}", destination.display()))?;
-    let mut header = vec![0_u8; 8192];
-    let read = file
-        .read(&mut header)
-        .map_err(|error| format!("read {} for format probe: {error}", destination.display()))?;
-    header.truncate(read);
-    Ok((output_bytes, formats::extension(&header)))
+    let format = formats::audio::probe_path(destination)?;
+    Ok((output_bytes, format))
 }
 
 fn music_execution_report(
@@ -213,6 +211,20 @@ pub fn preflight_with_resources(
 ) -> Result<Option<PlannedJob>, String> {
     match formats::prepare(source).map_err(|e| e.to_string())? {
         PreparedClassification::Passthrough | PreparedClassification::Unknown => {
+            let is_music = formats::audio::probe_path(source)
+                .map_err(|error| error.to_string())?
+                .is_some();
+            if is_music && !config.copy_passthrough {
+                // A no-copy standard-audio item is still a terminal music
+                // record, but it must neither claim nor create an output.
+                // Keeping the source as its snapshot target routes it through
+                // the existing skipped branch before output reservation.
+                return Ok(Some(PlannedJob {
+                    source: source.into(),
+                    destination: source.into(),
+                    action: PlannedAction::SkipMusic,
+                }));
+            }
             if !config.copy_passthrough {
                 return Ok(None);
             }
@@ -222,7 +234,7 @@ pub fn preflight_with_resources(
             Ok(Some(PlannedJob {
                 source: source.into(),
                 destination,
-                action: PlannedAction::Copy,
+                action: PlannedAction::Copy { is_music },
             }))
         }
         PreparedClassification::Encrypted(prepared) => {
@@ -538,10 +550,16 @@ pub fn execute_cancellable_with_resources_report(
     if cancellation.is_cancelled() {
         return Ok(ExecutionReport::default());
     }
-    let is_music = matches!(&planned.action, PlannedAction::Decrypt { .. });
+    let is_music = matches!(
+        &planned.action,
+        PlannedAction::Decrypt { .. }
+            | PlannedAction::Copy { is_music: true }
+            | PlannedAction::SkipMusic
+    );
     let source_kind = match &planned.action {
         PlannedAction::Decrypt { prepared, .. } => Some(prepared.kind()),
-        PlannedAction::Copy => None,
+        PlannedAction::Copy { .. } => None,
+        PlannedAction::SkipMusic => None,
     };
     let source = planned.source.clone();
     let destination = planned.destination.clone();
@@ -586,16 +604,32 @@ pub fn execute_cancellable_with_resources_report(
         });
     }
     match planned.action {
-        PlannedAction::Copy => copy_atomic(
+        PlannedAction::SkipMusic => Ok(music_execution_report(
+            Summary {
+                skipped: 1,
+                ..Default::default()
+            },
+            &source,
+            &source,
+            None,
+            Vec::new(),
+        )),
+        PlannedAction::Copy { .. } => copy_atomic(
             &planned.source,
             &planned.destination,
             config.overwrite,
             cancellation,
             timings,
         )
-        .map(|summary| ExecutionReport {
-            summary,
-            ..Default::default()
+        .map(|summary| {
+            if is_music && capture_music_snapshot {
+                music_execution_report(summary, &source, &destination, None, Vec::new())
+            } else {
+                ExecutionReport {
+                    summary,
+                    ..Default::default()
+                }
+            }
         }),
         PlannedAction::Decrypt {
             prepared,

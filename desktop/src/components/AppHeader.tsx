@@ -1,10 +1,11 @@
-import { Check, GlobeHemisphereWest, Moon, Sun } from "@phosphor-icons/react";
+import { Check, GlobeHemisphereWest, Moon, Palette, Sun } from "@phosphor-icons/react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
   useEffect,
   useRef,
   useState,
+  type MutableRefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import unlockmIcon from "../../src-tauri/icons/source/UnlockM Icon.png";
@@ -14,29 +15,54 @@ import type { Preferences } from "../lib/contracts";
 type AppHeaderProps = {
   locale: Preferences["locale"];
   theme: Preferences["theme"];
+  palette: NonNullable<Preferences["palette"]>;
   onLocale: (locale: Preferences["locale"]) => void;
   onTheme: (theme: Preferences["theme"]) => void;
+  onPalette: (palette: NonNullable<Preferences["palette"]>) => void;
 };
 
-export function AppHeader({ locale, theme, onLocale, onTheme }: AppHeaderProps) {
+const palettes = ["blue", "emerald", "violet", "amber"] as const;
+
+export function AppHeader({
+  locale,
+  theme,
+  palette,
+  onLocale,
+  onTheme,
+  onPalette,
+}: AppHeaderProps) {
   const { t } = useTranslation();
   const [languageOpen, setLanguageOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const languageMenuRef = useRef<HTMLDivElement>(null);
+  const languageTriggerRef = useRef<HTMLButtonElement>(null);
+  const languageOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const paletteMenuRef = useRef<HTMLDivElement>(null);
+  const paletteTriggerRef = useRef<HTMLButtonElement>(null);
+  const paletteOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const closeLanguageMenu = useCallback((restoreFocus = false) => {
     setLanguageOpen(false);
-    if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
+    if (restoreFocus) window.requestAnimationFrame(() => languageTriggerRef.current?.focus());
+  }, []);
+  const closePaletteMenu = useCallback((restoreFocus = false) => {
+    setPaletteOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => paletteTriggerRef.current?.focus());
   }, []);
 
   useEffect(() => {
-    if (!languageOpen) return;
+    if (!languageOpen && !paletteOpen) return;
     const close = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setLanguageOpen(false);
+      const target = event.target as Node;
+      if (!languageMenuRef.current?.contains(target) && !paletteMenuRef.current?.contains(target)) {
+        setLanguageOpen(false);
+        setPaletteOpen(false);
+      }
     };
     const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeLanguageMenu(true);
+      if (event.key !== "Escape") return;
+      if (languageOpen) closeLanguageMenu(true);
+      if (paletteOpen) closePaletteMenu(true);
     };
     window.addEventListener("pointerdown", close);
     window.addEventListener("keydown", escape);
@@ -44,16 +70,26 @@ export function AppHeader({ locale, theme, onLocale, onTheme }: AppHeaderProps) 
       window.removeEventListener("pointerdown", close);
       window.removeEventListener("keydown", escape);
     };
-  }, [closeLanguageMenu, languageOpen]);
+  }, [closeLanguageMenu, closePaletteMenu, languageOpen, paletteOpen]);
 
   useEffect(() => {
     if (!languageOpen) return;
     const selected = supportedLocales.indexOf(locale);
-    window.requestAnimationFrame(() => optionRefs.current[selected]?.focus());
+    window.requestAnimationFrame(() => languageOptionRefs.current[selected]?.focus());
   }, [languageOpen, locale]);
+  useEffect(() => {
+    if (!paletteOpen) return;
+    const selected = palettes.indexOf(palette);
+    window.requestAnimationFrame(() => paletteOptionRefs.current[selected]?.focus());
+  }, [palette, paletteOpen]);
 
-  const moveLanguageFocus = (event: ReactKeyboardEvent, index: number) => {
-    const last = supportedLocales.length - 1;
+  const moveMenuFocus = (
+    event: ReactKeyboardEvent,
+    index: number,
+    length: number,
+    refs: MutableRefObject<Array<HTMLButtonElement | null>>,
+  ) => {
+    const last = length - 1;
     let next = index;
     if (event.key === "ArrowDown") next = index === last ? 0 : index + 1;
     else if (event.key === "ArrowUp") next = index === 0 ? last : index - 1;
@@ -61,7 +97,7 @@ export function AppHeader({ locale, theme, onLocale, onTheme }: AppHeaderProps) 
     else if (event.key === "End") next = last;
     else return;
     event.preventDefault();
-    optionRefs.current[next]?.focus();
+    refs.current[next]?.focus();
   };
 
   return (
@@ -74,16 +110,19 @@ export function AppHeader({ locale, theme, onLocale, onTheme }: AppHeaderProps) 
           <span className="brand-localized">{t("app.localName", { lng: locale })}</span>
         </div>
         <div className="topbar-actions">
-          <div className="language-control" ref={menuRef}>
+          <div className="language-control" ref={languageMenuRef}>
             <button
-              ref={triggerRef}
+              ref={languageTriggerRef}
               aria-expanded={languageOpen}
               aria-haspopup="menu"
               aria-label={t("app.chooseLanguage")}
               className="icon-button"
               title={t("app.chooseLanguage")}
               type="button"
-              onClick={() => setLanguageOpen((open) => !open)}
+              onClick={() => {
+                setPaletteOpen(false);
+                setLanguageOpen((open) => !open);
+              }}
             >
               <GlobeHemisphereWest aria-hidden="true" size={19} weight="regular" />
             </button>
@@ -92,7 +131,7 @@ export function AppHeader({ locale, theme, onLocale, onTheme }: AppHeaderProps) 
                 {supportedLocales.map((value, index) => (
                   <button
                     ref={(element) => {
-                      optionRefs.current[index] = element;
+                      languageOptionRefs.current[index] = element;
                     }}
                     className="language-option"
                     key={value}
@@ -100,7 +139,9 @@ export function AppHeader({ locale, theme, onLocale, onTheme }: AppHeaderProps) 
                     aria-checked={locale === value}
                     type="button"
                     tabIndex={locale === value ? 0 : -1}
-                    onKeyDown={(event) => moveLanguageFocus(event, index)}
+                    onKeyDown={(event) =>
+                      moveMenuFocus(event, index, supportedLocales.length, languageOptionRefs)
+                    }
                     onClick={() => {
                       onLocale(value);
                       closeLanguageMenu(true);
@@ -108,6 +149,59 @@ export function AppHeader({ locale, theme, onLocale, onTheme }: AppHeaderProps) 
                   >
                     <span>{t(`app.languages.${value}`)}</span>
                     {locale === value ? <Check aria-hidden="true" size={16} weight="bold" /> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div className="palette-control" ref={paletteMenuRef}>
+            <button
+              ref={paletteTriggerRef}
+              aria-expanded={paletteOpen}
+              aria-haspopup="menu"
+              aria-label={t("app.choosePalette")}
+              className="icon-button"
+              title={t("app.choosePalette")}
+              type="button"
+              onClick={() => {
+                setLanguageOpen(false);
+                setPaletteOpen((open) => !open);
+              }}
+            >
+              <Palette aria-hidden="true" size={19} />
+            </button>
+            {paletteOpen ? (
+              <div
+                className="language-menu palette-menu"
+                role="menu"
+                aria-label={t("app.choosePalette")}
+              >
+                {palettes.map((value, index) => (
+                  <button
+                    ref={(element) => {
+                      paletteOptionRefs.current[index] = element;
+                    }}
+                    className="language-option palette-option"
+                    key={value}
+                    role="menuitemradio"
+                    aria-checked={palette === value}
+                    type="button"
+                    tabIndex={palette === value ? 0 : -1}
+                    onKeyDown={(event) =>
+                      moveMenuFocus(event, index, palettes.length, paletteOptionRefs)
+                    }
+                    onClick={() => {
+                      onPalette(value);
+                      closePaletteMenu(true);
+                    }}
+                  >
+                    <span className={`palette-swatch ${value}`} aria-hidden="true" />
+                    <span>
+                      {t(`app.palette${value.slice(0, 1).toUpperCase()}${value.slice(1)}`)}
+                    </span>
+                    {palette === value ? (
+                      <Check aria-hidden="true" size={16} weight="bold" />
+                    ) : null}
                   </button>
                 ))}
               </div>

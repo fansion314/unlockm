@@ -4,6 +4,8 @@
   "preferences": {
     "locale": "en-US",
     "theme": "light",
+    "palette": "blue",
+    "playerVolume": 0.6,
     "defaultSettings": {
       "updateMetadata": false,
       "copyPassthrough": true,

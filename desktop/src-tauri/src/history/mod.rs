@@ -9,16 +9,16 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::Read,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const MAX_PAGE_SIZE: usize = 200;
 const MAX_ARTWORK_BYTES: usize = 10 * 1024 * 1024;
+const LEGACY_REPAIR_BATCH: usize = 32;
 
 pub type HistoryResult<T> = Result<T, HistoryError>;
 
@@ -35,6 +35,8 @@ pub enum HistoryError {
     Json(#[from] serde_json::Error),
     #[error("artwork exceeds the 10 MiB history limit")]
     ArtworkTooLarge,
+    #[error("display name must contain 1–120 characters")]
+    InvalidDisplayName,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,6 +92,10 @@ impl RunStatus {
             _ => Self::Failed,
         }
     }
+
+    fn is_terminal(self) -> bool {
+        !matches!(self, Self::Planning | Self::Running)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +120,7 @@ pub struct CreateRun {
 #[serde(rename_all = "camelCase")]
 pub struct RunSummary {
     pub id: i64,
+    pub display_name: String,
     pub input_kind: InputKind,
     pub input_path: PathBuf,
     pub output_path: PathBuf,
@@ -193,6 +200,7 @@ pub struct PersistedItemInput {
     pub logical_bytes: u64,
     pub output_bytes: Option<u64>,
     pub output_format: Option<String>,
+    pub bitrate_kbps: Option<u32>,
     pub preflight_ms: u64,
     pub decrypt_ms: u64,
     pub metadata_resolve_ms: u64,
@@ -225,6 +233,9 @@ pub struct HistoryItem {
     pub logical_bytes: u64,
     pub output_bytes: Option<u64>,
     pub output_format: Option<String>,
+    pub bitrate_kbps: Option<u32>,
+    pub media_probe_version: i64,
+    pub metadata_edit_pending: bool,
     pub error_code: Option<String>,
     pub error_detail: Option<String>,
     pub warnings: Vec<StoredWarning>,
@@ -245,6 +256,7 @@ pub struct ItemPage {
     pub filtered_total: usize,
     pub companion_count: usize,
     pub music_total: usize,
+    pub repair_pending: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -282,6 +294,7 @@ pub enum SortDirection {
 #[serde(rename_all = "lowercase")]
 pub enum OutcomeFilter {
     Converted,
+    Copied,
     Skipped,
     Conflict,
     Failed,
@@ -292,6 +305,7 @@ impl OutcomeFilter {
     fn as_str(self) -> &'static str {
         match self {
             Self::Converted => "converted",
+            Self::Copied => "copied",
             Self::Skipped => "skipped",
             Self::Conflict => "conflict",
             Self::Failed => "failed",
@@ -353,12 +367,34 @@ pub struct ArtworkRecord {
     pub bytes: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+pub struct EditableItem {
+    pub id: i64,
+    pub destination_path: PathBuf,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtworkCandidate {
+    pub artwork_id: i64,
+    pub album: Option<String>,
+    pub artist: Option<String>,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
     pub locale: String,
     #[serde(default)]
     pub theme: Theme,
+    #[serde(default)]
+    pub palette: Palette,
+    #[serde(default = "default_player_volume")]
+    pub player_volume: f64,
     pub default_settings: RunSettings,
 }
 
@@ -370,11 +406,27 @@ pub enum Theme {
     Dark,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Palette {
+    #[default]
+    Blue,
+    Emerald,
+    Violet,
+    Amber,
+}
+
+fn default_player_volume() -> f64 {
+    0.6
+}
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {
             locale: "en-US".into(),
             theme: Theme::Light,
+            palette: Palette::Blue,
+            player_volume: default_player_volume(),
             default_settings: RunSettings {
                 update_metadata: false,
                 copy_passthrough: true,
@@ -382,6 +434,16 @@ impl Default for Preferences {
             },
         }
     }
+}
+
+/// Preferences originate in the webview and may also come from older local
+/// databases. Keep an explicit zero (mute) but never let an out-of-range or
+/// non-finite value reach the HTML audio element, whose native default is 1.0.
+pub fn sanitize_preferences(mut preferences: Preferences) -> Preferences {
+    if !preferences.player_volume.is_finite() || !(0.0..=1.0).contains(&preferences.player_volume) {
+        preferences.player_volume = default_player_volume();
+    }
+    preferences
 }
 
 pub struct HistoryStore {
@@ -516,8 +578,9 @@ impl HistoryStore {
                 run_id, ordinal, item_kind, source_path, relative_path, destination_path,
                 action, outcome, logical_bytes, output_bytes, output_format, preflight_ms, decrypt_ms,
                 metadata_resolve_ms, tag_write_ms, fallback_ms, copy_ms, publish_ms,
-                error_code, error_detail, warnings_json, title, artist, album, duration_ms, artwork_id
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                error_code, error_detail, warnings_json, title, artist, album, duration_ms, artwork_id,
+                bitrate_kbps, media_probe_version
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 run_id,
                 item.ordinal as i64,
@@ -545,6 +608,8 @@ impl HistoryStore {
                 item.album,
                 item.duration_ms.map(i64::from),
                 artwork_id,
+                item.bitrate_kbps.map(i64::from),
+                1_i64,
             ],
         )?;
         let item_id = transaction.last_insert_rowid();
@@ -578,7 +643,7 @@ impl HistoryStore {
         let limit = checked_limit(limit);
         let connection = self.connection.lock().expect("history connection lock");
         let mut statement = connection.prepare(
-            "SELECT runs.id, input_kind, input_path, output_path, settings_json, status,
+            "SELECT runs.id, input_kind, input_path, output_path, settings_json, status, display_name,
                     created_at_ms, updated_at_ms, finished_at_ms, total_items, completed_items,
                     converted, copied, skipped, conflicted, failed, representative_artwork_id,
                     terminal_error_code, terminal_error_detail,
@@ -611,6 +676,25 @@ impl HistoryStore {
         run_by_id(&connection, run_id)
     }
 
+    pub fn rename_run(&self, run_id: i64, display_name: &str) -> HistoryResult<Option<RunSummary>> {
+        let display_name = display_name.trim();
+        if display_name.is_empty() || display_name.chars().count() > 120 {
+            return Err(HistoryError::InvalidDisplayName);
+        }
+        let connection = self.connection.lock().expect("history connection lock");
+        let Some(run) = run_by_id(&connection, run_id)? else {
+            return Ok(None);
+        };
+        if !run.status.is_terminal() {
+            return Ok(None);
+        }
+        connection.execute(
+            "UPDATE runs SET display_name = ?, updated_at_ms = ? WHERE id = ?",
+            params![display_name, now_ms(), run_id],
+        )?;
+        run_by_id(&connection, run_id)
+    }
+
     pub fn run_output_path(&self, run_id: i64) -> HistoryResult<Option<PathBuf>> {
         let connection = self.connection.lock().expect("history connection lock");
         connection
@@ -629,12 +713,170 @@ impl HistoryStore {
             .query_row(
                 "SELECT destination_path FROM items
                  WHERE id = ? AND item_kind = 'music'
-                   AND outcome IN ('converted', 'skipped')
+                   AND outcome IN ('converted', 'copied', 'skipped')
                    AND destination_path IS NOT NULL",
                 [item_id],
                 |row| row.get::<_, String>(0).map(PathBuf::from),
             )
             .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn editable_item(&self, item_id: i64) -> HistoryResult<Option<EditableItem>> {
+        let connection = self.connection.lock().expect("history connection lock");
+        connection
+            .query_row(
+                "SELECT id, destination_path, title, artist, album FROM items
+             WHERE id = ? AND item_kind = 'music' AND outcome IN ('converted', 'copied', 'skipped')
+               AND destination_path IS NOT NULL",
+                [item_id],
+                |row| {
+                    Ok(EditableItem {
+                        id: row.get(0)?,
+                        destination_path: PathBuf::from(row.get::<_, String>(1)?),
+                        title: row.get(2)?,
+                        artist: row.get(3)?,
+                        album: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn history_item_by_id(&self, item_id: i64) -> HistoryResult<Option<HistoryItem>> {
+        let connection = self.connection.lock().expect("history connection lock");
+        connection.query_row(
+            "SELECT id, run_id, ordinal, item_kind, source_path, relative_path, destination_path,
+                    action, outcome, logical_bytes, output_bytes, output_format,
+                    error_code, error_detail, warnings_json, title, artist, album, duration_ms, artwork_id,
+                    bitrate_kbps, media_probe_version, metadata_edit_pending FROM items WHERE id = ?",
+            [item_id], item_from_row,
+        ).optional().map_err(Into::into)
+    }
+
+    pub fn set_metadata_edit_pending(&self, item_id: i64, pending: bool) -> HistoryResult<()> {
+        let connection = self.connection.lock().expect("history connection lock");
+        connection.execute(
+            "UPDATE items SET metadata_edit_pending = ? WHERE id = ?",
+            params![i64::from(pending), item_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn refresh_metadata_text(
+        &self,
+        item_id: i64,
+        title: Option<String>,
+        artist: Option<String>,
+        album: Option<String>,
+        artwork: Option<ArtworkInput>,
+    ) -> HistoryResult<()> {
+        let mut connection = self.connection.lock().expect("history connection lock");
+        let transaction = connection.transaction()?;
+        let artwork_id = artwork
+            .as_ref()
+            .map(|value| insert_or_get_artwork(&transaction, value))
+            .transpose()?;
+        transaction.execute("UPDATE items SET title = ?, artist = ?, album = ?, artwork_id = COALESCE(?, artwork_id), metadata_edit_pending = 0 WHERE id = ?", params![title, artist, album, artwork_id, item_id])?;
+        if let Some(artwork_id) = artwork_id {
+            transaction.execute("UPDATE runs SET representative_artwork_id = ? WHERE id = (SELECT run_id FROM items WHERE id = ?)", params![artwork_id, item_id])?;
+        }
+        cleanup_orphan_artwork(&transaction)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn reconcile_item_from_output(
+        &self,
+        item_id: i64,
+        path: &Path,
+    ) -> HistoryResult<HistoryItem> {
+        let snapshot = unlockm::metadata::tags::read_bounded_snapshot(path).map_err(|detail| {
+            HistoryError::Io {
+                path: path.into(),
+                source: std::io::Error::other(detail),
+            }
+        })?;
+        let (bytes, format, bitrate) =
+            probe_output_facts(path).ok_or_else(|| HistoryError::Io {
+                path: path.into(),
+                source: std::io::Error::other("output facts unavailable"),
+            })?;
+        let title = snapshot.metadata.title.map(|v| v.text);
+        let artist = snapshot.metadata.artists.map(|v| v.text);
+        let album = snapshot.metadata.album.map(|v| v.text);
+        let duration = snapshot.metadata.duration_ms;
+        let artwork = snapshot
+            .metadata
+            .cover
+            .and_then(|c| c.bytes)
+            .and_then(|bytes| {
+                artwork_mime(&bytes).map(|mime_type| ArtworkInput {
+                    mime_type: mime_type.into(),
+                    bytes,
+                })
+            });
+        let mut connection = self.connection.lock().expect("history connection lock");
+        let tx = connection.transaction()?;
+        let artwork_id = artwork
+            .as_ref()
+            .map(|v| insert_or_get_artwork(&tx, v))
+            .transpose()?;
+        tx.execute("UPDATE items SET title=?,artist=?,album=?,duration_ms=?,artwork_id=?,output_bytes=?,output_format=?,bitrate_kbps=?,media_probe_version=1,metadata_edit_pending=0 WHERE id=?", params![title,artist,album,duration.map(i64::from),artwork_id,bytes as i64,format,bitrate.map(i64::from),item_id])?;
+        tx.execute("UPDATE runs SET representative_artwork_id=(SELECT artwork_id FROM items WHERE run_id=(SELECT run_id FROM items WHERE id=?) AND artwork_id IS NOT NULL ORDER BY id DESC LIMIT 1) WHERE id=(SELECT run_id FROM items WHERE id=?)", params![item_id,item_id])?;
+        cleanup_orphan_artwork(&tx)?;
+        tx.commit()?;
+        connection.query_row(
+            "SELECT id, run_id, ordinal, item_kind, source_path, relative_path, destination_path,
+                    action, outcome, logical_bytes, output_bytes, output_format,
+                    error_code, error_detail, warnings_json, title, artist, album, duration_ms, artwork_id,
+                    bitrate_kbps, media_probe_version, metadata_edit_pending FROM items WHERE id = ?",
+            [item_id], item_from_row,
+        ).map_err(Into::into)
+    }
+
+    pub fn artwork_candidates(
+        &self,
+        item_id: i64,
+        query: Option<String>,
+        limit: usize,
+    ) -> HistoryResult<Vec<ArtworkCandidate>> {
+        let connection = self.connection.lock().expect("history connection lock");
+        let album: Option<String> = connection
+            .query_row("SELECT album FROM items WHERE id = ?", [item_id], |row| {
+                row.get::<_, Option<String>>(0)
+            })
+            .optional()?
+            .flatten()
+            .map(|value| value.trim().to_lowercase())
+            .filter(|value| !value.is_empty());
+        let needle = normalized_filter(query).map(|value| like_pattern(&value));
+        let mut statement = connection.prepare(
+            "SELECT artwork_id, album, artist, title FROM (
+                SELECT artwork_id, album, artist, title, id,
+                       CASE WHEN ?2 IS NOT NULL AND LOWER(TRIM(COALESCE(album, ''))) = ?2 THEN 0 ELSE 1 END AS album_rank,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY artwork_id
+                           ORDER BY CASE WHEN ?2 IS NOT NULL AND LOWER(TRIM(COALESCE(album, ''))) = ?2 THEN 0 ELSE 1 END, id DESC
+                       ) AS artwork_rank
+                FROM items
+                WHERE artwork_id IS NOT NULL
+                  AND (?1 IS NULL OR title LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                       OR album LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
+             ) WHERE artwork_rank = 1
+             ORDER BY album_rank, id DESC LIMIT ?3",
+        )?;
+        let rows =
+            statement.query_map(params![needle, album, checked_limit(limit) as i64], |row| {
+                Ok(ArtworkCandidate {
+                    artwork_id: row.get(0)?,
+                    album: row.get(1)?,
+                    artist: row.get(2)?,
+                    title: row.get(3)?,
+                })
+            })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
 
@@ -649,7 +891,9 @@ impl HistoryStore {
         let artist = normalized_filter(query.artist).map(|value| like_pattern(&value));
         let album = normalized_filter(query.album).map(|value| like_pattern(&value));
         let outcome = query.outcome.map(OutcomeFilter::as_str);
-        let connection = self.connection.lock().expect("history connection lock");
+        let mut connection = self.connection.lock().expect("history connection lock");
+        repair_legacy_batch(&connection, run_id);
+        let repair_pending: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM items WHERE run_id = ? AND action = 'copy' AND media_probe_version < 1)", [run_id], |row| row.get(0))?;
         let companion_count: i64 = connection.query_row(
             "SELECT COUNT(*) FROM items WHERE run_id = ? AND item_kind = 'companion'",
             [run_id],
@@ -687,7 +931,8 @@ impl HistoryStore {
         let sql = format!(
             "SELECT id, run_id, ordinal, item_kind, source_path, relative_path, destination_path,
                     action, outcome, logical_bytes, output_bytes, output_format,
-                    error_code, error_detail, warnings_json, title, artist, album, duration_ms, artwork_id
+                    error_code, error_detail, warnings_json, title, artist, album, duration_ms, artwork_id,
+                    bitrate_kbps, media_probe_version, metadata_edit_pending
              FROM items WHERE {filter_sql}
              ORDER BY {order_sql} LIMIT ?6 OFFSET ?7"
         );
@@ -707,7 +952,7 @@ impl HistoryStore {
         }
         drop(rows);
         drop(statement);
-        repair_page_facts(&connection, &mut items);
+        repair_page_facts(&mut connection, &mut items);
         Ok(ItemPage {
             items,
             page,
@@ -716,6 +961,7 @@ impl HistoryStore {
             filtered_total: filtered_total.max(0) as usize,
             companion_count: companion_count.max(0) as usize,
             music_total: music_total.max(0) as usize,
+            repair_pending,
         })
     }
 
@@ -815,22 +1061,24 @@ impl HistoryStore {
                 |row| row.get(0),
             )
             .optional()?;
-        value
-            .map(|value| serde_json::from_str(&value).map_err(Into::into))
+        let preferences = value
+            .map(|value| serde_json::from_str::<Preferences>(&value).map_err(HistoryError::from))
             .transpose()
-            .map(|value| value.unwrap_or_default())
+            .map(|value| value.unwrap_or_default())?;
+        Ok(sanitize_preferences(preferences))
     }
 
-    pub fn set_preferences(&self, preferences: &Preferences) -> HistoryResult<()> {
+    pub fn set_preferences(&self, preferences: &Preferences) -> HistoryResult<Preferences> {
+        let preferences = sanitize_preferences(preferences.clone());
         let connection = self.connection.lock().expect("history connection lock");
         connection.execute(
             "INSERT INTO preferences (key, value_json, updated_at_ms)
              VALUES ('preferences', ?, ?)
              ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json,
                                            updated_at_ms = excluded.updated_at_ms",
-            params![serde_json::to_string(preferences)?, now_ms()],
+            params![serde_json::to_string(&preferences)?, now_ms()],
         )?;
-        Ok(())
+        Ok(preferences)
     }
 
     pub fn recover_interrupted(&self) -> HistoryResult<usize> {
@@ -972,6 +1220,20 @@ fn migrate(connection: &Connection) -> HistoryResult<()> {
              CREATE INDEX IF NOT EXISTS items_run_music_album
                ON items(run_id, item_kind, album COLLATE NOCASE, ordinal);",
         )?;
+        transaction.pragma_update(None, "user_version", 2)?;
+        transaction.commit()?;
+        version = 2;
+    }
+    if version < 3 {
+        let transaction = connection.unchecked_transaction()?;
+        transaction.execute_batch(
+            "ALTER TABLE runs ADD COLUMN display_name TEXT;
+             ALTER TABLE items ADD COLUMN bitrate_kbps INTEGER;
+             ALTER TABLE items ADD COLUMN media_probe_version INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE items ADD COLUMN metadata_edit_pending INTEGER NOT NULL DEFAULT 0;
+             CREATE INDEX IF NOT EXISTS items_run_probe_pending
+               ON items(run_id, item_kind, media_probe_version, metadata_edit_pending, ordinal);",
+        )?;
         transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         transaction.commit()?;
     }
@@ -1018,7 +1280,7 @@ fn cleanup_orphan_artwork(transaction: &Transaction<'_>) -> HistoryResult<()> {
 fn run_by_id(connection: &Connection, id: i64) -> HistoryResult<Option<RunSummary>> {
     connection
         .query_row(
-            "SELECT runs.id, input_kind, input_path, output_path, settings_json, status,
+            "SELECT runs.id, input_kind, input_path, output_path, settings_json, status, display_name,
                     created_at_ms, updated_at_ms, finished_at_ms, total_items, completed_items,
                     converted, copied, skipped, conflicted, failed, representative_artwork_id,
                     terminal_error_code, terminal_error_detail,
@@ -1039,6 +1301,13 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunSummary> {
     })?;
     Ok(RunSummary {
         id: row.get(0)?,
+        display_name: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| {
+            Path::new(&row.get::<_, String>(2).expect("input path selected"))
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("UnlockM conversion")
+                .to_owned()
+        }),
         input_kind: if row.get::<_, String>(1)? == "directory" {
             InputKind::Directory
         } else {
@@ -1048,20 +1317,20 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunSummary> {
         output_path: PathBuf::from(row.get::<_, String>(3)?),
         settings,
         status: RunStatus::parse(&row.get::<_, String>(5)?),
-        created_at_ms: row.get(6)?,
-        updated_at_ms: row.get(7)?,
-        finished_at_ms: row.get(8)?,
-        total_items: row.get::<_, i64>(9)? as usize,
-        completed_items: row.get::<_, i64>(10)? as usize,
-        converted: row.get::<_, i64>(11)? as usize,
-        copied: row.get::<_, i64>(12)? as usize,
-        skipped: row.get::<_, i64>(13)? as usize,
-        conflicted: row.get::<_, i64>(14)? as usize,
-        failed: row.get::<_, i64>(15)? as usize,
-        music_count: row.get::<_, i64>(19)? as usize,
-        representative_artwork_id: row.get(16)?,
-        terminal_error_code: row.get(17)?,
-        terminal_error_detail: row.get(18)?,
+        created_at_ms: row.get(7)?,
+        updated_at_ms: row.get(8)?,
+        finished_at_ms: row.get(9)?,
+        total_items: row.get::<_, i64>(10)? as usize,
+        completed_items: row.get::<_, i64>(11)? as usize,
+        converted: row.get::<_, i64>(12)? as usize,
+        copied: row.get::<_, i64>(13)? as usize,
+        skipped: row.get::<_, i64>(14)? as usize,
+        conflicted: row.get::<_, i64>(15)? as usize,
+        failed: row.get::<_, i64>(16)? as usize,
+        music_count: row.get::<_, i64>(20)? as usize,
+        representative_artwork_id: row.get(17)?,
+        terminal_error_code: row.get(18)?,
+        terminal_error_detail: row.get(19)?,
     })
 }
 
@@ -1083,6 +1352,9 @@ fn item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryItem> {
         logical_bytes: row.get::<_, i64>(9)? as u64,
         output_bytes: row.get::<_, Option<i64>>(10)?.map(|value| value as u64),
         output_format: row.get(11)?,
+        bitrate_kbps: row.get::<_, Option<i64>>(20)?.map(|value| value as u32),
+        media_probe_version: row.get(21)?,
+        metadata_edit_pending: row.get::<_, i64>(22)? != 0,
         error_code: row.get(12)?,
         error_detail: row.get(13)?,
         warnings,
@@ -1108,21 +1380,93 @@ fn like_pattern(value: &str) -> String {
     format!("%{escaped}%")
 }
 
-fn repair_page_facts(connection: &Connection, items: &mut [HistoryItem]) {
+fn reconcile_pending_item(connection: &mut Connection, item: &mut HistoryItem) {
+    let Some(destination) = item.destination_path.as_deref() else {
+        return;
+    };
+    let Ok(snapshot) = unlockm::metadata::tags::read_bounded_snapshot(destination) else {
+        return;
+    };
+    let Some((bytes, format, bitrate_kbps)) = probe_output_facts(destination) else {
+        return;
+    };
+    let artwork = snapshot
+        .metadata
+        .cover
+        .and_then(|cover| cover.bytes)
+        .and_then(|bytes| {
+            artwork_mime(&bytes).map(|mime_type| ArtworkInput {
+                mime_type: mime_type.into(),
+                bytes,
+            })
+        });
+    let title = snapshot.metadata.title.map(|value| value.text);
+    let artist = snapshot.metadata.artists.map(|value| value.text);
+    let album = snapshot.metadata.album.map(|value| value.text);
+    let duration_ms = snapshot.metadata.duration_ms;
+    let Ok(transaction) = connection.transaction() else {
+        return;
+    };
+    let artwork_id = artwork
+        .as_ref()
+        .map(|value| insert_or_get_artwork(&transaction, value))
+        .transpose();
+    let Ok(artwork_id) = artwork_id else { return };
+    if transaction.execute(
+        "UPDATE items SET title=?, artist=?, album=?, duration_ms=?, artwork_id=?, output_bytes=?, output_format=?, bitrate_kbps=?, media_probe_version=1, metadata_edit_pending=0 WHERE id=?",
+        params![title.clone(), artist.clone(), album.clone(), duration_ms.map(i64::from), artwork_id, bytes as i64, format.clone(), bitrate_kbps.map(i64::from), item.id],
+    ).is_err() { return; }
+    let _ = transaction.execute("UPDATE runs SET representative_artwork_id=(SELECT artwork_id FROM items WHERE run_id=? AND artwork_id IS NOT NULL ORDER BY id DESC LIMIT 1) WHERE id=?", params![item.run_id, item.run_id]);
+    let _ = cleanup_orphan_artwork(&transaction);
+    if transaction.commit().is_err() {
+        return;
+    }
+    item.title = title;
+    item.artist = artist;
+    item.album = album;
+    item.duration_ms = duration_ms;
+    item.artwork_id = artwork_id;
+    item.output_bytes = Some(bytes);
+    item.output_format = format;
+    item.bitrate_kbps = bitrate_kbps;
+    item.media_probe_version = 1;
+    item.metadata_edit_pending = false;
+}
+
+fn artwork_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+fn repair_page_facts(connection: &mut Connection, items: &mut [HistoryItem]) {
     for item in items {
+        if item.metadata_edit_pending {
+            reconcile_pending_item(connection, item);
+        }
         if item.output_bytes.is_none()
             && matches!(item.outcome.as_str(), "converted" | "skipped")
             && let Some(destination) = item.destination_path.as_deref()
-            && let Some((bytes, format)) = probe_output_facts(destination)
+            && let Some((bytes, format, bitrate_kbps)) = probe_output_facts(destination)
             && connection
                 .execute(
-                    "UPDATE items SET output_bytes = ?, output_format = ? WHERE id = ?",
-                    params![bytes as i64, format, item.id],
+                    "UPDATE items SET output_bytes = ?, output_format = ?, bitrate_kbps = ?, media_probe_version = 1 WHERE id = ?",
+                    params![bytes as i64, format, bitrate_kbps.map(i64::from), item.id],
                 )
                 .is_ok()
         {
             item.output_bytes = Some(bytes);
             item.output_format = format;
+            item.bitrate_kbps = bitrate_kbps;
+            item.media_probe_version = 1;
         }
 
         if item.artist.is_none() || item.title.is_none() {
@@ -1172,16 +1516,53 @@ fn repair_page_facts(connection: &Connection, items: &mut [HistoryItem]) {
     }
 }
 
-fn probe_output_facts(path: &Path) -> Option<(u64, Option<String>)> {
+/// Repairs a small, deterministic group on each detail read. This lets copied
+/// standard music from pre-v3 history become playable without an unbounded
+/// startup scan or trusting a filename extension.
+fn repair_legacy_batch(connection: &Connection, run_id: i64) {
+    let mut statement = match connection.prepare(
+        "SELECT id, destination_path FROM items
+         WHERE run_id = ? AND action = 'copy' AND media_probe_version < 1
+           AND destination_path IS NOT NULL ORDER BY ordinal LIMIT ?",
+    ) {
+        Ok(statement) => statement,
+        Err(_) => return,
+    };
+    let rows = match statement.query_map(params![run_id, LEGACY_REPAIR_BATCH as i64], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            PathBuf::from(row.get::<_, String>(1)?),
+        ))
+    }) {
+        Ok(rows) => rows,
+        Err(_) => return,
+    };
+    for row in rows.flatten() {
+        let (id, destination) = row;
+        match probe_output_facts(&destination) {
+            Some((bytes, format @ Some(_), bitrate)) => {
+                let _ = connection.execute("UPDATE items SET item_kind = 'music', output_bytes = ?, output_format = ?, bitrate_kbps = ?, media_probe_version = 1 WHERE id = ?", params![bytes as i64, format, bitrate.map(i64::from), id]);
+            }
+            _ => {
+                let _ = connection.execute(
+                    "UPDATE items SET media_probe_version = 1 WHERE id = ?",
+                    [id],
+                );
+            }
+        }
+    }
+}
+
+fn probe_output_facts(path: &Path) -> Option<(u64, Option<String>, Option<u32>)> {
     let metadata = fs::symlink_metadata(path).ok()?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return None;
     }
-    let mut file = fs::File::open(path).ok()?;
-    let mut header = vec![0_u8; 8192];
-    let read = file.read(&mut header).ok()?;
-    header.truncate(read);
-    Some((metadata.len(), unlockm::formats::extension(&header)))
+    let format = unlockm::formats::audio::probe_path(path).ok()?;
+    let bitrate_kbps = unlockm::metadata::tags::read_bounded_snapshot(path)
+        .ok()
+        .and_then(|snapshot| snapshot.bitrate_kbps);
+    Some((metadata.len(), format, bitrate_kbps))
 }
 
 fn checked_limit(limit: usize) -> usize {
@@ -1221,6 +1602,7 @@ mod tests {
             logical_bytes: 10,
             output_bytes: Some(20),
             output_format: Some("flac".into()),
+            bitrate_kbps: None,
             preflight_ms: 1,
             decrypt_ms: 2,
             metadata_resolve_ms: 0,
@@ -1253,6 +1635,8 @@ mod tests {
         let preferences = Preferences {
             locale: "zh-CN".into(),
             theme: Theme::Dark,
+            palette: Palette::Blue,
+            player_volume: 0.6,
             default_settings: settings(),
         };
         store.set_preferences(&preferences).unwrap();
@@ -1277,6 +1661,280 @@ mod tests {
         let preferences = store.preferences().unwrap();
         assert_eq!(preferences.locale, "zh-CN");
         assert_eq!(preferences.theme, Theme::Light);
+        assert_eq!(preferences.palette, Palette::Blue);
+        assert_eq!(preferences.player_volume, 0.6);
+    }
+
+    #[test]
+    fn invalid_player_volume_falls_back_but_explicit_mute_is_preserved() {
+        let (_directory, store) = store();
+        let preferences = Preferences {
+            player_volume: -0.1,
+            ..Preferences::default()
+        };
+        assert_eq!(
+            store.set_preferences(&preferences).unwrap().player_volume,
+            0.6
+        );
+
+        let muted = Preferences {
+            player_volume: 0.0,
+            ..preferences
+        };
+        store.set_preferences(&muted).unwrap();
+        assert_eq!(store.preferences().unwrap().player_volume, 0.0);
+    }
+
+    #[test]
+    fn terminal_runs_can_be_renamed_but_active_runs_cannot() {
+        let (_directory, store) = store();
+        let run = store
+            .create_run(CreateRun {
+                input_kind: InputKind::File,
+                input_path: "/input/album.ncm".into(),
+                output_path: "/output".into(),
+                settings: settings(),
+                total_items: 0,
+            })
+            .unwrap();
+        assert!(store.rename_run(run.id, "New name").unwrap().is_none());
+        store
+            .finish_run(run.id, RunStatus::Completed, None, None)
+            .unwrap();
+        assert_eq!(
+            store
+                .rename_run(run.id, " New name ")
+                .unwrap()
+                .unwrap()
+                .display_name,
+            "New name"
+        );
+        assert!(matches!(
+            store.rename_run(run.id, ""),
+            Err(HistoryError::InvalidDisplayName)
+        ));
+    }
+
+    #[test]
+    fn legacy_copy_repair_promotes_only_content_verified_music() {
+        use base64::Engine;
+        let (directory, store) = store();
+        let output = directory.path().join("copied-without-extension");
+        let audio = base64::engine::general_purpose::STANDARD
+            .decode(include_str!("../../../../tests/fixtures/lofty-silent.mp3.b64").trim())
+            .unwrap();
+        fs::write(&output, audio).unwrap();
+        let run = store
+            .create_run(CreateRun {
+                input_kind: InputKind::File,
+                input_path: directory.path().join("source.mp3"),
+                output_path: directory.path().to_path_buf(),
+                settings: settings(),
+                total_items: 1,
+            })
+            .unwrap();
+        let mut copied = item(1, None);
+        copied.item_kind = StoredItemKind::Companion;
+        copied.action = Some("copy".into());
+        copied.outcome = "copied".into();
+        copied.destination_path = Some(output);
+        let item_id = store.record_item(run.id, copied).unwrap();
+        store
+            .execute_test_sql(&format!(
+                "UPDATE items
+                 SET media_probe_version = 0, output_bytes = NULL,
+                     output_format = NULL, bitrate_kbps = NULL
+                 WHERE id = {item_id};"
+            ))
+            .unwrap();
+        let page = store
+            .query_music_items(run.id, ItemQuery::default())
+            .unwrap();
+        assert_eq!(page.music_total, 1);
+        assert_eq!(page.items[0].output_format.as_deref(), Some("mp3"));
+    }
+
+    #[test]
+    fn pending_metadata_recovers_real_disk_tags_but_not_missing_outputs() {
+        use base64::Engine;
+        let (directory, store) = store();
+        let output = directory.path().join("pending.mp3");
+        let audio = base64::engine::general_purpose::STANDARD
+            .decode(include_str!("../../../../tests/fixtures/lofty-silent.mp3.b64").trim())
+            .unwrap();
+        fs::write(&output, audio).unwrap();
+        let run = store
+            .create_run(CreateRun {
+                input_kind: InputKind::File,
+                input_path: directory.path().join("source.mp3"),
+                output_path: directory.path().to_path_buf(),
+                settings: settings(),
+                total_items: 2,
+            })
+            .unwrap();
+        let mut persisted = item(1, None);
+        persisted.destination_path = Some(output.clone());
+        let item_id = store.record_item(run.id, persisted).unwrap();
+        let metadata = unlockm::metadata::Metadata {
+            title: Some(unlockm::metadata::MetadataValue::new(
+                "Recovered title",
+                unlockm::metadata::Provenance::ExistingTag,
+            )),
+            ..Default::default()
+        };
+        unlockm::metadata::tags::write(&output, &metadata, None).unwrap();
+        store.set_metadata_edit_pending(item_id, true).unwrap();
+        let page = store
+            .query_music_items(run.id, ItemQuery::default())
+            .unwrap();
+        assert_eq!(page.items[0].title.as_deref(), Some("Recovered title"));
+        assert!(!page.items[0].metadata_edit_pending);
+
+        let mut missing = item(2, None);
+        missing.destination_path = Some(directory.path().join("missing.mp3"));
+        let missing_id = store.record_item(run.id, missing).unwrap();
+        store.set_metadata_edit_pending(missing_id, true).unwrap();
+        let page = store
+            .query_music_items(run.id, ItemQuery::default())
+            .unwrap();
+        assert!(
+            page.items
+                .iter()
+                .any(|value| value.id == missing_id && value.metadata_edit_pending)
+        );
+    }
+
+    #[test]
+    fn pending_recovery_reconciles_flac_artwork_and_output_facts() {
+        use base64::Engine;
+        let (directory, store) = store();
+        let output = directory.path().join("pending.flac");
+        let audio = base64::engine::general_purpose::STANDARD
+            .decode(include_str!("../../../../tests/fixtures/lofty-full_test.flac.b64").trim())
+            .unwrap();
+        fs::write(&output, audio).unwrap();
+        let run = store
+            .create_run(CreateRun {
+                input_kind: InputKind::File,
+                input_path: directory.path().join("source.flac"),
+                output_path: directory.path().to_path_buf(),
+                settings: settings(),
+                total_items: 1,
+            })
+            .unwrap();
+        let mut persisted = item(1, None);
+        persisted.destination_path = Some(output.clone());
+        let item_id = store.record_item(run.id, persisted).unwrap();
+        let cover = base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLq6QAAAABJRU5ErkJggg==").unwrap();
+        let metadata = unlockm::metadata::Metadata {
+            title: Some(unlockm::metadata::MetadataValue::new(
+                "Recovered FLAC",
+                unlockm::metadata::Provenance::ExistingTag,
+            )),
+            ..Default::default()
+        };
+        unlockm::metadata::tags::write(&output, &metadata, Some(&cover)).unwrap();
+        store.set_metadata_edit_pending(item_id, true).unwrap();
+        let page = store
+            .query_music_items(run.id, ItemQuery::default())
+            .unwrap();
+        let recovered = &page.items[0];
+        assert_eq!(recovered.title.as_deref(), Some("Recovered FLAC"));
+        assert!(!recovered.metadata_edit_pending);
+        assert_eq!(recovered.output_format.as_deref(), Some("flac"));
+        assert!(recovered.output_bytes.is_some() && recovered.bitrate_kbps.is_some());
+        assert!(recovered.artwork_id.is_some());
+        assert_eq!(
+            store
+                .run(run.id)
+                .unwrap()
+                .unwrap()
+                .representative_artwork_id,
+            recovered.artwork_id
+        );
+    }
+
+    #[test]
+    fn artwork_candidates_dedupe_sha_across_runs_and_prioritize_album() {
+        let (_directory, store) = store();
+        let first = store
+            .create_run(CreateRun {
+                input_kind: InputKind::File,
+                input_path: "/input/one.ncm".into(),
+                output_path: "/output".into(),
+                settings: settings(),
+                total_items: 1,
+            })
+            .unwrap();
+        let second = store
+            .create_run(CreateRun {
+                input_kind: InputKind::File,
+                input_path: "/input/two.ncm".into(),
+                output_path: "/output".into(),
+                settings: settings(),
+                total_items: 1,
+            })
+            .unwrap();
+        let cover = ArtworkInput {
+            mime_type: "image/png".into(),
+            bytes: b"same-cover".to_vec(),
+        };
+        let mut first_item = item(1, Some(cover.clone()));
+        first_item.album = Some("Other album".into());
+        let first_id = store.record_item(first.id, first_item).unwrap();
+        let mut second_item = item(1, Some(cover));
+        second_item.album = Some("Target album".into());
+        let second_id = store.record_item(second.id, second_item).unwrap();
+        let candidates = store.artwork_candidates(second_id, None, 12).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].album.as_deref(), Some("Target album"));
+        let first_page = store
+            .query_music_items(first.id, ItemQuery::default())
+            .unwrap();
+        let second_page = store
+            .query_music_items(second.id, ItemQuery::default())
+            .unwrap();
+        assert_eq!(
+            first_page.items[0].artwork_id,
+            second_page.items[0].artwork_id
+        );
+        assert_ne!(first_id, second_id);
+    }
+
+    #[test]
+    fn metadata_refresh_syncs_representative_artwork_and_deletes_orphans() {
+        let (_directory, store) = store();
+        let run = store
+            .create_run(CreateRun {
+                input_kind: InputKind::File,
+                input_path: "/input/cover.ncm".into(),
+                output_path: "/output".into(),
+                settings: settings(),
+                total_items: 1,
+            })
+            .unwrap();
+        let item_id = store.record_item(run.id, item(1, None)).unwrap();
+        let artwork = ArtworkInput {
+            mime_type: "image/png".into(),
+            bytes: vec![1, 2, 3],
+        };
+        store
+            .refresh_metadata_text(item_id, Some("Title".into()), None, None, Some(artwork))
+            .unwrap();
+        let item_page = store
+            .query_music_items(run.id, ItemQuery::default())
+            .unwrap();
+        let artwork_id = item_page.items[0].artwork_id.expect("item artwork sync");
+        assert_eq!(
+            store
+                .run(run.id)
+                .unwrap()
+                .unwrap()
+                .representative_artwork_id,
+            Some(artwork_id)
+        );
+        store.delete_run(run.id).unwrap();
+        assert!(store.artwork(artwork_id).unwrap().is_none());
     }
 
     #[test]
@@ -1423,13 +2081,18 @@ mod tests {
     }
 
     #[test]
-    fn schema_one_database_migrates_output_fact_columns_idempotently() {
+    fn schema_one_database_migrates_v2_and_v3_columns_idempotently() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("history.sqlite");
         let store = HistoryStore::open(&database).unwrap();
         store
             .execute_test_sql(
-                "ALTER TABLE items DROP COLUMN output_bytes;
+                "DROP INDEX IF EXISTS items_run_probe_pending;
+                 ALTER TABLE runs DROP COLUMN display_name;
+                 ALTER TABLE items DROP COLUMN metadata_edit_pending;
+                 ALTER TABLE items DROP COLUMN media_probe_version;
+                 ALTER TABLE items DROP COLUMN bitrate_kbps;
+                 ALTER TABLE items DROP COLUMN output_bytes;
                  ALTER TABLE items DROP COLUMN output_format;
                  PRAGMA user_version = 1;",
             )
@@ -1448,9 +2111,78 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, SCHEMA_VERSION);
         assert!(columns.iter().any(|column| column == "output_bytes"));
         assert!(columns.iter().any(|column| column == "output_format"));
+        assert!(columns.iter().any(|column| column == "bitrate_kbps"));
+        assert!(columns.iter().any(|column| column == "media_probe_version"));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == "metadata_edit_pending")
+        );
+        let run_columns: Vec<String> = connection
+            .prepare("SELECT name FROM pragma_table_info('runs')")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(run_columns.iter().any(|column| column == "display_name"));
+    }
+
+    #[test]
+    fn schema_two_database_migrates_v3_columns_idempotently() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("history.sqlite");
+        let store = HistoryStore::open(&database).unwrap();
+        store
+            .execute_test_sql(
+                "DROP INDEX IF EXISTS items_run_probe_pending;
+             ALTER TABLE runs DROP COLUMN display_name;
+             ALTER TABLE items DROP COLUMN metadata_edit_pending;
+             ALTER TABLE items DROP COLUMN media_probe_version;
+             ALTER TABLE items DROP COLUMN bitrate_kbps;
+             PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        drop(store);
+        let migrated = HistoryStore::open(&database).unwrap();
+        let version: i64 = migrated
+            .connection
+            .lock()
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let columns: Vec<String> = migrated
+            .connection
+            .lock()
+            .unwrap()
+            .prepare("SELECT name FROM pragma_table_info('items')")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            columns.iter().any(|column| column == "bitrate_kbps")
+                && columns.iter().any(|column| column == "media_probe_version")
+                && columns
+                    .iter()
+                    .any(|column| column == "metadata_edit_pending")
+        );
+        drop(migrated);
+        let reopened = HistoryStore::open(&database).unwrap();
+        assert_eq!(
+            reopened
+                .connection
+                .lock()
+                .unwrap()
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
     }
 
     #[test]

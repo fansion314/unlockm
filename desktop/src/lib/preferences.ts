@@ -4,8 +4,16 @@ export function preferenceSnapshot(
   locale: Preferences["locale"],
   theme: Preferences["theme"],
   defaultSettings: RunSettings,
+  palette: NonNullable<Preferences["palette"]> = "blue",
+  playerVolume = 0.6,
 ): Preferences {
-  return { locale, theme, defaultSettings: { ...defaultSettings, overwrite: false } };
+  return {
+    locale,
+    theme,
+    palette,
+    playerVolume: Math.max(0, Math.min(1, Number.isFinite(playerVolume) ? playerVolume : 0.6)),
+    defaultSettings: { ...defaultSettings, overwrite: false },
+  };
 }
 
 export async function persistPreferences(
@@ -13,6 +21,8 @@ export async function persistPreferences(
   locale: Preferences["locale"],
   theme: Preferences["theme"],
   defaultSettings: RunSettings,
+  palette: NonNullable<Preferences["palette"]> = "blue",
+  playerVolume = 0.6,
 ): Promise<Preferences> {
-  return setPreferences(preferenceSnapshot(locale, theme, defaultSettings));
+  return setPreferences(preferenceSnapshot(locale, theme, defaultSettings, palette, playerVolume));
 }

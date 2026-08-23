@@ -217,12 +217,16 @@ pub fn run() {
             commands::get_artwork_mime,
             commands::get_preferences,
             commands::set_preferences,
+            commands::update_run_item_metadata,
+            commands::list_artwork_candidates,
             commands::reveal_run_output,
             commands::reveal_run_item,
             commands::open_run_item,
             commands::delete_run,
+            commands::rename_run,
             commands::clear_history,
             commands::start_conversion,
+            commands::rerun_conversion,
             commands::cancel_conversion,
         ])
         .run(tauri::generate_context!())

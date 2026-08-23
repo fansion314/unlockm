@@ -78,7 +78,13 @@ pub fn prepare(path: &Path) -> Result<PreparedClassification> {
         source,
     })?;
     h.truncate(n);
-    if is_standard_audio(&h) {
+    if audio::probe_path(path)
+        .map_err(|detail| AppError::Io {
+            path: path.to_path_buf(),
+            source: std::io::Error::other(detail),
+        })?
+        .is_some()
+    {
         return Ok(PreparedClassification::Passthrough);
     }
     // `.xm` is shared by Xiami and Ximalaya.  Xiami has a short, definitive

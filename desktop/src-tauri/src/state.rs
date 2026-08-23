@@ -1,6 +1,6 @@
 use crate::history::{CreateRun, HistoryError, HistoryStore, RunStatus, RunSummary};
 use std::{
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     time::SystemTime,
 };
 use thiserror::Error;
@@ -27,6 +27,21 @@ pub struct ActiveRun {
     pub run_id: i64,
     pub cancellation: Cancellation,
     pub started_at: SystemTime,
+}
+
+/// Owns the idle active-run lock for the full duration of a history mutation.
+///
+/// Keeping this guard alive makes starting a conversion mutually exclusive
+/// with mutations that must agree with both an output file and SQLite.
+pub struct IdleHistoryMutationGuard<'a> {
+    _active: MutexGuard<'a, Option<ActiveRun>>,
+    history: &'a HistoryStore,
+}
+
+impl IdleHistoryMutationGuard<'_> {
+    pub fn history(&self) -> &HistoryStore {
+        self.history
+    }
 }
 
 impl AppState {
@@ -57,6 +72,21 @@ impl AppState {
         };
         *active = Some(active_run.clone());
         Ok(active_run)
+    }
+
+    /// Starts a history mutation only while no conversion is active. The
+    /// returned guard must cover every related file and database operation.
+    pub fn begin_history_mutation(&self) -> Result<IdleHistoryMutationGuard<'_>, StateError> {
+        let active = self.active.lock().expect("active run lock");
+        if let Some(existing) = active.as_ref() {
+            return Err(StateError::Busy {
+                active_run_id: existing.run_id,
+            });
+        }
+        Ok(IdleHistoryMutationGuard {
+            _active: active,
+            history: self.history.as_ref(),
+        })
     }
 
     pub fn mark_run_running(&self, run_id: i64, total_items: usize) -> Result<(), StateError> {
@@ -122,28 +152,15 @@ impl AppState {
     }
 
     pub fn delete_history_run(&self, run_id: i64) -> Result<bool, StateError> {
-        let active = self.active.lock().expect("active run lock");
-        if active
-            .as_ref()
-            .is_some_and(|current| current.run_id == run_id)
-        {
-            return Err(StateError::Busy {
-                active_run_id: run_id,
-            });
-        }
+        let mutation = self.begin_history_mutation()?;
         wait_for_history_mutation_barrier();
-        self.history.delete_run(run_id).map_err(Into::into)
+        mutation.history().delete_run(run_id).map_err(Into::into)
     }
 
     pub fn clear_history(&self) -> Result<(), StateError> {
-        let active = self.active.lock().expect("active run lock");
-        if let Some(active) = active.as_ref() {
-            return Err(StateError::Busy {
-                active_run_id: active.run_id,
-            });
-        }
+        let mutation = self.begin_history_mutation()?;
         wait_for_history_mutation_barrier();
-        self.history.clear_history().map_err(Into::into)
+        mutation.history().clear_history().map_err(Into::into)
     }
 }
 
@@ -161,12 +178,12 @@ fn set_history_mutation_barrier(barrier: Option<Arc<std::sync::Barrier>>) {
 
 #[cfg(test)]
 fn wait_for_history_mutation_barrier() {
-    if let Some(barrier) = HISTORY_MUTATION_BARRIER
+    let barrier = HISTORY_MUTATION_BARRIER
         .get_or_init(|| Mutex::new(None))
         .lock()
         .expect("history mutation barrier lock")
-        .clone()
-    {
+        .clone();
+    if let Some(barrier) = barrier {
         barrier.wait();
         barrier.wait();
     }
@@ -260,6 +277,66 @@ mod tests {
         ));
         assert!(state.history().run(active.run_id).unwrap().is_some());
         assert!(state.cancel_run(active.run_id));
+    }
+
+    #[test]
+    fn history_mutation_guard_rejects_active_runs_and_blocks_conversion_start() {
+        let directory = tempfile::tempdir().unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+
+        let mutation = state.begin_history_mutation().unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let begin_state = state.clone();
+        let begin = std::thread::spawn(move || {
+            sender.send(begin_state.begin_run(request())).unwrap();
+        });
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_millis(30))
+                .is_err()
+        );
+        drop(mutation);
+        let active = receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        begin.join().unwrap();
+        assert!(matches!(
+            state.begin_history_mutation(),
+            Err(StateError::Busy { active_run_id }) if active_run_id == active.run_id
+        ));
+        state
+            .finish_run(active.run_id, RunStatus::Completed, None, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn history_mutation_guards_serialize_idle_writers() {
+        let directory = tempfile::tempdir().unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+        let first = state.begin_history_mutation().unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let second_state = state.clone();
+        let second = std::thread::spawn(move || {
+            let guard = second_state.begin_history_mutation();
+            sender.send(guard.is_ok()).unwrap();
+        });
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_millis(30))
+                .is_err()
+        );
+        drop(first);
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap()
+        );
+        second.join().unwrap();
     }
 
     #[test]

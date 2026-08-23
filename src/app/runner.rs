@@ -76,6 +76,7 @@ struct InFlightJob {
     destination: PathBuf,
     item_kind: ItemKind,
     action: ItemAction,
+    skip_music: bool,
     logical_bytes: u64,
     preflight: std::time::Duration,
 }
@@ -213,14 +214,22 @@ fn item_kind_for_source(source: &std::path::Path) -> ItemKind {
 
 fn planned_item_kind(planned: &job::PlannedJob) -> ItemKind {
     match &planned.action {
-        job::PlannedAction::Copy => ItemKind::Companion,
+        job::PlannedAction::Copy { is_music } => {
+            if *is_music {
+                ItemKind::Music
+            } else {
+                ItemKind::Companion
+            }
+        }
+        job::PlannedAction::SkipMusic => ItemKind::Music,
         job::PlannedAction::Decrypt { .. } => ItemKind::Music,
     }
 }
 
 fn planned_action(planned: &job::PlannedJob) -> ItemAction {
     match &planned.action {
-        job::PlannedAction::Copy => ItemAction::Copy,
+        job::PlannedAction::Copy { .. } => ItemAction::Copy,
+        job::PlannedAction::SkipMusic => ItemAction::Copy,
         job::PlannedAction::Decrypt { .. } => ItemAction::Convert,
     }
 }
@@ -233,7 +242,9 @@ fn report_for_planned(config: &RunConfig, measured: &MeasuredPlannedJob) -> JobR
         measured.logical_bytes,
         measured.preflight,
     );
-    report.destination = Some(measured.planned.destination.clone());
+    if !matches!(&measured.planned.action, job::PlannedAction::SkipMusic) {
+        report.destination = Some(measured.planned.destination.clone());
+    }
     report.item_kind = planned_item_kind(&measured.planned);
     report.action = Some(planned_action(&measured.planned));
     report
@@ -634,7 +645,8 @@ pub async fn run_paths_with_resources_and_cancel_with_observer(
                 .relative_input(&source)
                 .unwrap_or_else(|_| source.clone());
             let phase = match &measured.planned.action {
-                job::PlannedAction::Copy => "Copying",
+                job::PlannedAction::Copy { .. } => "Copying",
+                job::PlannedAction::SkipMusic => "Skipping",
                 job::PlannedAction::Decrypt { .. } => "Decrypting",
             };
             if observer.is_enabled() {
@@ -654,6 +666,7 @@ pub async fn run_paths_with_resources_and_cancel_with_observer(
                 destination: destination.clone(),
                 item_kind,
                 action,
+                skip_music: matches!(&measured.planned.action, job::PlannedAction::SkipMusic),
                 logical_bytes: measured.logical_bytes,
                 preflight: measured.preflight,
             };
@@ -710,7 +723,9 @@ pub async fn run_paths_with_resources_and_cancel_with_observer(
                 );
                 timings.preflight = context.preflight;
                 report.timings = timings;
-                report.destination = Some(context.destination);
+                if !context.skip_music {
+                    report.destination = Some(context.destination);
+                }
                 report.item_kind = context.item_kind;
                 report.action = Some(context.action);
                 report.warnings = execution.warnings;
@@ -747,7 +762,9 @@ pub async fn run_paths_with_resources_and_cancel_with_observer(
                 );
                 timings.preflight = context.preflight;
                 report.timings = timings;
-                report.destination = Some(context.destination);
+                if !context.skip_music {
+                    report.destination = Some(context.destination);
+                }
                 report.item_kind = context.item_kind;
                 report.action = Some(context.action);
                 report.outcome = if error.starts_with("collision") {
@@ -776,7 +793,9 @@ pub async fn run_paths_with_resources_and_cancel_with_observer(
                         context.logical_bytes,
                         context.preflight,
                     );
-                    report.destination = Some(context.destination);
+                    if !context.skip_music {
+                        report.destination = Some(context.destination);
+                    }
                     report.item_kind = context.item_kind;
                     report.action = Some(context.action);
                     report.error = Some(ReportError {
@@ -1360,5 +1379,80 @@ mod tests {
         );
         assert!(reports[0].warnings.is_empty());
         assert!(output.join("track.flac").is_file());
+    }
+
+    #[tokio::test]
+    async fn no_copy_reports_standard_audio_as_skipped_music() {
+        use base64::Engine;
+        let temp = tempfile::tempdir().unwrap();
+        let input = temp.path().join("in");
+        let output = temp.path().join("out");
+        std::fs::create_dir(&input).unwrap();
+        let mp3 = input.join("track.mp3");
+        std::fs::write(
+            &mp3,
+            base64::engine::general_purpose::STANDARD
+                .decode(include_str!("../../tests/fixtures/lofty-silent.mp3.b64").trim())
+                .unwrap(),
+        )
+        .unwrap();
+        let config = Arc::new(
+            crate::config::RunConfig::new(
+                input,
+                Some(output.clone()),
+                false,
+                true,
+                false,
+                false,
+                false,
+                1,
+                64,
+                1,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap(),
+        );
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let captured = seen.clone();
+        let summary = run_paths_with_observer(
+            config,
+            vec![mp3],
+            BatchObserver::new(Arc::new(move |event| captured.lock().unwrap().push(event)))
+                .with_music_snapshots(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.skipped, 1);
+        assert!(
+            !output.exists(),
+            "--no-copy must not create an output directory"
+        );
+        let report = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|event| {
+                if let BatchEvent::ItemTerminal { report } = event {
+                    Some(report)
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+            .clone();
+        assert_eq!(report.item_kind, ItemKind::Music);
+        assert_eq!(report.outcome, JobOutcome::Skipped);
+        assert_eq!(report.destination, None, "a no-copy item has no output");
+        assert_eq!(
+            report
+                .music
+                .and_then(|music| music.output_format)
+                .as_deref(),
+            Some("mp3")
+        );
     }
 }

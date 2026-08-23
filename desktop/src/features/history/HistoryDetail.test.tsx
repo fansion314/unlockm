@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import i18n from "../../i18n";
 import type { HistoryItem } from "../../lib/contracts";
 import { Artwork, HistoryDetail, VisibleArtwork } from "./HistoryDetail";
+import { PlaybackProvider } from "../playback/PlaybackProvider";
 
 const { api, convertFileSrc } = vi.hoisted(() => ({
   api: {
@@ -85,9 +86,17 @@ function page(items = [item(1)], overrides = {}) {
   };
 }
 
-function renderDetail(onError = vi.fn()) {
+function renderDetail(onError = vi.fn(), onRename = vi.fn(async () => undefined)) {
   return render(
-    <HistoryDetail layoutId="run-card-9" run={run} onBack={() => undefined} onError={onError} />,
+    <PlaybackProvider>
+      <HistoryDetail
+        layoutId="run-card-9"
+        run={run}
+        onBack={() => undefined}
+        onRename={onRename}
+        onError={onError}
+      />
+    </PlaybackProvider>,
   );
 }
 
@@ -152,6 +161,37 @@ test("detail renders compact output facts without raw diagnostics", async () => 
   expect(document.querySelector(".music-item details")).toBeNull();
 });
 
+test("detail renames inline, cancels with Escape, and keeps editing after a failure", async () => {
+  const user = userEvent.setup();
+  const rename = vi.fn(async () => undefined);
+  renderDetail(vi.fn(), rename);
+  await screen.findByText("Track 1");
+  await user.click(screen.getByRole("button", { name: "Rename conversion" }));
+  const input = screen.getByRole("textbox", { name: "Rename conversion" }) as HTMLInputElement;
+  expect(input.value).toBe("album");
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Rename conversion" })).toBeNull();
+  await user.clear(input);
+  await user.type(input, "Downloads");
+  await user.keyboard("{Enter}");
+  await waitFor(() => expect(rename).toHaveBeenCalledWith(9, "Downloads"));
+
+  await user.click(screen.getByRole("button", { name: "Rename conversion" }));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Rename conversion" })),
+  );
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("textbox", { name: "Rename conversion" })).toBeNull();
+
+  rename.mockRejectedValueOnce(new Error("sqlite busy"));
+  await user.click(screen.getByRole("button", { name: "Rename conversion" }));
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Could not rename this conversion",
+  );
+  expect(screen.getByRole("textbox", { name: "Rename conversion" })).toBeTruthy();
+});
+
 test("search, facets, sorting, and numbered pages produce server queries", async () => {
   const user = userEvent.setup();
   api.queryRunItems.mockResolvedValue(
@@ -189,21 +229,45 @@ test("search, facets, sorting, and numbered pages produce server queries", async
   expect(api.queryRunItems).toHaveBeenCalledWith(9, expect.objectContaining({ page: 2 }));
 });
 
-test("one shared player switches tracks and keeps seek controls item-scoped", async () => {
+test("each filter clears independently without resetting the selected sort", async () => {
+  const user = userEvent.setup();
+  renderDetail();
+  await screen.findByText("Track 1");
+  await user.selectOptions(screen.getByLabelText("Sort"), "size:desc");
+  await user.type(screen.getByPlaceholderText("All artists"), "Artist B");
+  await user.click(screen.getByRole("button", { name: "Clear artist filter" }));
+  await waitFor(() =>
+    expect(api.queryRunItems).toHaveBeenLastCalledWith(
+      9,
+      expect.objectContaining({ artist: null, sort: "size", direction: "desc", page: 1 }),
+    ),
+  );
+});
+
+test("copied outcome is available as a server-side result filter", async () => {
+  const user = userEvent.setup();
+  renderDetail();
+  await screen.findByText("Track 1");
+  await user.selectOptions(screen.getByLabelText("Result"), "copied");
+  await waitFor(() =>
+    expect(api.queryRunItems).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ outcome: "copied" }),
+    ),
+  );
+});
+
+test("row controls delegate each selected track to the shared player", async () => {
   const user = userEvent.setup();
   api.queryRunItems.mockResolvedValue(page([item(1), item(2)]));
   renderDetail();
   const playOne = await screen.findByRole("button", { name: "Play Track 1" });
   await user.click(playOne);
   await waitFor(() => expect(convertFileSrc).toHaveBeenCalledWith("1", "unlockm-audio"));
-  expect(screen.getByRole("button", { name: "Pause Track 1" })).toBeTruthy();
-
   await user.click(screen.getByRole("button", { name: "Play Track 2" }));
   await waitFor(() => expect(convertFileSrc).toHaveBeenCalledWith("2", "unlockm-audio"));
   expect(pauseSpy).toHaveBeenCalled();
-  const seek = screen.getByRole("slider", { name: "Seek through Track 2" });
-  fireEvent.change(seek, { target: { value: "12" } });
-  expect((seek as HTMLInputElement).value).toBe("12");
+  expect(screen.queryByRole("slider", { name: /Seek through/ })).toBeNull();
 });
 
 test("normal player cleanup releases the source without forcing an error-prone reload", async () => {
@@ -214,6 +278,17 @@ test("normal player cleanup releases the source without forcing an error-prone r
   cleanup();
   expect(pauseSpy).toHaveBeenCalled();
   expect(loadSpy).toHaveBeenCalledTimes(1);
+});
+
+test("legacy repair refreshes once until repairPending clears", async () => {
+  api.queryRunItems
+    .mockResolvedValueOnce(page([item(1)], { repairPending: true }))
+    .mockResolvedValueOnce(page([item(1)], { repairPending: false }));
+  renderDetail();
+  await waitFor(() => expect(api.queryRunItems).toHaveBeenCalledTimes(2), { timeout: 1_000 });
+  await new Promise((resolve) => window.setTimeout(resolve, 350));
+  expect(api.queryRunItems).toHaveBeenCalledTimes(2);
+  cleanup();
 });
 
 test("file reveal and system-player buttons call separate ID-only commands", async () => {

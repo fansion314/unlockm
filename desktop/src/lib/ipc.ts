@@ -7,6 +7,8 @@ import type {
   ItemQuery,
   ItemPage,
   Preferences,
+  MetadataPatch,
+  ArtworkCandidate,
   RunPage,
   RunSummary,
   StartConversionRequest,
@@ -29,10 +31,21 @@ export type DesktopApi = {
     request: StartConversionRequest,
     onEvent: (event: ConversionEvent) => void,
   ): Promise<RunSummary>;
+  rerunConversion(runId: number, onEvent: (event: ConversionEvent) => void): Promise<RunSummary>;
   cancelConversion(runId: number): Promise<boolean>;
   getPreferences(): Promise<Preferences>;
   setPreferences(preferences: Preferences): Promise<Preferences>;
   deleteRun(runId: number): Promise<boolean>;
+  renameRun(runId: number, displayName: string): Promise<RunSummary | null>;
+  updateRunItemMetadata(
+    itemId: number,
+    patch: MetadataPatch,
+  ): Promise<import("./contracts").HistoryItem>;
+  listArtworkCandidates(
+    itemId: number,
+    query?: string | null,
+    limit?: number,
+  ): Promise<ArtworkCandidate[]>;
   clearHistory(): Promise<void>;
   revealRunOutput(runId: number): Promise<boolean>;
   revealRunItem(itemId: number): Promise<boolean>;
@@ -59,10 +72,21 @@ export const desktopApi: DesktopApi = {
     channel.onmessage = onEvent;
     return invoke<RunSummary>("start_conversion", { request, onEvent: channel });
   },
+  rerunConversion: (runId, onEvent) => {
+    const channel = new Channel<ConversionEvent>();
+    channel.onmessage = onEvent;
+    return invoke<RunSummary>("rerun_conversion", { runId, onEvent: channel });
+  },
   cancelConversion: (runId) => invoke<boolean>("cancel_conversion", { runId }),
   getPreferences: () => invoke<Preferences>("get_preferences"),
   setPreferences: (preferences) => invoke<Preferences>("set_preferences", { preferences }),
   deleteRun: (runId) => invoke<boolean>("delete_run", { runId }),
+  renameRun: (runId, displayName) =>
+    invoke<RunSummary | null>("rename_run", { runId, displayName }),
+  updateRunItemMetadata: (itemId, patch) =>
+    invoke<import("./contracts").HistoryItem>("update_run_item_metadata", { itemId, patch }),
+  listArtworkCandidates: (itemId, query, limit) =>
+    invoke<ArtworkCandidate[]>("list_artwork_candidates", { itemId, query: query ?? null, limit }),
   clearHistory: () => invoke<void>("clear_history"),
   revealRunOutput: (runId) => invoke<boolean>("reveal_run_output", { runId }),
   revealRunItem: (itemId) => invoke<boolean>("reveal_run_item", { itemId }),

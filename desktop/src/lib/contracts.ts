@@ -7,6 +7,8 @@ export type RunSettings = {
 export type Preferences = {
   locale: "en-US" | "zh-CN" | "ja-JP";
   theme: "light" | "dark";
+  palette?: "blue" | "emerald" | "violet" | "amber";
+  playerVolume?: number;
   defaultSettings: RunSettings;
 };
 
@@ -21,6 +23,7 @@ export type RunStatus =
 
 export type RunSummary = {
   id: number;
+  displayName?: string;
   inputKind: "file" | "directory";
   inputPath: string;
   outputPath: string;
@@ -72,6 +75,9 @@ export type MusicSnapshot = {
   durationMs: number | null;
   outputBytes: number | null;
   outputFormat: string | null;
+  bitrateKbps?: number | null;
+  mediaProbeVersion?: number;
+  metadataEditPending?: boolean;
   artwork: null;
 };
 
@@ -136,6 +142,21 @@ export type StartConversionRequest = {
   settings: RunSettings;
 };
 
+export type MetadataPatch = {
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  cover?: Uint8Array;
+  existingArtworkId?: number;
+};
+
+export type ArtworkCandidate = {
+  artworkId: number;
+  album: string | null;
+  artist: string | null;
+  title: string | null;
+};
+
 export type HistoryItem = {
   id: number;
   runId: number;
@@ -157,6 +178,9 @@ export type HistoryItem = {
   album: string | null;
   durationMs: number | null;
   artworkId: number | null;
+  bitrateKbps?: number | null;
+  mediaProbeVersion?: number;
+  metadataEditPending?: boolean;
 };
 
 export type ItemPage = {
@@ -167,11 +191,18 @@ export type ItemPage = {
   filteredTotal: number;
   companionCount: number;
   musicTotal: number;
+  repairPending?: boolean;
 };
 
 export type ItemSort = "ordinal" | "title" | "artist" | "album" | "size";
 export type SortDirection = "asc" | "desc";
-export type OutcomeFilter = "converted" | "skipped" | "conflict" | "failed" | "cancelled";
+export type OutcomeFilter =
+  | "converted"
+  | "copied"
+  | "skipped"
+  | "conflict"
+  | "failed"
+  | "cancelled";
 
 export type ItemQuery = {
   page: number;

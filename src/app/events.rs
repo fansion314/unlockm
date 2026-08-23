@@ -48,6 +48,7 @@ pub struct MusicSnapshot {
     pub duration_ms: Option<u32>,
     pub output_bytes: Option<u64>,
     pub output_format: Option<String>,
+    pub bitrate_kbps: Option<u32>,
     pub artwork: Option<ArtworkSnapshot>,
 }
 

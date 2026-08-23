@@ -1,19 +1,22 @@
-import { FolderOpen, Trash, X } from "@phosphor-icons/react";
+import { ArrowClockwise, FolderOpen, Trash, X } from "@phosphor-icons/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { appReducer, initialAppModel } from "./app/conversion-state";
+import { clearHistoryRecords, deleteHistoryRun } from "./app/history-mutations";
 import { pageTransition, pageVariants as createPageVariants } from "./app/page-motion";
 import { AppHeader } from "./components/AppHeader";
 import { Composer } from "./features/conversion/Composer";
 import { HistoryDetail, VisibleArtwork } from "./features/history/HistoryDetail";
+import { PersistentPlayer } from "./features/playback/PersistentPlayer";
+import { PlaybackProvider, type PlaybackController } from "./features/playback/PlaybackProvider";
 import type { Preferences, RunSettings, ValidatedInput } from "./lib/contracts";
 import { conversionRequest } from "./lib/conversion-request";
 import { errorMessageKey, normalizeDesktopError } from "./lib/errors";
 import { formatTimestamp } from "./lib/format";
 import { desktopApi } from "./lib/ipc";
 import { persistPreferences } from "./lib/preferences";
-import { applyTheme, cachedTheme } from "./lib/theme";
+import { applyTheme, cachedPalette, cachedTheme } from "./lib/theme";
 import "./App.css";
 import { localeFromLanguage } from "./i18n";
 
@@ -38,13 +41,17 @@ function App() {
   const [outputPath, setOutputPath] = useState<string | null>(null);
   const [settings, setSettings] = useState<RunSettings>(defaultSettings);
   const [theme, setTheme] = useState<Preferences["theme"]>(cachedTheme);
+  const [palette, setPalette] = useState<NonNullable<Preferences["palette"]>>(cachedPalette);
+  const [playerVolume, setPlayerVolume] = useState(0.6);
   const [locale, setLocale] = useState<Preferences["locale"]>(() => currentLocale(i18n.language));
   const [detailRunId, setDetailRunId] = useState<number | null>(null);
   const [direction, setDirection] = useState<1 | -1>(1);
   const [loadingMoreRuns, setLoadingMoreRuns] = useState(false);
+  const [showTop, setShowTop] = useState(false);
   const nextRequestId = useRef(0);
   const startInFlight = useRef(false);
   const preferencesBootstrapped = useRef(false);
+  const playbackController = useRef<PlaybackController | null>(null);
   const reducedMotion = useReducedMotion();
 
   const reportError = useCallback(
@@ -67,8 +74,10 @@ function App() {
         preferencesBootstrapped.current = true;
         setSettings({ ...bootstrap.preferences.defaultSettings, overwrite: false });
         setTheme(bootstrap.preferences.theme);
+        setPalette(bootstrap.preferences.palette ?? "blue");
+        setPlayerVolume(bootstrap.preferences.playerVolume ?? 0.6);
         setLocale(bootstrap.preferences.locale);
-        applyTheme(bootstrap.preferences.theme);
+        applyTheme(bootstrap.preferences.theme, bootstrap.preferences.palette ?? "blue");
         await i18n.changeLanguage(bootstrap.preferences.locale);
       }
     } catch (error) {
@@ -86,6 +95,13 @@ function App() {
   useEffect(() => void boot(), [boot]);
 
   useEffect(() => {
+    const update = () => setShowTop(window.scrollY > 360);
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    return () => window.removeEventListener("scroll", update);
+  }, []);
+
+  useEffect(() => {
     if (model.active?.requestId !== null || model.active?.runId === null) return;
     const timer = window.setInterval(() => void boot(), 1_000);
     return () => window.clearInterval(timer);
@@ -96,12 +112,16 @@ function App() {
       locale: Preferences["locale"],
       nextTheme: Preferences["theme"],
       nextSettings: RunSettings,
+      nextPalette: NonNullable<Preferences["palette"]>,
+      nextPlayerVolume: number,
     ) => {
       await persistPreferences(
         (preferences) => desktopApi.setPreferences(preferences),
         locale,
         nextTheme,
         nextSettings,
+        nextPalette,
+        nextPlayerVolume,
       );
     },
     [],
@@ -125,21 +145,36 @@ function App() {
       setLocale(nextLocale);
       try {
         await i18n.changeLanguage(nextLocale);
-        await persist(nextLocale, theme, settings);
+        await persist(nextLocale, theme, settings, palette, playerVolume);
       } catch (error) {
         reportError(error);
       }
     },
-    [i18n, persist, reportError, settings, theme],
+    [i18n, palette, persist, playerVolume, reportError, settings, theme],
   );
 
   const changeTheme = useCallback(
     (nextTheme: Preferences["theme"]) => {
       setTheme(nextTheme);
-      applyTheme(nextTheme);
-      void persist(locale, nextTheme, settings).catch(reportError);
+      applyTheme(nextTheme, palette);
+      void persist(locale, nextTheme, settings, palette, playerVolume).catch(reportError);
     },
-    [locale, persist, reportError, settings],
+    [locale, palette, persist, playerVolume, reportError, settings],
+  );
+  const changePalette = useCallback(
+    (nextPalette: NonNullable<Preferences["palette"]>) => {
+      setPalette(nextPalette);
+      applyTheme(theme, nextPalette);
+      void persist(locale, theme, settings, nextPalette, playerVolume).catch(reportError);
+    },
+    [locale, persist, playerVolume, reportError, settings, theme],
+  );
+  const changePlayerVolume = useCallback(
+    (nextVolume: number) => {
+      setPlayerVolume(nextVolume);
+      void persist(locale, theme, settings, palette, nextVolume).catch(reportError);
+    },
+    [locale, palette, persist, reportError, settings, theme],
   );
 
   const convert = useCallback(() => {
@@ -147,7 +182,7 @@ function App() {
     const requestId = ++nextRequestId.current;
     startInFlight.current = true;
     dispatch({ type: "conversionStarted", requestId });
-    void persist(locale, theme, settings).catch(reportError);
+    void persist(locale, theme, settings, palette, playerVolume).catch(reportError);
     void desktopApi
       .startConversion(conversionRequest(selected, outputPath, settings), (event) =>
         dispatch({ type: "conversionEvent", event }),
@@ -168,24 +203,83 @@ function App() {
       .finally(() => {
         startInFlight.current = false;
       });
-  }, [boot, locale, model.active, outputPath, persist, reportError, selected, settings, t, theme]);
+  }, [
+    boot,
+    locale,
+    model.active,
+    outputPath,
+    palette,
+    persist,
+    playerVolume,
+    reportError,
+    selected,
+    settings,
+    t,
+    theme,
+  ]);
 
   const cancel = useCallback(() => {
     const runId = model.active?.runId;
     if (runId !== null && runId !== undefined) void desktopApi.cancelConversion(runId);
   }, [model.active]);
 
-  const clearHistory = useCallback(() => {
+  const clearHistory = useCallback(async () => {
     if (!window.confirm(t("app.clearConfirm"))) return;
-    void desktopApi.clearHistory().then(boot).catch(reportError);
+    try {
+      await clearHistoryRecords(playbackController.current, () => desktopApi.clearHistory());
+      await boot();
+    } catch (error) {
+      reportError(error);
+    }
   }, [boot, reportError, t]);
 
   const removeRun = useCallback(
-    (runId: number) => {
+    async (runId: number) => {
       if (!window.confirm(t("app.deleteConfirm"))) return;
-      void desktopApi.deleteRun(runId).then(boot).catch(reportError);
+      try {
+        await deleteHistoryRun(playbackController.current, runId, (id) => desktopApi.deleteRun(id));
+        await boot();
+      } catch (error) {
+        reportError(error);
+      }
     },
     [boot, reportError, t],
+  );
+
+  const renameRun = useCallback(
+    async (runId: number, displayName: string) => {
+      await desktopApi.renameRun(runId, displayName);
+      await boot();
+    },
+    [boot],
+  );
+
+  const rerun = useCallback(
+    (runId: number) => {
+      if (model.active || startInFlight.current) return;
+      const requestId = ++nextRequestId.current;
+      startInFlight.current = true;
+      dispatch({ type: "conversionStarted", requestId });
+      void desktopApi
+        .rerunConversion(runId, (event) => dispatch({ type: "conversionEvent", event }))
+        .then(async (run) => {
+          dispatch({ type: "conversionResolved", requestId, run });
+          await boot();
+        })
+        .catch((error) => {
+          const normalized = normalizeDesktopError(error);
+          dispatch({
+            type: "conversionFailed",
+            requestId,
+            message: t(errorMessageKey(normalized.code), { defaultValue: t("errors.unknown") }),
+            detail: normalized.detail || null,
+          });
+        })
+        .finally(() => {
+          startInFlight.current = false;
+        });
+    },
+    [boot, model.active, t],
   );
 
   const loadMoreRuns = useCallback(async () => {
@@ -210,8 +304,19 @@ function App() {
   const variants = createPageVariants(reducedMotion ?? false);
 
   return (
-    <>
-      <AppHeader locale={locale} theme={theme} onLocale={changeLocale} onTheme={changeTheme} />
+    <PlaybackProvider
+      volume={playerVolume}
+      onVolumeChange={changePlayerVolume}
+      controllerRef={playbackController}
+    >
+      <AppHeader
+        locale={locale}
+        theme={theme}
+        palette={palette}
+        onLocale={changeLocale}
+        onTheme={changeTheme}
+        onPalette={changePalette}
+      />
       <main className="app-shell">
         {model.boot === "loading" ? <p className="boot-status">{t("app.loading")}</p> : null}
         <AnimatePresence custom={direction} mode="wait">
@@ -230,9 +335,11 @@ function App() {
                 layoutId={`run-card-${detailRun.id}`}
                 run={detailRun}
                 onBack={() => {
+                  window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
                   setDirection(-1);
                   setDetailRunId(null);
                 }}
+                onRename={renameRun}
                 onError={reportError}
                 reducedMotion={reducedMotion ?? false}
               />
@@ -307,20 +414,26 @@ function App() {
                           transition={{ layout: transition.layout }}
                         >
                           <button
-                            aria-label={t("app.openDetails", { name: basename(run.inputPath) })}
+                            aria-label={t("app.openDetails", {
+                              name: run.displayName || basename(run.inputPath),
+                            })}
                             className="run-detail-button"
                             type="button"
                             onClick={() => {
+                              window.scrollTo({
+                                top: 0,
+                                behavior: reducedMotion ? "auto" : "smooth",
+                              });
                               setDirection(1);
                               setDetailRunId(run.id);
                             }}
                           >
                             <VisibleArtwork
                               artworkId={run.representativeArtworkId}
-                              title={basename(run.inputPath)}
+                              title={run.displayName || basename(run.inputPath)}
                             />
                             <span className="run-identity">
-                              <strong>{basename(run.inputPath)}</strong>
+                              <strong>{run.displayName || basename(run.inputPath)}</strong>
                               <span title={run.outputPath}>{run.outputPath}</span>
                             </span>
                             <span className="run-count">
@@ -335,6 +448,15 @@ function App() {
                             </time>
                           </button>
                           <div className="run-actions">
+                            <button
+                              aria-label={t("app.rerun")}
+                              className="icon-button subtle"
+                              type="button"
+                              disabled={busy}
+                              onClick={() => rerun(run.id)}
+                            >
+                              <ArrowClockwise aria-hidden="true" size={18} />
+                            </button>
                             <button
                               aria-label={t("app.revealOutput", { name: basename(run.inputPath) })}
                               className="icon-button subtle"
@@ -403,7 +525,18 @@ function App() {
           </button>
         </section>
       ) : null}
-    </>
+      {showTop ? (
+        <button
+          className="scroll-top"
+          type="button"
+          aria-label={t("app.backToTop")}
+          onClick={() => window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" })}
+        >
+          ↑
+        </button>
+      ) : null}
+      <PersistentPlayer />
+    </PlaybackProvider>
   );
 }
 

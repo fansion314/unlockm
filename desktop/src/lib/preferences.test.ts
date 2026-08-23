@@ -11,6 +11,29 @@ test("quick settings are snapshotted and persisted through the narrow preference
   expect(setPreferences).toHaveBeenCalledWith({
     locale: "zh-CN",
     theme: "dark",
+    palette: "blue",
+    playerVolume: 0.6,
     defaultSettings: snapshot.defaultSettings,
   });
+});
+
+test("player volume is clamped without turning explicit mute into full volume", () => {
+  expect(
+    preferenceSnapshot(
+      "en-US",
+      "light",
+      { updateMetadata: false, copyPassthrough: true, overwrite: false },
+      "violet",
+      0,
+    ).playerVolume,
+  ).toBe(0);
+  expect(
+    preferenceSnapshot(
+      "en-US",
+      "light",
+      { updateMetadata: false, copyPassthrough: true, overwrite: false },
+      "blue",
+      Number.NaN,
+    ).playerVolume,
+  ).toBe(0.6);
 });

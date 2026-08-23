@@ -1,0 +1,107 @@
+.persistent-player {
+  align-items: center;
+  background: var(--surface-card);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-card);
+  bottom: max(16px, env(safe-area-inset-bottom));
+  box-shadow: var(--shadow-float);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto auto minmax(112px, 1fr) minmax(100px, 180px) auto auto minmax(
+      64px,
+      104px
+    ) auto;
+  left: max(16px, env(safe-area-inset-left));
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 10px 12px;
+  position: fixed;
+  z-index: 40;
+}
+
+.persistent-player.is-collapsed {
+  grid-template-columns: auto auto;
+}
+.player-cover {
+  border-radius: var(--radius-control);
+  height: 38px;
+  object-fit: cover;
+  width: 38px;
+}
+.player-cover-placeholder {
+  align-items: center;
+  background: var(--surface-selected);
+  color: var(--color-accent);
+  display: inline-flex;
+  font-weight: 800;
+  justify-content: center;
+}
+.persistent-player:not(.is-collapsed) .player-cover {
+  animation: player-cover-spin 12s linear infinite;
+}
+.persistent-player:not(.is-collapsed) .player-cover-placeholder {
+  animation: none;
+}
+.persistent-player .play-button {
+  height: 40px;
+  width: 40px;
+}
+.persistent-copy {
+  display: grid;
+  min-width: 0;
+}
+.persistent-copy strong,
+.persistent-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.persistent-copy span,
+.player-time {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+.player-time {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.player-mute {
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  padding: 4px;
+  place-items: center;
+}
+.persistent-player input[type="range"] {
+  accent-color: var(--color-accent);
+  min-width: 64px;
+  width: 100%;
+}
+.player-error {
+  color: var(--color-danger);
+  font-size: 0.76rem;
+  grid-column: 3 / -1;
+}
+@keyframes player-cover-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .persistent-player .player-cover {
+    animation: none;
+  }
+}
+@media (max-width: 720px) {
+  .persistent-player {
+    grid-template-columns: auto auto minmax(76px, 1fr) auto auto;
+  }
+  .persistent-player > input,
+  .persistent-player .player-time {
+    display: none;
+  }
+  .player-error {
+    grid-column: 3 / -1;
+  }
+}

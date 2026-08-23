@@ -1,4 +1,5 @@
 :root {
+  --native-density: 1;
   --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", sans-serif;
   --font-body: "Manrope Variable", "Manrope", "PingFang SC", "Hiragino Sans GB", sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", monospace;
@@ -91,4 +92,38 @@
 
   --shadow-float: 0 14px 42px rgb(4 7 10 / 30%);
   --shadow-menu: 0 16px 40px rgb(3 5 8 / 42%);
+}
+
+:root[data-palette="emerald"] {
+  --color-accent: #16785d;
+  --color-accent-hover: #0f624b;
+  --color-focus: #16785d;
+  --border-accent: #4aa88a;
+}
+:root[data-palette="violet"] {
+  --color-accent: #7352c7;
+  --color-accent-hover: #5e40aa;
+  --color-focus: #7352c7;
+  --border-accent: #9c84e3;
+}
+:root[data-palette="amber"] {
+  --color-accent: #a85e12;
+  --color-accent-hover: #88490a;
+  --color-focus: #a85e12;
+  --border-accent: #d59046;
+}
+:root[data-theme="dark"][data-palette="emerald"] {
+  --color-accent: #65c5a4;
+  --color-accent-hover: #84d4b9;
+  --color-focus: #84d4b9;
+}
+:root[data-theme="dark"][data-palette="violet"] {
+  --color-accent: #af95ef;
+  --color-accent-hover: #c2aeff;
+  --color-focus: #c2aeff;
+}
+:root[data-theme="dark"][data-palette="amber"] {
+  --color-accent: #f0ae62;
+  --color-accent-hover: #f7c181;
+  --color-focus: #f7c181;
 }

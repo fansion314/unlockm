@@ -28,6 +28,7 @@ use unlockm::{
         events::{BatchEvent, BatchObserver, ItemAction, ItemKind},
     },
     config::{OutputLayout, RunOptions},
+    metadata::tags::MetadataPatch,
 };
 
 pub type CommandResult<T> = Result<T, CommandError>;
@@ -122,6 +123,16 @@ pub struct StartConversionRequest {
     pub input_path: PathBuf,
     pub output_path: Option<PathBuf>,
     pub settings: RunSettings,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataPatchRequest {
+    pub title: Option<Option<String>>,
+    pub artist: Option<Option<String>>,
+    pub album: Option<Option<String>>,
+    pub cover: Option<Vec<u8>>,
+    pub existing_artwork_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -366,6 +377,174 @@ pub async fn get_preferences(state: State<'_, AppState>) -> CommandResult<Prefer
 }
 
 #[tauri::command]
+pub async fn update_run_item_metadata(
+    state: State<'_, AppState>,
+    item_id: i64,
+    patch: MetadataPatchRequest,
+) -> CommandResult<crate::history::HistoryItem> {
+    let state = state.inner().clone();
+    blocking(move || update_run_item_metadata_blocking(&state, item_id, patch)).await
+}
+
+fn update_run_item_metadata_blocking(
+    state: &AppState,
+    item_id: i64,
+    patch: MetadataPatchRequest,
+) -> CommandResult<crate::history::HistoryItem> {
+    // This lock intentionally spans every disk and SQLite step. A conversion
+    // cannot start, and another metadata/delete/clear mutation cannot observe
+    // a candidate-publish/reconcile sequence halfway through.
+    let mutation = state
+        .begin_history_mutation()
+        .map_err(CommandError::state)?;
+    wait_for_metadata_mutation_barrier();
+    let history = mutation.history();
+    let item = history
+        .editable_item(item_id)
+        .map_err(CommandError::history)?
+        .ok_or_else(|| CommandError::output_unavailable("recorded music output is unavailable"))?;
+    let output = validated_recorded_file(item.destination_path)?;
+    let patch = normalize_metadata_patch(patch)?;
+    let existing_cover = match patch.existing_artwork_id {
+        Some(artwork_id) => Some(
+            history
+                .artwork(artwork_id)
+                .map_err(CommandError::history)?
+                .ok_or_else(|| CommandError::invalid_input("selected artwork no longer exists"))?
+                .bytes,
+        ),
+        None => None,
+    };
+    let patch = MetadataPatch {
+        title: patch.title,
+        artist: patch.artist,
+        album: patch.album,
+        cover: patch.cover.or(existing_cover),
+    };
+    history
+        .set_metadata_edit_pending(item.id, true)
+        .map_err(CommandError::history)?;
+    let candidate = match unlockm::metadata::tags::write_patch(&output, &patch) {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            let _ = history.set_metadata_edit_pending(item.id, false);
+            return Err(CommandError::output_unavailable(error));
+        }
+    };
+    if let Err(error) =
+        unlockm::io::atomic::AtomicOutput::publish_existing_temp(candidate, &output, true)
+    {
+        let _ = history.set_metadata_edit_pending(item.id, false);
+        return Err(CommandError::output_unavailable(error.to_string()));
+    }
+    history
+        .reconcile_item_from_output(item.id, &output)
+        .map_err(CommandError::history)
+}
+
+#[cfg(test)]
+static METADATA_MUTATION_BARRIER: std::sync::OnceLock<Mutex<Option<Arc<std::sync::Barrier>>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(test)]
+fn set_metadata_mutation_barrier(barrier: Option<Arc<std::sync::Barrier>>) {
+    *METADATA_MUTATION_BARRIER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("metadata mutation barrier lock") = barrier;
+}
+
+#[cfg(test)]
+fn wait_for_metadata_mutation_barrier() {
+    let barrier = METADATA_MUTATION_BARRIER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("metadata mutation barrier lock")
+        .clone();
+    if let Some(barrier) = barrier {
+        barrier.wait();
+        barrier.wait();
+    }
+}
+
+#[cfg(not(test))]
+fn wait_for_metadata_mutation_barrier() {}
+
+fn validate_metadata_patch(patch: &MetadataPatchRequest) -> CommandResult<()> {
+    for value in [&patch.title, &patch.artist, &patch.album] {
+        if value
+            .as_ref()
+            .and_then(|value| value.as_ref())
+            .is_some_and(|value| value.trim().chars().count() > 512)
+        {
+            return Err(CommandError::invalid_input(
+                "metadata fields are limited to 512 characters",
+            ));
+        }
+    }
+    if patch
+        .cover
+        .as_ref()
+        .is_some_and(|bytes| bytes.len() > unlockm::metadata::tags::MAX_COVER_BYTES)
+    {
+        return Err(CommandError::invalid_input("cover exceeds 10 MiB"));
+    }
+    if patch
+        .cover
+        .as_deref()
+        .is_some_and(|bytes| artwork_mime(bytes).is_none())
+    {
+        return Err(CommandError::invalid_input(
+            "cover is not a supported image type",
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_metadata_patch(
+    mut patch: MetadataPatchRequest,
+) -> CommandResult<MetadataPatchRequest> {
+    for value in [&mut patch.title, &mut patch.artist, &mut patch.album] {
+        if let Some(Some(text)) = value {
+            let normalized = text.trim().to_owned();
+            *value = Some((!normalized.is_empty()).then_some(normalized));
+        }
+    }
+    validate_metadata_patch(&patch)?;
+    Ok(patch)
+}
+
+fn artwork_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+#[tauri::command]
+pub async fn list_artwork_candidates(
+    state: State<'_, AppState>,
+    item_id: i64,
+    query: Option<String>,
+    limit: usize,
+) -> CommandResult<Vec<crate::history::ArtworkCandidate>> {
+    let history = state.history().clone();
+    blocking(move || {
+        history
+            .artwork_candidates(item_id, query, limit)
+            .map_err(CommandError::history)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn set_preferences(
     state: State<'_, AppState>,
     preferences: Preferences,
@@ -374,8 +553,7 @@ pub async fn set_preferences(
     blocking(move || {
         history
             .set_preferences(&preferences)
-            .map_err(CommandError::history)?;
-        Ok(preferences)
+            .map_err(CommandError::history)
     })
     .await
 }
@@ -489,6 +667,22 @@ pub async fn delete_run(state: State<'_, AppState>, run_id: i64) -> CommandResul
         state
             .delete_history_run(run_id)
             .map_err(CommandError::state)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn rename_run(
+    state: State<'_, AppState>,
+    run_id: i64,
+    display_name: String,
+) -> CommandResult<Option<crate::history::RunSummary>> {
+    let state = state.inner().clone();
+    blocking(move || {
+        state
+            .history()
+            .rename_run(run_id, &display_name)
+            .map_err(CommandError::history)
     })
     .await
 }
@@ -609,6 +803,57 @@ pub async fn start_conversion(
         code: "conversion_coordinator_join_failed",
         detail: error.to_string(),
     })?
+}
+
+/// Replays a terminal run's persisted request through the exact same bounded
+/// conversion entrypoint. Paths and settings are never accepted from the
+/// webview for this operation.
+#[tauri::command]
+pub async fn rerun_conversion(
+    state: State<'_, AppState>,
+    run_id: i64,
+    on_event: Channel<ConversionEventDto>,
+) -> CommandResult<crate::history::RunSummary> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (request, display_name) = rerun_snapshot(state.history(), run_id)?;
+        let result = start_conversion_blocking(state.clone(), request, on_event)?;
+        state
+            .history()
+            .rename_run(result.id, &display_name)
+            .map_err(CommandError::history)?
+            .ok_or_else(|| {
+                CommandError::invalid_input("rerun did not reach a terminal history state")
+            })
+    })
+    .await
+    .map_err(|error| CommandError {
+        code: "conversion_coordinator_join_failed",
+        detail: error.to_string(),
+    })?
+}
+
+fn rerun_snapshot(
+    history: &crate::history::HistoryStore,
+    run_id: i64,
+) -> CommandResult<(StartConversionRequest, String)> {
+    let previous = history
+        .run(run_id)
+        .map_err(CommandError::history)?
+        .ok_or_else(|| CommandError::invalid_input("recorded conversion no longer exists"))?;
+    if matches!(previous.status, RunStatus::Planning | RunStatus::Running) {
+        return Err(CommandError::state(crate::state::StateError::NotActive {
+            run_id,
+        }));
+    }
+    Ok((
+        StartConversionRequest {
+            input_path: previous.input_path,
+            output_path: Some(previous.output_path),
+            settings: previous.settings,
+        },
+        previous.display_name,
+    ))
 }
 
 fn start_conversion_blocking(
@@ -886,6 +1131,7 @@ fn item_for_history(report: &JobReport) -> PersistedItemInput {
         logical_bytes: report.logical_bytes,
         output_bytes: music.and_then(|music| music.output_bytes),
         output_format: music.and_then(|music| music.output_format.clone()),
+        bitrate_kbps: music.and_then(|music| music.bitrate_kbps),
         preflight_ms: report.timings.preflight.as_millis() as u64,
         decrypt_ms: report.timings.decrypt.as_millis() as u64,
         metadata_resolve_ms: report.timings.metadata_resolve.as_millis() as u64,
@@ -948,6 +1194,226 @@ mod tests {
             copy_passthrough: true,
             overwrite: false,
         }
+    }
+
+    #[test]
+    fn rerun_snapshot_copies_terminal_request_and_rejects_nonterminal_or_missing() {
+        let directory = tempfile::tempdir().unwrap();
+        let history = HistoryStore::open(directory.path().join("history.sqlite")).unwrap();
+        let settings = conversion_settings();
+        let run = history
+            .create_run(CreateRun {
+                input_kind: InputKind::Directory,
+                input_path: directory.path().join("input"),
+                output_path: directory.path().join("output"),
+                settings: settings.clone(),
+                total_items: 0,
+            })
+            .unwrap();
+        assert_eq!(
+            rerun_snapshot(&history, run.id).unwrap_err().code,
+            "state_error"
+        );
+        history
+            .finish_run(run.id, RunStatus::Completed, None, None)
+            .unwrap();
+        history.rename_run(run.id, "Album rerun").unwrap();
+        let (request, name) = rerun_snapshot(&history, run.id).unwrap();
+        assert_eq!(request.settings, settings);
+        assert_eq!(request.input_path, directory.path().join("input"));
+        assert_eq!(request.output_path, Some(directory.path().join("output")));
+        assert_eq!(name, "Album rerun");
+        assert_eq!(
+            rerun_snapshot(&history, run.id + 1).unwrap_err().code,
+            "invalid_input"
+        );
+    }
+
+    #[test]
+    fn metadata_patch_validation_limits_trimmed_fields_and_cover_bytes() {
+        let mut patch = MetadataPatchRequest {
+            title: Some(Some("x".repeat(513))),
+            artist: None,
+            album: None,
+            cover: None,
+            existing_artwork_id: None,
+        };
+        assert_eq!(
+            validate_metadata_patch(&patch).unwrap_err().code,
+            "invalid_input"
+        );
+        patch.title = Some(Some(" title ".into()));
+        patch.cover = Some(vec![0; unlockm::metadata::tags::MAX_COVER_BYTES + 1]);
+        assert_eq!(
+            validate_metadata_patch(&patch).unwrap_err().code,
+            "invalid_input"
+        );
+        patch.cover = None;
+        assert!(validate_metadata_patch(&patch).is_ok());
+    }
+
+    #[test]
+    fn metadata_patch_normalizes_whitespace_to_clear_or_trimmed_value() {
+        let patch = normalize_metadata_patch(MetadataPatchRequest {
+            title: Some(Some("   ".into())),
+            artist: Some(Some(" A ".into())),
+            album: Some(Some("\t".into())),
+            cover: None,
+            existing_artwork_id: None,
+        })
+        .unwrap();
+        assert_eq!(patch.title, Some(None));
+        assert_eq!(patch.artist, Some(Some("A".into())));
+        assert_eq!(patch.album, Some(None));
+    }
+
+    #[test]
+    fn metadata_edit_reconciles_the_published_output_facts() {
+        let _guard = start_test_guard();
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("track.ncm");
+        let output = directory.path().join("output");
+        fs::write(&input, silent_ncm()).unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+        let run = start_conversion_blocking(
+            state.clone(),
+            StartConversionRequest {
+                input_path: input,
+                output_path: Some(output.clone()),
+                settings: conversion_settings(),
+            },
+            channel(),
+        )
+        .unwrap();
+        let before = state
+            .history()
+            .query_music_items(run.id, ItemQuery::default())
+            .unwrap()
+            .items
+            .pop()
+            .unwrap();
+        let cover = STANDARD
+            .decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLq6QAAAABJRU5ErkJggg==",
+            )
+            .unwrap();
+        let updated = update_run_item_metadata_blocking(
+            &state,
+            before.id,
+            MetadataPatchRequest {
+                title: Some(Some("Cover-sized output".into())),
+                artist: None,
+                album: None,
+                cover: Some(cover),
+                existing_artwork_id: None,
+            },
+        )
+        .unwrap();
+        let output = output.join("track.mp3");
+        let published_bytes = fs::metadata(output).unwrap().len();
+        assert_ne!(updated.output_bytes, before.output_bytes);
+        assert_eq!(updated.output_bytes, Some(published_bytes));
+        assert_eq!(updated.output_format.as_deref(), Some("mp3"));
+        assert_eq!(
+            state.history().history_item_by_id(updated.id).unwrap(),
+            Some(updated)
+        );
+    }
+
+    #[test]
+    fn metadata_mutations_serialize_the_full_publish_and_reconcile_sequence() {
+        let _guard = start_test_guard();
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("track.ncm");
+        let output = directory.path().join("output");
+        fs::write(&input, silent_ncm()).unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+        let run = start_conversion_blocking(
+            state.clone(),
+            StartConversionRequest {
+                input_path: input,
+                output_path: Some(output),
+                settings: conversion_settings(),
+            },
+            channel(),
+        )
+        .unwrap();
+        let item_id = state
+            .history()
+            .query_music_items(run.id, ItemQuery::default())
+            .unwrap()
+            .items[0]
+            .id;
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        set_metadata_mutation_barrier(Some(barrier.clone()));
+        let first_state = state.clone();
+        let (first_sender, first_receiver) = std::sync::mpsc::channel();
+        let first = std::thread::spawn(move || {
+            first_sender
+                .send(update_run_item_metadata_blocking(
+                    &first_state,
+                    item_id,
+                    MetadataPatchRequest {
+                        title: Some(Some("first".into())),
+                        artist: None,
+                        album: None,
+                        cover: None,
+                        existing_artwork_id: None,
+                    },
+                ))
+                .unwrap();
+        });
+        // The first command owns the state guard before it reaches any file or
+        // SQLite work. A second mutation must remain blocked on that guard.
+        barrier.wait();
+        let second_state = state.clone();
+        let (second_sender, second_receiver) = std::sync::mpsc::channel();
+        let second = std::thread::spawn(move || {
+            second_sender
+                .send(update_run_item_metadata_blocking(
+                    &second_state,
+                    item_id,
+                    MetadataPatchRequest {
+                        title: Some(Some("second".into())),
+                        artist: None,
+                        album: None,
+                        cover: None,
+                        existing_artwork_id: None,
+                    },
+                ))
+                .unwrap();
+        });
+        assert!(
+            second_receiver
+                .recv_timeout(std::time::Duration::from_millis(30))
+                .is_err()
+        );
+        set_metadata_mutation_barrier(None);
+        barrier.wait();
+        first_receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        second_receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        assert_eq!(
+            state
+                .history()
+                .history_item_by_id(item_id)
+                .unwrap()
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("second")
+        );
     }
 
     fn silent_ncm() -> Vec<u8> {
@@ -1365,6 +1831,79 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[test]
+    fn rerun_snapshot_preserves_named_history_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let history = HistoryStore::open(directory.path().join("history.sqlite")).unwrap();
+        let input = directory.path().join("input");
+        let output = directory.path().join("output");
+        std::fs::create_dir(&input).unwrap();
+        let run = history
+            .create_run(CreateRun {
+                input_kind: InputKind::Directory,
+                input_path: input.clone(),
+                output_path: output.clone(),
+                settings: conversion_settings(),
+                total_items: 1,
+            })
+            .unwrap();
+        history
+            .finish_run(run.id, RunStatus::Completed, None, None)
+            .unwrap();
+        history.rename_run(run.id, "Library").unwrap();
+        let (request, name) = rerun_snapshot(&history, run.id).unwrap();
+        assert_eq!(name, "Library");
+        assert_eq!(request.input_path, input);
+        assert_eq!(request.output_path, Some(output));
+        assert_eq!(request.settings, conversion_settings());
+    }
+
+    #[test]
+    fn rerun_scans_new_files_skips_existing_outputs_and_keeps_old_run_unchanged() {
+        let _guard = start_test_guard();
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("input");
+        let output = directory.path().join("output");
+        fs::create_dir(&input).unwrap();
+        fs::write(input.join("first.ncm"), silent_ncm()).unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+        let original = start_conversion_blocking(
+            state.clone(),
+            StartConversionRequest {
+                input_path: input.clone(),
+                output_path: Some(output.clone()),
+                settings: conversion_settings(),
+            },
+            channel(),
+        )
+        .unwrap();
+        state
+            .history()
+            .rename_run(original.id, "Downloads")
+            .unwrap();
+        fs::write(input.join("later.ncm"), silent_ncm()).unwrap();
+
+        let (request, display_name) = rerun_snapshot(state.history(), original.id).unwrap();
+        let rerun = start_conversion_blocking(state.clone(), request, channel()).unwrap();
+        let rerun = state
+            .history()
+            .rename_run(rerun.id, &display_name)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(rerun.display_name, "Downloads");
+        assert_eq!(rerun.converted, 1);
+        assert_eq!(rerun.skipped, 1);
+        assert!(output.join("first.mp3").is_file());
+        assert!(output.join("later.mp3").is_file());
+        let original_after = state.history().run(original.id).unwrap().unwrap();
+        assert_eq!(original_after.completed_items, 1);
+        assert_eq!(original_after.converted, 1);
+        assert_eq!(original_after.skipped, 0);
     }
 
     #[test]
