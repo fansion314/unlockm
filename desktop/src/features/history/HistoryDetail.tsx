@@ -46,16 +46,22 @@ export function Artwork({
 }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (artworkId === null || !visible) return;
     let active = true;
     let objectUrl: string | null = null;
+    setUrl(null);
+    if (artworkId === null || !visible)
+      return () => {
+        active = false;
+      };
     void Promise.all([desktopApi.getArtworkMime(artworkId), desktopApi.getArtwork(artworkId)])
       .then(([metadata, bytes]) => {
         objectUrl = URL.createObjectURL(new Blob([bytes], { type: metadata.mimeType }));
         if (active) setUrl(objectUrl);
         else URL.revokeObjectURL(objectUrl);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (active) setUrl(null);
+      });
     return () => {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -260,7 +266,7 @@ export function HistoryDetail({
 
   return (
     <section className="detail-view" aria-labelledby="detail-title">
-      <button className="back-button" type="button" onClick={onBack}>
+      <button className="back-button detail-back-pill" type="button" onClick={onBack}>
         <ArrowLeft aria-hidden="true" size={18} />
         {t("app.back")}
       </button>
@@ -356,8 +362,8 @@ export function HistoryDetail({
         </div>
       </motion.header>
 
-      <div className="detail-toolbar">
-        <label className="search-control">
+      <div className="detail-toolbar" data-reduced-motion={reducedMotion}>
+        <label className={`compact-filter search-control ${searchInput ? "is-expanded" : ""}`}>
           <MagnifyingGlass aria-hidden="true" size={18} />
           <input
             aria-label={t("app.searchSongs")}
@@ -368,6 +374,7 @@ export function HistoryDetail({
           />
           {searchInput ? (
             <button
+              className="filter-clear"
               aria-label={t("app.clearSearch")}
               type="button"
               onClick={() => {
@@ -380,96 +387,105 @@ export function HistoryDetail({
             </button>
           ) : null}
         </label>
-        <label>
+        <label className={`compact-filter ${artist ? "is-expanded" : ""}`}>
           <span>{t("app.artist")}</span>
-          <input
-            list="artist-options"
-            value={artist}
-            placeholder={t("app.allArtists")}
-            onChange={(event) => {
-              setArtist(event.target.value);
-              setPage(1);
-            }}
-          />
+          <span className="filter-field">
+            <input
+              list="artist-options"
+              value={artist}
+              placeholder={t("app.allArtists")}
+              onChange={(event) => {
+                setArtist(event.target.value);
+                setPage(1);
+              }}
+            />
+            {artist ? (
+              <button
+                className="filter-clear"
+                aria-label={t("app.clearArtist")}
+                type="button"
+                onClick={() => {
+                  setArtist("");
+                  setPage(1);
+                }}
+              >
+                ×
+              </button>
+            ) : null}
+          </span>
           <datalist id="artist-options">
             {artists.map((value) => (
               <option key={value} value={value} />
             ))}
           </datalist>
-          {artist ? (
-            <button
-              aria-label={t("app.clearArtist")}
-              type="button"
-              onClick={() => {
-                setArtist("");
+        </label>
+        <label className={`compact-filter ${album ? "is-expanded" : ""}`}>
+          <span>{t("app.album")}</span>
+          <span className="filter-field">
+            <input
+              list="album-options"
+              value={album}
+              placeholder={t("app.allAlbums")}
+              onChange={(event) => {
+                setAlbum(event.target.value);
                 setPage(1);
               }}
-            >
-              ×
-            </button>
-          ) : null}
-        </label>
-        <label>
-          <span>{t("app.album")}</span>
-          <input
-            list="album-options"
-            value={album}
-            placeholder={t("app.allAlbums")}
-            onChange={(event) => {
-              setAlbum(event.target.value);
-              setPage(1);
-            }}
-          />
+            />
+            {album ? (
+              <button
+                className="filter-clear"
+                aria-label={t("app.clearAlbum")}
+                type="button"
+                onClick={() => {
+                  setAlbum("");
+                  setPage(1);
+                }}
+              >
+                ×
+              </button>
+            ) : null}
+          </span>
           <datalist id="album-options">
             {albums.map((value) => (
               <option key={value} value={value} />
             ))}
           </datalist>
-          {album ? (
-            <button
-              aria-label={t("app.clearAlbum")}
-              type="button"
-              onClick={() => {
-                setAlbum("");
-                setPage(1);
-              }}
-            >
-              ×
-            </button>
-          ) : null}
         </label>
-        <label>
+        <label className="compact-select">
           <span>{t("app.result")}</span>
-          <select
-            value={outcome}
-            onChange={(event) => {
-              setOutcome(event.target.value as OutcomeFilter | "");
-              setPage(1);
-            }}
-          >
-            <option value="">{t("app.allResults")}</option>
-            {(["converted", "copied", "skipped", "failed", "conflict", "cancelled"] as const).map(
-              (value) => (
-                <option key={value} value={value}>
-                  {t(`app.${value}`)}
-                </option>
-              ),
-            )}
-          </select>
-          {outcome ? (
-            <button
-              aria-label={t("app.clearOutcome")}
-              type="button"
-              onClick={() => {
-                setOutcome("");
+          <span className="filter-field">
+            <select
+              value={outcome}
+              onChange={(event) => {
+                setOutcome(event.target.value as OutcomeFilter | "");
                 setPage(1);
               }}
             >
-              ×
-            </button>
-          ) : null}
+              <option value="">{t("app.allResults")}</option>
+              {(["converted", "copied", "skipped", "failed", "conflict", "cancelled"] as const).map(
+                (value) => (
+                  <option key={value} value={value}>
+                    {t(`app.${value}`)}
+                  </option>
+                ),
+              )}
+            </select>
+            {outcome ? (
+              <button
+                className="filter-clear"
+                aria-label={t("app.clearOutcome")}
+                type="button"
+                onClick={() => {
+                  setOutcome("");
+                  setPage(1);
+                }}
+              >
+                ×
+              </button>
+            ) : null}
+          </span>
         </label>
-        <label>
+        <label className="compact-select">
           <span>{t("app.sort")}</span>
           <select
             value={`${sort}:${direction}`}
@@ -524,53 +540,94 @@ export function HistoryDetail({
                 item.destinationPath !== null &&
                 item.outputFormat !== null &&
                 ["converted", "copied", "skipped"].includes(item.outcome);
+              const toggleTrack = () => void playback.toggle(item).catch(onError);
               return (
-                <article className="music-item" key={item.id}>
-                  <Artwork artworkId={item.artworkId} title={title} />
+                <article
+                  className={`music-item ${active ? "is-active" : ""}`}
+                  key={item.id}
+                  onClick={(event) => {
+                    if (
+                      !playable ||
+                      (event.target as HTMLElement).closest("button, input, select, a")
+                    ) {
+                      return;
+                    }
+                    toggleTrack();
+                  }}
+                >
+                  <button
+                    aria-label={
+                      active && playback.playing
+                        ? t("app.pauseSong", { title })
+                        : t("app.playSong", { title })
+                    }
+                    className="track-index"
+                    disabled={!playable}
+                    title={
+                      active && playback.playing
+                        ? t("app.pauseSong", { title })
+                        : t("app.playSong", { title })
+                    }
+                    type="button"
+                    onClick={toggleTrack}
+                  >
+                    <span className="track-number">
+                      {String(item.ordinal + 1).padStart(2, "0")}
+                    </span>
+                    <span className="track-toggle" aria-hidden="true">
+                      {active && playback.playing ? (
+                        <Pause weight="fill" />
+                      ) : (
+                        <Play weight="fill" />
+                      )}
+                    </span>
+                  </button>
+                  <VisibleArtwork artworkId={item.artworkId} title={title} />
                   <div className="music-copy">
                     <strong>{title}</strong>
-                    <span>{item.artist || t("app.unknownArtist")}</span>
-                    <small>{item.album || t("app.unknownAlbum")}</small>
+                    <button
+                      className="metadata-link"
+                      type="button"
+                      onClick={() => {
+                        if (item.artist) {
+                          setArtist(item.artist);
+                          setPage(1);
+                        }
+                      }}
+                    >
+                      {item.artist || t("app.unknownArtist")}
+                    </button>
                   </div>
-                  <div className="file-facts">
+                  <button
+                    className="album-cell metadata-link"
+                    type="button"
+                    onClick={() => {
+                      if (item.album) {
+                        setAlbum(item.album);
+                        setPage(1);
+                      }
+                    }}
+                  >
+                    {item.album || t("app.unknownAlbum")}
+                  </button>
+                  <div className="format-cell">
                     <strong>{item.outputFormat?.toUpperCase() || t("app.unknownFormat")}</strong>
-                    <span>{formatBytes(item.outputBytes, i18n.language)}</span>
-                    {item.bitrateKbps ? <small>{item.bitrateKbps} kbps</small> : null}
                     {!(["converted", "skipped"] as string[]).includes(item.outcome) ? (
                       <small className={`outcome outcome-${item.outcome}`}>
                         {t(`app.${item.outcome}`)}
                       </small>
                     ) : null}
                   </div>
-                  <div className="track-player">
-                    <button
-                      aria-label={
-                        active && playback.playing
-                          ? t("app.pauseSong", { title })
-                          : t("app.playSong", { title })
-                      }
-                      className="play-button"
-                      disabled={!playable}
-                      title={
-                        active && playback.playing
-                          ? t("app.pauseSong", { title })
-                          : t("app.playSong", { title })
-                      }
-                      type="button"
-                      onClick={() => void playback.toggle(item).catch(onError)}
-                    >
-                      {active && playback.playing ? (
-                        <Pause aria-hidden="true" size={17} weight="fill" />
-                      ) : (
-                        <Play aria-hidden="true" size={17} weight="fill" />
-                      )}
-                    </button>
+                  <div className="file-facts">
+                    <span>{formatBytes(item.outputBytes, i18n.language)}</span>
+                    {item.bitrateKbps ? <small>{item.bitrateKbps} kbps</small> : null}
                   </div>
                   <div className="song-actions">
                     <button
                       aria-label={t("app.editSong", { title })}
                       className="icon-button subtle"
                       disabled={!playable}
+                      title={t("app.editSong", { title })}
                       type="button"
                       onClick={() => setEditing(item)}
                     >

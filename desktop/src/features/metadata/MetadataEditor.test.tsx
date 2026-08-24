@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import "../../i18n";
+import "../../styles/history.css";
 import { MetadataEditor } from "./MetadataEditor";
 
 const api = vi.hoisted(() => ({
@@ -57,6 +58,8 @@ test("edits metadata, chooses a local artwork and supports Escape", async () => 
   const close = vi.fn();
   const saved = vi.fn();
   render(<MetadataEditor item={item} onClose={close} onSaved={saved} />);
+  expect(document.querySelector(".metadata-modal-body")).toBeTruthy();
+  expect(document.querySelector(".metadata-actions")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
   expect(await screen.findByRole("button", { name: "Use local cover 44" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Use local cover 44" }));
@@ -69,6 +72,20 @@ test("edits metadata, chooses a local artwork and supports Escape", async () => 
   );
   fireEvent.keyDown(window, { key: "Escape" });
   expect(close).toHaveBeenCalled();
+});
+
+test("modal owns a vertical-scroll body and keeps the actions outside it", () => {
+  api.listArtworkCandidates.mockResolvedValue([]);
+  render(<MetadataEditor item={item} onClose={vi.fn()} onSaved={vi.fn()} />);
+  const body = document.querySelector('[data-layout="vertical-scroll"]')!;
+  const actions = document.querySelector('[data-layout="actions-row"]')!;
+  expect(body.classList.contains("metadata-modal-body")).toBe(true);
+  expect(actions.classList.contains("metadata-actions")).toBe(true);
+  expect(body.contains(actions)).toBe(false);
+  expect(document.querySelector(".metadata-modal")?.children).toContain(actions);
+  expect(getComputedStyle(body).display).toBe("grid");
+  expect(getComputedStyle(body).overflowX).toBe("hidden");
+  expect(getComputedStyle(actions).display).toBe("flex");
 });
 
 test("releases before metadata IPC and restores updated or original track", async () => {

@@ -142,6 +142,21 @@ test("late artwork resolution after unmount revokes its object URL", async () =>
   expect(revoke).toHaveBeenCalledWith("blob:cover");
 });
 
+test("detail artwork clears the old cover when its artwork id becomes null", async () => {
+  api.getArtworkMime.mockResolvedValue({ id: 1, mimeType: "image/png" });
+  api.getArtwork.mockResolvedValue(new ArrayBuffer(4));
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:detail-cover");
+  const revoke = vi.spyOn(URL, "revokeObjectURL");
+  const view = render(<Artwork artworkId={1} title="Old" />);
+  await waitFor(() =>
+    expect(document.querySelector("img.cover")?.getAttribute("src")).toBe("blob:detail-cover"),
+  );
+  view.rerender(<Artwork artworkId={null} title="New" />);
+  expect(document.querySelector("img.cover")).toBeNull();
+  expect(document.querySelector(".cover-placeholder")?.textContent).toBe("N");
+  expect(revoke).toHaveBeenCalledWith("blob:detail-cover");
+});
+
 test("detail renders compact output facts without raw diagnostics", async () => {
   const failed = {
     ...item(1, "Broken track"),
@@ -159,6 +174,16 @@ test("detail renders compact output facts without raw diagnostics", async () => 
   expect(document.querySelector(".outcome-failed")?.textContent).toBe("Failed");
   expect(screen.queryByText("private diagnostic path")).toBeNull();
   expect(document.querySelector(".music-item details")).toBeNull();
+});
+
+test("detail back navigation remains an identifiable sticky pill", async () => {
+  renderDetail();
+  await screen.findByText("Track 1");
+  expect(
+    screen
+      .getByRole("button", { name: "Back to conversions" })
+      .classList.contains("detail-back-pill"),
+  ).toBe(true);
 });
 
 test("detail renames inline, cancels with Escape, and keeps editing after a failure", async () => {
@@ -268,6 +293,25 @@ test("row controls delegate each selected track to the shared player", async () 
   await waitFor(() => expect(convertFileSrc).toHaveBeenCalledWith("2", "unlockm-audio"));
   expect(pauseSpy).toHaveBeenCalled();
   expect(screen.queryByRole("slider", { name: /Seek through/ })).toBeNull();
+});
+
+test("media-library row keeps artist filtering and row playback separate from actions", async () => {
+  const user = userEvent.setup();
+  renderDetail();
+  await screen.findByText("Track 1");
+  const row = document.querySelector(".music-item")!;
+  expect(row.querySelector(".track-index")?.textContent).toContain("01");
+  await user.click(row);
+  await waitFor(() => expect(convertFileSrc).toHaveBeenCalledWith("1", "unlockm-audio"));
+  await user.click(screen.getByRole("button", { name: "Artist A" }));
+  await waitFor(() =>
+    expect(api.queryRunItems).toHaveBeenLastCalledWith(
+      9,
+      expect.objectContaining({ artist: "Artist A", page: 1 }),
+    ),
+  );
+  await user.click(screen.getByRole("button", { name: "Reveal Track 1 in its folder" }));
+  expect(api.revealRunItem).toHaveBeenCalledWith(1);
 });
 
 test("normal player cleanup releases the source without forcing an error-prone reload", async () => {

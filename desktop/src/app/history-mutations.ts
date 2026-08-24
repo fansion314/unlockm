@@ -16,3 +16,15 @@ export async function clearHistoryRecords(
   controller?.releaseAll();
   return clear();
 }
+
+/** A same-ID rerun replaces item records, so its old audio identity must be
+ * detached before Rust resets the run. Failed reruns intentionally do not
+ * restore that stale item ID. */
+export async function rerunHistoryRun<T>(
+  controller: PlaybackController | null,
+  runId: number,
+  rerun: () => Promise<T>,
+) {
+  controller?.releaseForRun(runId);
+  return rerun();
+}

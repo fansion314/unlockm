@@ -74,6 +74,27 @@ impl AppState {
         Ok(active_run)
     }
 
+    /// Atomically reset a terminal run for a same-ID replay while holding the
+    /// one-active-run lock that also gates history mutations and new runs.
+    pub fn begin_rerun(&self, run_id: i64) -> Result<ActiveRun, StateError> {
+        let mut active = self.active.lock().expect("active run lock");
+        if let Some(existing) = active.as_ref() {
+            return Err(StateError::Busy {
+                active_run_id: existing.run_id,
+            });
+        }
+        self.history
+            .reset_run_for_rerun(run_id)?
+            .ok_or(StateError::NotActive { run_id })?;
+        let active_run = ActiveRun {
+            run_id,
+            cancellation: Cancellation::default(),
+            started_at: SystemTime::now(),
+        };
+        *active = Some(active_run.clone());
+        Ok(active_run)
+    }
+
     /// Starts a history mutation only while no conversion is active. The
     /// returned guard must cover every related file and database operation.
     pub fn begin_history_mutation(&self) -> Result<IdleHistoryMutationGuard<'_>, StateError> {
@@ -337,6 +358,57 @@ mod tests {
                 .unwrap()
         );
         second.join().unwrap();
+    }
+
+    #[test]
+    fn rerun_resets_a_terminal_run_in_place_and_obeys_the_history_mutation_gate() {
+        let directory = tempfile::tempdir().unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+        let original = state.begin_run(request()).unwrap();
+        state
+            .finish_run(original.run_id, RunStatus::Completed, None, None)
+            .unwrap();
+        state
+            .history()
+            .rename_run(original.run_id, "Library")
+            .unwrap();
+        let run_id = original.run_id;
+
+        let mutation = state.begin_history_mutation().unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let rerun_state = state.clone();
+        let rerun = std::thread::spawn(move || {
+            sender.send(rerun_state.begin_rerun(run_id)).unwrap();
+        });
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_millis(30))
+                .is_err()
+        );
+        drop(mutation);
+        let active = receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        rerun.join().unwrap();
+        assert_eq!(active.run_id, original.run_id);
+        let reset = state.history().run(original.run_id).unwrap().unwrap();
+        assert_eq!(reset.display_name, "Library");
+        assert_eq!(reset.status, RunStatus::Planning);
+        assert_eq!(reset.completed_items, 0);
+        assert!(matches!(
+            state.begin_rerun(original.run_id),
+            Err(StateError::Busy { active_run_id }) if active_run_id == original.run_id
+        ));
+        state
+            .finish_run(original.run_id, RunStatus::Cancelled, None, None)
+            .unwrap();
+        assert!(matches!(
+            state.begin_rerun(original.run_id + 1),
+            Err(StateError::NotActive { .. })
+        ));
     }
 
     #[test]

@@ -237,11 +237,11 @@ export function PlaybackProvider({
       <audio
         className="audio-engine"
         ref={audio}
+        loop
         onDurationChange={(event) => setDuration(event.currentTarget.duration || 0)}
         onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
         onError={() => setError("playback_unavailable")}
       />
     </PlaybackContext.Provider>

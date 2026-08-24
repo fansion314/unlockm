@@ -230,6 +230,16 @@ test("palette menu is collapsed by default, persists selection, and supports key
   expect(screen.queryByRole("menu", { name: "Choose color palette" })).toBeNull();
   await user.click(trigger);
   expect(screen.getAllByRole("menuitemradio")).toHaveLength(4);
+  const paletteOptions = screen.getAllByRole("menuitemradio");
+  const checkSlots = paletteOptions.map((option) => option.querySelector(".palette-check-slot"));
+  expect(checkSlots).toHaveLength(4);
+  expect(checkSlots.every(Boolean)).toBe(true);
+  expect(checkSlots.map((slot) => slot?.getAttribute("data-selected"))).toEqual([
+    "true",
+    "false",
+    "false",
+    "false",
+  ]);
   await waitFor(() =>
     expect(document.activeElement).toBe(
       screen.getByRole("menuitemradio", { name: "Blue palette" }),

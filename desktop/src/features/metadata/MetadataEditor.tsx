@@ -125,84 +125,97 @@ export function MetadataEditor({
         aria-label={t("app.editMetadata")}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <h2>{t("app.editMetadata")}</h2>
-        <label>
-          {t("app.title")}
-          <input
-            ref={titleRef}
-            value={title}
-            maxLength={512}
-            onChange={(event) => setTitle(event.target.value)}
-          />
-        </label>
-        <label>
-          {t("app.artist")}
-          <input
-            value={artist}
-            maxLength={512}
-            onChange={(event) => setArtist(event.target.value)}
-          />
-        </label>
-        <label>
-          {t("app.album")}
-          <input value={album} maxLength={512} onChange={(event) => setAlbum(event.target.value)} />
-        </label>
-        <label>
-          {t("app.cover")}
-          <input
-            aria-label={t("app.uploadCover")}
-            type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp"
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              if (!file) return;
-              if (file.size > 10 * 1024 * 1024) {
-                setError(t("app.coverTooLarge"));
-                return;
-              }
-              const nextPreview = URL.createObjectURL(file);
-              setPreview((current) => {
-                if (current) URL.revokeObjectURL(current);
-                return nextPreview;
-              });
-              void file.arrayBuffer().then((bytes) => setCover(new Uint8Array(bytes)));
-            }}
-          />
-        </label>
-        {preview ? <img className="metadata-cover-preview" src={preview} alt="" /> : null}
-        <div className="metadata-candidates">
+        <header className="metadata-modal-header">
+          <h2>{t("app.editMetadata")}</h2>
+        </header>
+        <div
+          className="metadata-modal-body"
+          data-layout="vertical-scroll"
+          style={{ display: "grid", overflowX: "hidden" }}
+          tabIndex={-1}
+        >
           <label>
-            {t("app.localCoverCandidates")}
+            {t("app.title")}
             <input
-              value={candidateSearch}
-              onChange={(event) => setCandidateSearch(event.target.value)}
-              placeholder={t("app.searchLocalCover")}
+              ref={titleRef}
+              value={title}
+              maxLength={512}
+              onChange={(event) => setTitle(event.target.value)}
             />
           </label>
-          {candidates.length ? (
-            <div className="metadata-candidate-grid">
-              {candidates.map((candidate) => (
-                <button
-                  type="button"
-                  key={candidate.artworkId}
-                  aria-label={t("app.useCoverCandidate", { id: candidate.artworkId })}
-                  aria-pressed={existingArtworkId === candidate.artworkId}
-                  onClick={() => {
-                    setExistingArtworkId(candidate.artworkId);
-                    setCover(undefined);
-                  }}
-                >
-                  <CandidateArtwork candidate={candidate} />
-                  <small>{candidate.album || candidate.title || `#${candidate.artworkId}`}</small>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <small>{t("app.noCoverCandidates")}</small>
-          )}
+          <label>
+            {t("app.artist")}
+            <input
+              value={artist}
+              maxLength={512}
+              onChange={(event) => setArtist(event.target.value)}
+            />
+          </label>
+          <label>
+            {t("app.album")}
+            <input
+              value={album}
+              maxLength={512}
+              onChange={(event) => setAlbum(event.target.value)}
+            />
+          </label>
+          <label>
+            {t("app.cover")}
+            <input
+              aria-label={t("app.uploadCover")}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (!file) return;
+                if (file.size > 10 * 1024 * 1024) {
+                  setError(t("app.coverTooLarge"));
+                  return;
+                }
+                const nextPreview = URL.createObjectURL(file);
+                setPreview((current) => {
+                  if (current) URL.revokeObjectURL(current);
+                  return nextPreview;
+                });
+                void file.arrayBuffer().then((bytes) => setCover(new Uint8Array(bytes)));
+              }}
+            />
+          </label>
+          {preview ? <img className="metadata-cover-preview" src={preview} alt="" /> : null}
+          <div className="metadata-candidates">
+            <label>
+              {t("app.localCoverCandidates")}
+              <input
+                value={candidateSearch}
+                onChange={(event) => setCandidateSearch(event.target.value)}
+                placeholder={t("app.searchLocalCover")}
+              />
+            </label>
+            {candidates.length ? (
+              <div className="metadata-candidate-grid">
+                {candidates.map((candidate) => (
+                  <button
+                    type="button"
+                    key={candidate.artworkId}
+                    aria-label={t("app.useCoverCandidate", { id: candidate.artworkId })}
+                    aria-pressed={existingArtworkId === candidate.artworkId}
+                    onClick={() => {
+                      setExistingArtworkId(candidate.artworkId);
+                      setCover(undefined);
+                    }}
+                  >
+                    <CandidateArtwork candidate={candidate} />
+                    <small>{candidate.album || candidate.title || `#${candidate.artworkId}`}</small>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <small>{t("app.noCoverCandidates")}</small>
+            )}
+          </div>
+          {error ? <p role="alert">{error}</p> : null}
         </div>
-        {error ? <p role="alert">{error}</p> : null}
-        <div className="metadata-actions">
+        <div className="metadata-actions" data-layout="actions-row" style={{ display: "flex" }}>
           <button type="button" onClick={onClose}>
             {t("app.cancelEdit")}
           </button>

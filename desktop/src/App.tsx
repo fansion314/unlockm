@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { appReducer, initialAppModel } from "./app/conversion-state";
-import { clearHistoryRecords, deleteHistoryRun } from "./app/history-mutations";
+import { clearHistoryRecords, deleteHistoryRun, rerunHistoryRun } from "./app/history-mutations";
 import { pageTransition, pageVariants as createPageVariants } from "./app/page-motion";
 import { AppHeader } from "./components/AppHeader";
 import { Composer } from "./features/conversion/Composer";
@@ -260,8 +260,9 @@ function App() {
       const requestId = ++nextRequestId.current;
       startInFlight.current = true;
       dispatch({ type: "conversionStarted", requestId });
-      void desktopApi
-        .rerunConversion(runId, (event) => dispatch({ type: "conversionEvent", event }))
+      void rerunHistoryRun(playbackController.current, runId, () =>
+        desktopApi.rerunConversion(runId, (event) => dispatch({ type: "conversionEvent", event })),
+      )
         .then(async (run) => {
           dispatch({ type: "conversionResolved", requestId, run });
           await boot();

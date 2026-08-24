@@ -536,6 +536,39 @@ impl HistoryStore {
         run_by_id(&connection, id)?.ok_or(rusqlite::Error::QueryReturnedNoRows.into())
     }
 
+    /// Replaces a terminal run's execution facts while preserving its identity
+    /// and persisted request. This is deliberately one SQLite transaction so
+    /// readers never observe a partially-cleared historical task.
+    pub fn reset_run_for_rerun(&self, run_id: i64) -> HistoryResult<Option<RunSummary>> {
+        let mut connection = self.connection.lock().expect("history connection lock");
+        let transaction = connection.transaction()?;
+        let status = transaction
+            .query_row("SELECT status FROM runs WHERE id = ?", [run_id], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()?;
+        let Some(status) = status else {
+            return Ok(None);
+        };
+        if !RunStatus::parse(&status).is_terminal() {
+            return Ok(None);
+        }
+        transaction.execute("DELETE FROM items WHERE run_id = ?", [run_id])?;
+        cleanup_orphan_artwork(&transaction)?;
+        let now = now_ms();
+        transaction.execute(
+            "UPDATE runs
+             SET status = 'planning', created_at_ms = ?, updated_at_ms = ?, finished_at_ms = NULL,
+                 total_items = 0, completed_items = 0, converted = 0, copied = 0, skipped = 0,
+                 conflicted = 0, failed = 0, representative_artwork_id = NULL,
+                 terminal_error_code = NULL, terminal_error_detail = NULL, app_version = ?
+             WHERE id = ?",
+            params![now, now, env!("CARGO_PKG_VERSION"), run_id],
+        )?;
+        transaction.commit()?;
+        run_by_id(&connection, run_id)
+    }
+
     pub fn mark_running(&self, run_id: i64) -> HistoryResult<()> {
         self.update_status(run_id, RunStatus::Running, None, None, false)
     }
@@ -1713,6 +1746,100 @@ mod tests {
             store.rename_run(run.id, ""),
             Err(HistoryError::InvalidDisplayName)
         ));
+    }
+
+    #[test]
+    fn rerun_reset_replaces_only_terminal_facts_and_cleans_only_orphaned_artwork() {
+        let (_directory, store) = store();
+        let main = store
+            .create_run(CreateRun {
+                input_kind: InputKind::Directory,
+                input_path: "/input/library".into(),
+                output_path: "/output/library".into(),
+                settings: settings(),
+                total_items: 2,
+            })
+            .unwrap();
+        let unique = ArtworkInput {
+            mime_type: "image/png".into(),
+            bytes: vec![1, 2, 3],
+        };
+        let shared = ArtworkInput {
+            mime_type: "image/png".into(),
+            bytes: vec![4, 5, 6],
+        };
+        let unique_item = store.record_item(main.id, item(1, Some(unique))).unwrap();
+        let shared_item = store
+            .record_item(main.id, item(2, Some(shared.clone())))
+            .unwrap();
+        store
+            .finish_run(
+                main.id,
+                RunStatus::Partial,
+                Some("old_failure"),
+                Some("old detail"),
+            )
+            .unwrap();
+        store.rename_run(main.id, "Library").unwrap();
+        let other = store
+            .create_run(CreateRun {
+                input_kind: InputKind::File,
+                input_path: "/input/other.ncm".into(),
+                output_path: "/output".into(),
+                settings: settings(),
+                total_items: 1,
+            })
+            .unwrap();
+        store.record_item(other.id, item(3, Some(shared))).unwrap();
+        let unique_artwork = store
+            .history_item_by_id(unique_item)
+            .unwrap()
+            .unwrap()
+            .artwork_id;
+        let shared_artwork = store
+            .history_item_by_id(shared_item)
+            .unwrap()
+            .unwrap()
+            .artwork_id;
+
+        let reset = store.reset_run_for_rerun(main.id).unwrap().unwrap();
+        assert_eq!(reset.id, main.id);
+        assert_eq!(reset.display_name, "Library");
+        assert_eq!(reset.input_path, main.input_path);
+        assert_eq!(reset.output_path, main.output_path);
+        assert_eq!(reset.settings, main.settings);
+        assert_eq!(reset.status, RunStatus::Planning);
+        assert_eq!(reset.total_items, 0);
+        assert_eq!(reset.completed_items, 0);
+        assert_eq!(reset.music_count, 0);
+        assert_eq!(reset.representative_artwork_id, None);
+        assert_eq!(reset.terminal_error_code, None);
+        assert_eq!(reset.terminal_error_detail, None);
+        assert!(store.history_item_by_id(unique_item).unwrap().is_none());
+        assert!(store.artwork(unique_artwork.unwrap()).unwrap().is_none());
+        assert!(store.artwork(shared_artwork.unwrap()).unwrap().is_some());
+        assert_eq!(store.list_runs(None, 10).unwrap().runs.len(), 2);
+
+        let active = store
+            .create_run(CreateRun {
+                input_kind: InputKind::File,
+                input_path: "/input/active.ncm".into(),
+                output_path: "/output".into(),
+                settings: settings(),
+                total_items: 0,
+            })
+            .unwrap();
+        assert!(store.reset_run_for_rerun(active.id).unwrap().is_none());
+        assert_eq!(
+            store.run(active.id).unwrap().unwrap().status,
+            RunStatus::Planning
+        );
+        assert!(
+            store
+                .reset_run_for_rerun(active.id + 999)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

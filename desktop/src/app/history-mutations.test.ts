@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vite-plus/test";
-import { clearHistoryRecords, deleteHistoryRun } from "./history-mutations";
+import { clearHistoryRecords, deleteHistoryRun, rerunHistoryRun } from "./history-mutations";
 
 test("releases matching run before deleting its record", async () => {
   const order: string[] = [];
@@ -29,4 +29,23 @@ test("releases all media before clearing history", async () => {
     order.push("clear");
   });
   expect(order).toEqual(["release", "clear"]);
+});
+
+test("releases the matching run before same-ID rerun and does not restore on failure", async () => {
+  const order: string[] = [];
+  const controller = {
+    releaseForRun: vi.fn((id: number) => {
+      order.push(`release:${id}`);
+      return null;
+    }),
+    releaseAll: vi.fn(() => null),
+  };
+  await expect(
+    rerunHistoryRun(controller, 7, async () => {
+      order.push("rerun");
+      throw new Error("scan failed");
+    }),
+  ).rejects.toThrow("scan failed");
+  expect(order).toEqual(["release:7", "rerun"]);
+  expect(controller.releaseAll).not.toHaveBeenCalled();
 });

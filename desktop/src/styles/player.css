@@ -7,25 +7,67 @@
   box-shadow: var(--shadow-float);
   display: grid;
   gap: 10px;
-  grid-template-columns: auto auto minmax(112px, 1fr) minmax(100px, 180px) auto auto minmax(
-      64px,
-      104px
-    ) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   left: max(16px, env(safe-area-inset-left));
   max-width: min(720px, calc(100vw - 32px));
   padding: 10px 12px;
   position: fixed;
+  transition:
+    gap 180ms ease,
+    padding 180ms ease;
   z-index: 40;
 }
 
 .persistent-player.is-collapsed {
-  grid-template-columns: auto auto;
+  gap: 0;
+  grid-template-columns: auto 0 auto;
+  padding-inline: 10px;
+}
+.collapsed-artwork {
+  position: relative;
+}
+.collapsed-play {
+  inset: 0;
+  opacity: 0;
+  position: absolute;
+  transition: opacity 160ms ease;
+}
+.persistent-player.is-collapsed:hover .collapsed-play,
+.persistent-player.is-collapsed:focus-within .collapsed-play {
+  opacity: 1;
+}
+.player-expanded {
+  align-items: center;
+  block-size: 48px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(112px, 1fr) minmax(180px, 1.4fr) auto minmax(64px, 104px);
+  min-width: 0;
+  max-block-size: 48px;
+  opacity: 1;
+  overflow: hidden;
+  transition:
+    grid-template-columns 180ms ease,
+    opacity 140ms ease,
+    block-size 180ms ease,
+    max-block-size 180ms ease;
+}
+.persistent-player.is-collapsed .player-expanded {
+  block-size: 0;
+  gap: 0;
+  grid-template-columns: 0px;
+  max-block-size: 0;
+  min-block-size: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 .player-cover {
-  border-radius: var(--radius-control);
-  height: 38px;
+  animation: player-cover-spin 12s linear infinite;
+  animation-play-state: paused;
+  border-radius: 50%;
+  height: 42px;
   object-fit: cover;
-  width: 38px;
+  width: 42px;
 }
 .player-cover-placeholder {
   align-items: center;
@@ -35,15 +77,21 @@
   font-weight: 800;
   justify-content: center;
 }
-.persistent-player:not(.is-collapsed) .player-cover {
-  animation: player-cover-spin 12s linear infinite;
+.player-cover.is-playing {
+  animation-play-state: running;
 }
-.persistent-player:not(.is-collapsed) .player-cover-placeholder {
+.player-cover-placeholder {
   animation: none;
 }
 .persistent-player .play-button {
   height: 40px;
   width: 40px;
+}
+.player-progress {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(100px, 1fr) auto;
 }
 .persistent-copy {
   display: grid;
@@ -92,12 +140,22 @@
   .persistent-player .player-cover {
     animation: none;
   }
+  .collapsed-play {
+    transition: none;
+  }
+  .persistent-player,
+  .player-expanded {
+    transition: none;
+  }
 }
 @media (max-width: 720px) {
   .persistent-player {
-    grid-template-columns: auto auto minmax(76px, 1fr) auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
-  .persistent-player > input,
+  .player-expanded {
+    grid-template-columns: minmax(76px, 1fr) auto auto;
+  }
+  .player-progress input,
   .persistent-player .player-time {
     display: none;
   }

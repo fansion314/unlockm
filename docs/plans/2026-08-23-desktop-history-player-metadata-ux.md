@@ -2,39 +2,39 @@
 
 ## Status
 
-In Progress
+In Review
 
 Last updated: 2026-08-24
 
 ## Objective
 
-改进 UnlockM 桌面端的长期音乐库使用体验：允许为历史转换任务命名并基于原配置重新扫描执行；让标准音频、格式与码率事实正确进入任务详情；把播放能力提升为跨主页/详情页和分页持续存在、带安全默认音量的全局播放器；提供安全、原子、可恢复的输出音乐元数据编辑；补齐长列表导航、独立筛选清空、macOS/Windows 界面密度与多配色偏好。
+改进 UnlockM 桌面端的长期音乐库使用体验：允许为历史转换任务命名并基于原配置原位重新扫描执行；让标准音频、格式与码率事实正确进入任务详情；把播放能力提升为跨主页/详情页和分页持续存在、带安全默认音量与单曲循环的全局播放器；提供安全、原子、可恢复且不溢出应用窗口的输出音乐元数据编辑；补齐长列表导航、紧凑筛选、单行媒体资料库布局、macOS/Windows 界面密度与多配色偏好。
 
 完成后，用户应能在不接触文件路径或数据库细节的前提下管理历史任务和输出音乐；CLI 的转换语义、源文件保留、原子发布、路径 containment、碰撞处理和有界处理等核心不变量保持不变。
 
 ## Scope
 
 - 历史任务新增可持久化名称、重命名入口和“重新执行”入口。
-- 重跑从历史记录读取原输入、输出和设置，重新扫描当前文件树并创建一条新的独立历史任务；旧任务保持不变。
-- 主页与详情页的长列表提供滚动后出现的固定“返回顶部”按钮；详情页提供固定左上角“回到主页”按钮。
-- 将唯一的 `<audio>` 引擎和播放状态提升到页面切换之外，增加左下角固定、可收起的播放器，展示封面、歌曲名、歌手、专辑、进度和时长，并提供音量滑杆、静音/恢复与低于 100% 的安全默认音量。
-- 详情歌曲行保留直接播放/暂停按钮，移除行内进度条和行内时间显示。
-- 新增单曲元数据编辑弹窗，可编辑/清空标题、歌手和专辑，可上传不超过 10 MiB 的受支持图片，也可选择本地历史中已有的封面；相同专辑封面优先展示。
+- 重跑从历史记录读取原输入、输出和设置，重新扫描当前文件树并原位替换同一 run ID 的执行事实与歌曲明细；显示名保持不变、任务更新时间刷新、历史列表记录数不增加。
+- 主页与详情页的长列表提供滚动后出现的固定“返回顶部”按钮；详情页固定左上角“回到主页”入口使用有背景、边框和阴影的紧凑按钮，滚动时不能与内容文字混在一起。
+- 将唯一的 `<audio>` 引擎和播放状态提升到页面切换之外，增加左下角固定、可收起的播放器，展示圆形封面、歌曲名、歌手、专辑、进度和时长，并提供音量滑杆、静音/恢复、低于 100% 的安全默认音量和单曲循环。
+- 详情歌曲行改为紧凑单行媒体资料库布局：序号/悬停播放、封面、标题+歌手两行、独立专辑列、格式列、右对齐大小+码率列与操作列；整行的非操作区域可点击播放，歌手/专辑可点击并应用对应筛选。
+- 新增单曲元数据编辑弹窗，可编辑/清空标题、歌手和专辑，可上传不超过 10 MiB 的受支持图片，也可选择本地历史中已有的封面；相同专辑封面优先展示。弹窗和候选区域必须受当前应用 viewport 约束并提供内部滚动，底部操作始终可达。
 - 在任务详情中展示每首音乐的码率；标准音频即使走 passthrough copy，也作为音乐而不是 companion 显示、筛选和播放。
 - 修复带较大 ID3/APE 前置标签的 MP3 只读 8 KiB 后被显示为“未知格式”的问题，并修复可安全识别的旧历史事实。
-- 搜索、歌手、专辑、结果筛选各自拥有独立清空按钮；排序继续作为排序控件，不被当作筛选清空。
+- 搜索、歌手、专辑、结果筛选各自拥有输入框内部的条件式小型清空按钮；搜索/歌手/专辑默认保持紧凑坍缩，仅在 focus 或已有值时平滑展开，结果和排序控件按内容宽度收紧。
 - 保留亮/暗模式，并新增默认蓝、翡翠绿、紫罗兰、暖橙四种配色风格，持久化到 Rust preferences。
 - 为 macOS 和 Windows 建立共用的界面密度基线：同步增大字体、图标、控件和列表信息密度，收紧当前过大的卡片空白、间距与 padding；再使用 Tauri 原生窗口缩放率和缩放变化事件做有上限的校准，避免整页 `zoom`/transform 造成模糊或布局溢出。
 - 更新中/英/日三套文案、Rust/TypeScript IPC 契约、自动化测试、手工 QA 清单及 `ARCHITECTURE.md`。
 
 ## Non-Goals
 
-- 不加入音频转码、均衡器、播放队列、上一首/下一首、系统媒体键或云端播放同步；音频控制范围仅包含播放/暂停、seek、音量和静音。
+- 不加入音频转码、均衡器、播放队列、上一首/下一首、系统媒体键或云端播放同步；音频控制范围仅包含当前单曲循环、播放/暂停、seek、音量和静音。
 - 不修改源音乐文件；元数据编辑只针对已持久化、已验证的成功输出文件。
 - 不加入外部网络封面搜索或新的元数据服务；“搜索已有封面”只查询本地 SQLite 历史中的去重 artwork。
 - 不允许前端传入任意输出路径，不开放通用文件系统、asset protocol、shell 或进程能力；自定义封面以受限字节 payload 传给 Rust。
 - 不改变 CLI 的复制开关、覆盖策略、输出布局、watch 模式或命令行界面；共享 runner 只补充媒体分类/事实，不改变发布结果。
-- 不自动覆盖重跑时已经存在的输出。重跑沿用历史快照中的 `overwrite = false`，已有输出记为 skipped，新下载的文件正常进入同一规划管线。
+- 不自动覆盖重跑时已经存在的输出文件。重跑沿用历史快照中的 `overwrite = false`，已有输出记为 skipped，新下载的文件正常进入同一规划管线；“原位替换”只针对 SQLite 中该任务的执行事实和条目。
 - 不批量编辑整张专辑的标签；本计划只提供单曲编辑和相同专辑封面快捷选择。
 
 ## Current Context
@@ -51,15 +51,23 @@ Last updated: 2026-08-24
 - `desktop/src/styles/tokens.css` 只有一套蓝色 token 的 light/dark 变体。多个详情字号低至 `0.58rem`–`0.72rem`；`App.css` 中还有较高的 drop-field、较大的 section gap 和 padding，导致 macOS/Windows 上同时呈现“元素偏小、空白偏多”。
 - 锁定的 `@tauri-apps/api` 已提供 `getCurrentWindow().scaleFactor()` 和 `onScaleChanged()`；当前 core window default ACL 已含只读 scale-factor 能力，无需增加广泛窗口权限。原生 factor 不能直接作为 CSS 倍率，否则 Retina/WebView2 已应用的 DPI 会被重复放大。
 - `docs/plans/2026-08-21-tauri-desktop-app.md` 已为 `Done`，记录了现有桌面架构、ID-only 播放协议和 macOS/Windows 发布证据。本计划是新的增量工作，不重开旧计划。
+- `v0.3.0` 已提交为 `83b503bf5433f9f47711f14e79ccd15490d56b07`、打 annotated `v0.3.0` tag、推送 `origin`/`github`，本轮修订从该干净工作树继续；本地 `/Applications/UnlockM.app` 是该提交构建的 arm64 0.3.0。
+- 当前 `rerun_conversion()` 在 `desktop/src-tauri/src/commands/mod.rs` 读取旧快照后调用普通 `start_conversion_blocking()`，后者经 `AppState::begin_run()` 插入新 `runs` 行，最后再复制名称；这与“同一任务原位刷新”的新产品语义冲突。
+- 当前 `AppHeader.tsx` 只为已选 palette option 渲染 `Check`，导致同一文字列在选中/未选中时改变可用宽度；菜单应永久预留固定尾列并只切换可见性。
+- 当前详情返回入口的 `.back-button` 是透明 sticky 文字，滚动到歌曲内容上时没有独立表面；筛选 toolbar 的 CSS grid 让三项文本筛选扩张占满行，非搜索清空按钮也没有输入框内定位。
+- 当前歌曲行把标题、歌手、专辑堆成三行，并单独常显播放按钮；需要改为资料库式列布局，同时保证编辑/显示目录/默认打开按钮不会被整行播放点击吞掉。
+- 当前 metadata modal 只有固定 `max-width`，没有 viewport 高度上限或滚动容器；12 个候选加表单已足以在较矮窗口中把操作按钮挤出可见区域。
+- 当前 `PlayerArtwork` 在 `artworkId` 变为 `null` 时提前 return 而不清除旧 object URL，封面动画只由“展开”状态控制；播放器 DOM 在收起时移除封面，播放按钮位于整条布局最左而不是进度条左侧，并使用加减号作为收展图标。
 
 ## Design and Decisions
 
 ### 1. 任务名称与重新执行语义
 
 - SQLite schema 升级时给 `runs` 增加 nullable `display_name`。API 始终返回非空 `displayName`：新任务默认使用输入 basename，旧记录在读取时使用相同 fallback；用户重命名后存储 trim 后的 1–120 字符名称。
-- 历史行和详情头提供同一个重命名交互。保存调用 ID-only `rename_run(run_id, display_name)`，只允许 terminal run，返回更新后的 `RunSummary`；不修改输入路径、输出路径或文件。
-- `rerun_conversion(run_id, on_event)` 从 Rust 历史读取快照并重新验证输入/输出，不信任前端重传路径或设置。它调用与 `start_conversion` 相同的内部执行函数、`AppState::begin_run` 和 observer pipeline，创建新 run ID，并复制当时的显示名。
-- 重跑会重新枚举源文件，因而可发现后来下载的音乐；旧输出仍按 `overwrite = false` skipped。按钮在任意转换 active 时禁用，后端仍以 one-active-run gate 作为最终并发保护。
+- 重命名只在详情头提供。保存调用 ID-only `rename_run(run_id, display_name)`，只允许 terminal run，返回更新后的 `RunSummary`；不修改输入路径、输出路径或文件。
+- `rerun_conversion(run_id, on_event)` 从 Rust 历史读取快照并重新验证输入/输出，不信任前端重传路径或设置。它与新任务复用同一个 conversion/observer/coordinator pipeline，但通过新的 state-owned `begin_rerun(run_id)` 进入原位替换分支。
+- `begin_rerun` 在 one-active-run 锁下事务性确认目标仍为 terminal，保留 run ID、显示名与请求快照，删除旧 item 明细并清理已失去引用的 artwork，重置计数、代表封面、terminal error/status/timestamps/app version，再把同一 ID 设为 active。不存在、非 terminal、删除/清空/其他转换竞态必须稳定失败，不能创建替代行。
+- 重跑会重新枚举源文件，因而可发现后来下载的音乐；旧输出仍按 `overwrite = false` skipped。完成、失败或取消都覆盖同一任务的新执行事实，历史总数不变；执行时间戳刷新，但同一 run ID 在现有 ID-keyset 历史分页中的相对位置保持稳定，不为本需求重写游标协议。
 
 ### 2. 统一媒体分类、格式与码率事实
 
@@ -79,7 +87,9 @@ Last updated: 2026-08-24
 
 - 在 `desktop/src/features/playback/` 新建 provider/controller 和 `PersistentPlayer`。provider 挂在 `App` 的页面 `AnimatePresence` 外，持有唯一 `<audio>`、活动 `PlaybackTrack`、播放/暂停、currentTime/duration、seek、错误和 collapsed 状态。
 - `HistoryDetail` 的行按钮只调用 provider 的 `playOrToggle(item)`，不再拥有 audio ref，也不因翻页、筛选或页面卸载停止活动音乐。播放器只在用户换歌、主动暂停/结束、记录被删除、输出失效或应用退出时释放 source。
-- 左下固定播放器展开时显示圆形封面、标题、歌手、专辑、播放按钮、进度 range、时间、音量 range 和静音/恢复按钮；收起后保留紧凑封面/播放状态入口。播放时封面旋转；`prefers-reduced-motion` 下保持静态。窄窗口、safe-area、错误 banner 和右下返回顶部按钮不得互相遮挡。
+- 左下固定播放器展开时显示圆形封面、标题、歌手、专辑、位于进度条左侧的播放按钮、进度 range、时间、音量 range 和静音/恢复按钮；收起后默认只突出圆形封面，hover/focus-within 时才覆盖显示播放/暂停按钮。播放时才旋转封面，暂停/停止立即保持当前角度；`prefers-reduced-motion` 下始终静态。
+- `<audio>` 使用 native loop 进行当前单曲循环；切换到 `artworkId = null` 或封面加载失败时立即撤销/清除旧 object URL 并显示当前歌曲占位图，绝不沿用上一首封面。
+- 收展控件使用语义明确的左右箭头，布局宽度/内容显隐以 Motion layout 或可中断 CSS transition 平滑过渡；reduced motion 下禁用位移动画。窄窗口、safe-area、错误 banner、右下返回顶部按钮和右对齐分页不得互相遮挡。
 - `Preferences` 增加 `playerVolume`（0.0–1.0，旧数据/缺失/非法值默认 0.6）。controller 必须在第一次 `play()` 前把 60% 或持久化值赋给 `audio.volume`，绝不依赖浏览器 100% 默认；用户结束拖动或键盘调整后节流持久化。静音按钮在会话内记住最近的正音量，恢复时回到该值或 0.6；显式把滑杆调到 0 可以作为持久静音。
 - 当前曲目被元数据编辑后刷新播放器快照/封面；编辑当前曲目前先暂停并在成功后从新文件重新装载，避免 Windows 文件占用冲突。
 - 新建共享滚动控制：超过阈值后右下显示固定返回顶部按钮，按 reduced-motion 选择 smooth/instant；详情页左上固定主页按钮调用现有 `onBack`。主页/详情切换后把新页面定位到顶部，但不触碰播放器。
@@ -95,7 +105,8 @@ Last updated: 2026-08-24
 
 ### 6. 独立筛选、配色和跨平台界面密度
 
-- 搜索、歌手、专辑、结果四个控件各自只在有值时显示可访问的清空按钮，清空后回到第 1 页。搜索清空同步取消 debounce 值；排序保持当前选择并与筛选清空解耦。
+- 搜索、歌手、专辑、结果四个控件各自只在有值时在输入/选择框内部尾侧显示可访问的圆形 `×`，控件为其永久预留尾部 padding，清空后回到第 1 页。搜索清空同步取消 debounce 值；排序保持当前选择并与筛选清空解耦。
+- 搜索、歌手、专辑使用同一 compact-expandable 控件：空值且未 focus 时按图标/短标签宽度坍缩，pointer 或键盘 focus 后用 `inline-size`/grid track 动画展开，已有值时保持展开；结果和排序按内容宽度布局，不用 `1fr` 吞掉剩余空间。`prefers-reduced-motion` 下只切换布局不动画。
 - `Preferences` 增加带 serde default 的 `palette`：`blue`（旧数据默认）、`emerald`、`violet`、`amber`。`AppHeader` 增加带色样、选中态和完整键盘导航的 palette menu；`applyTheme` 同时设置 `data-theme`、`data-palette` 和 `color-scheme`。
 - 每套 palette 只覆盖语义 accent/focus/selected token，并为 light/dark 提供可读对比；危险、成功、警告语义不被装饰色混淆。Rust preference 是权威，localStorage 只用于首帧防闪烁。
 - 新建 `desktop/src/lib/display-scale.ts`：在 macOS 和 Windows 读取原生 scale factor 并监听 monitor scale change，把经过平台归一化和 clamp 的温和比例写入 CSS custom property。不得把 Retina 的 `2.0` 或 Windows DPI factor 原样乘到页面上；同一个纯函数必须能用平台/factor fixture 单元测试。
@@ -108,6 +119,14 @@ Last updated: 2026-08-24
 - 删除正在播放的 run 前由 UI 停止播放器；Rust 删除仍只删记录。metadata edit/rename/rerun 的 busy/terminal 条件由后端检查，不能只依赖按钮 disabled。
 - schema migration 必须从 v1、v2 和当前版本重复打开均幂等；旧 preferences 缺 palette 时默认 blue、缺/坏 `playerVolume` 时默认并 clamp 为 0.6，旧 runs 缺名称时有确定 fallback，旧 items 通过 `media_probe_version` 有界修复。
 - `ARCHITECTURE.md` 更新桌面执行流、全局播放器所有权、可编辑输出元数据两阶段恢复、标准音频分类和统一 path probe；继续明确 source retention、atomic publication 与 ID-only filesystem boundary。
+
+### 8. 媒体资料库式详情布局与弹窗约束
+
+- 详情歌曲列表采用稳定 CSS grid 列：`序号/hover play`、`封面`、`minmax 标题+歌手`、`minmax 专辑`、`格式`、`右对齐大小+码率`、`操作`。桌面宽度下标题/歌手严格两行，专辑不再塞入标题块；窄窗口通过具名 grid area 折行，但不恢复三行元信息堆叠。
+- 行 hover/当前播放态以整行 surface、边框/阴影和 accent index 强调。序号位置默认显示补零序号，hover/focus-within/active 时替换为播放或暂停图标；该按钮仍是键盘和屏幕阅读器的主要播放入口。鼠标点击行内非交互区域也调用同一 `toggle(item)`，所有歌手/专辑/编辑/reveal/open 控件显式阻止冒泡。
+- 歌手与专辑使用低装饰的文本按钮，点击后只设置对应筛选、清空其它无关状态不在本次范围，并回到第 1 页；空值继续显示不可点击的 unknown 文案。
+- metadata dialog 使用 `max-block-size: calc(100dvh - safe-area - margin)`；标题和底部 actions 固定在 dialog 内，表单主体与候选 grid 在中间滚动。候选区有可见、可键盘滚动的 bounded region，确保 920×600 等矮窗口中 Save/Cancel 始终可达。
+- 详情分页靠容器右侧对齐，并为 safe-area/播放器留出最小间距；在窄窗口播放器接近全宽时，分页可换行到独立行但不能位于播放器下方不可点击。
 
 ## Milestones
 
@@ -126,11 +145,11 @@ Last updated: 2026-08-24
 
 ### M2 — 可命名、可重新执行的历史任务
 
-- Goal: 任务名可编辑，历史任务可安全复用快照并重新扫描。
+- Goal: 任务名可编辑，历史任务可安全复用快照并重新扫描。M2 记录 v0.3.0 已交付基线；历史记录保留语义已由 D20/M7 明确取代。
 - Dependencies: M1 schema/DTO migration。
 - Acceptance criteria:
   - 新旧 run 都显示稳定名称；重命名在重启后保留。
-  - 重跑创建新 run，旧 run 不变，沿用原路径/设置/name，发现新增文件并 skip 已有输出。
+  - v0.3.0 基线曾以新 run 保留旧 run；该条不再是当前验收目标，M7 要求 same-ID 原位替换、总数不变并保留名称/请求快照。
   - busy、缺失输入、失效输出和非 terminal run 返回稳定错误，不能绕过 one-active-run。
 - Validation:
   - Rust history/command/state tests 覆盖 migration、rename、rerun、busy 和失效路径。
@@ -190,6 +209,36 @@ Last updated: 2026-08-24
   - 执行 `Validation Strategy` 全部命令。
   - 完成主页、详情、重跑、重命名、滚动、播放/音量、编辑、筛选、8 个主题组合和 macOS/Windows 显示缩放的手工矩阵。
 
+### M7 — 原位重跑与紧凑媒体资料库详情
+
+- Goal: 修正 v0.3.0 实际使用中暴露的任务语义和详情信息布局问题，保持任务数量稳定并显著提高歌曲列表可读性。
+- Dependencies: 已完成的 M1–M6；重跑 reset 必须复用现有 one-active-run/history mutation 排他边界。
+- Acceptance criteria:
+  - 对 terminal run 重跑后返回相同 run ID，任务总数不变、显示名保留、旧 item 明细被新扫描结果完全替换，新增文件可见且已有输出仍为 skipped；失败/取消也只留下同一条最新任务事实。
+  - palette menu 四项的色样、文字和尾部选中槽始终在相同列，对勾显隐不引起文字或菜单宽度移动。
+  - 返回转换列表是独立可辨识的 sticky pill/button；滚动经过标题、筛选或歌曲行时保持清晰对比。
+  - 搜索/歌手/专辑默认紧凑、focus/有值展开，四项清空均位于控件内部；结果/排序不拉伸占满空白。
+  - 桌面歌曲行呈现序号/封面/标题歌手/专辑/格式/大小码率/操作列；整行非交互区域播放，hover 将序号替换为 play/pause，歌手/专辑点击可筛选；窄窗口仍无溢出或不可达操作。
+  - 分页右对齐且不被左下播放器遮挡。
+- Validation:
+  - Rust state/history/command tests 覆盖 same-ID reset、row-count stable、old-item replacement、orphan artwork、busy/nonterminal/missing、failure/cancel 和 event run ID。
+  - React tests 覆盖 reserved palette slot、compact filter focus/value/clear、row mouse/keyboard/interactive-child click、artist/album filter、back pill class 与 pagination layout hook。
+  - macOS 原生 debug/release bundle 在 920×600、1080×760 和长列表中复验截图 1–5 对应场景；Windows UI 留入既有 T6.3 平台矩阵。
+
+### M8 — Viewport-safe 元数据编辑与播放器动效修复
+
+- Goal: 元数据弹窗和播放器在长候选、缺封面、暂停/循环、收展及页面底部状态下始终正确、可见且流畅。
+- Dependencies: M7 的列表/pagination grid；沿用 M3/M4 的播放器与 metadata 安全边界。
+- Acceptance criteria:
+  - metadata dialog 永不超过应用可视高度，中间内容/候选可滚动，header/actions 可见，键盘 focus trap 能到达全部可见操作。
+  - 播放器封面始终为圆形；只有 `playing=true` 才旋转，暂停/停止/reduced-motion 时不旋转；换到无封面歌曲立即显示新占位，不闪回或保留旧图。
+  - 收起态默认显示唱片封面、hover/focus 显示 play/pause；展开态 play/pause 位于进度条左侧；左右箭头控制收展并有可中断、reduced-motion-aware 动画。
+  - 当前歌曲播放结束后从头继续，音量、mute、跨页状态和 metadata release/restore 既有行为不回归。
+- Validation:
+  - React/media tests 覆盖 `artworkId -> null` URL cleanup、load race、playing/paused classes、native loop、collapsed hover/focus controls、toggle animation/reduced motion 和 progress layout DOM 顺序。
+  - Modal tests 覆盖 viewport CSS contract、scroll region、12 个候选、矮窗口键盘访问、Escape/backdrop/Save/Cancel。
+  - macOS 原生应用使用有封面→无封面、播放→暂停→恢复→单曲循环、展开→收起、长候选与滚动到底分页场景复验；记录 Windows 缺口但不以 macOS 代替。
+
 ## Task Breakdown
 
 - [x] T1.1 在 `src/formats/audio.rs`、`src/crypto/audio.rs` 和 `src/formats.rs` 增加 checked、seek-based path probe，补齐大 ID3/APE、截断长度、真实 MP3 和伪装文件测试；验证相关 Rust 单测。（实现与测试已写，运行结果由复验记录。）
@@ -200,7 +249,7 @@ Last updated: 2026-08-24
 - [x] T1.6 实现旧 copied/skipped item 的逐批 path-probe repair 和前端空闲刷新，验证千条历史仍限制单批 I/O/内存且最终 counts/facets 准确。（每批32条、repairPending true→false 单 timer 前端回归通过；千条运行压力验证留复验。）
 
 - [x] T2.1 在 `desktop/src-tauri/src/history/mod.rs` 增加名称 fallback、rename 和 run snapshot 读取，校验 terminal 状态及 1–120 字符规则；验证重启持久化和旧库 fallback。（实现与 Rust 回归测试已写。）
-- [x] T2.2 重构 `desktop/src-tauri/src/commands/mod.rs`，让新任务与 `rerun_conversion` 共用一个内部执行入口和 state gate；验证新增文件、旧输出 skipped、busy/缺失路径及旧记录不变。（新增运行级 rerun 测试已写：新文件 converted、旧输出 skipped、原记录不变。）
+- [x] T2.2 重构 `desktop/src-tauri/src/commands/mod.rs`，让新任务与 `rerun_conversion` 共用一个内部执行入口和 state gate；验证新增文件、旧输出 skipped、busy/缺失路径及旧记录不变。（v0.3.0 基线完成；“新建并保留旧记录”已由 D20/T7.2 取代。）
 - [x] T2.3 在 `desktop/src/lib/ipc.ts`、`desktop/src/App.tsx` 和历史/详情组件加入 rename/rerun 控件及状态更新，保证操作按钮互不触发详情/删除；验证 React 交互和转换事件 reducer。（按新反馈：homepage 无 rename；详情页标题内联 rename，不依赖 WKWebView 不支持的 `window.prompt`，调用 ID-only API；列表 rerun 保持独立，React 回归通过。）
 
 - [x] T3.1 新建 `desktop/src/features/playback/PlaybackProvider.tsx`（或同等 controller）、类型和 tests，将唯一 audio 生命周期提升到 `App` 页面切换之外；在首次播放前应用默认/持久化音量并实现 clamp、节流保存和静音恢复状态。（首次 play 前 0.6、显式 0、静音恢复、bootstrap 回灌均由前端回归覆盖。）
@@ -229,6 +278,19 @@ Last updated: 2026-08-24
 - [ ] T6.3 在 macOS 和 Windows 完成端到端 QA：macOS absolute debug bundle 已完成新增后重跑、重命名、标准音频/码率、跨页播放及音量、滚动按钮、标签编辑、独立筛选、palette 与密度验证；仅剩 Windows DPI/runtime 和跨显示器矩阵。
 - [x] T6.4 独立 review 已于 2026-08-24 通过，全部 10 条 Review Notes 均已 resolved；未请求、亦未创建 commit。计划保持 `In Review`，仅因 T6.3 Windows native QA 尚未完成；除非另有发布请求，不自动创建 tag 或 release。
 
+- [x] T7.1 在 `desktop/src/components/AppHeader.tsx`、`desktop/src/App.css` 和 header tests 中为 palette option 永久渲染固定尾部 check slot，以 `visibility`/`opacity` 表示未选中并验证文字位置不移动。（四项 slot 和 selected 标记回归通过。）
+- [x] T7.2 在 `desktop/src-tauri/src/history/mod.rs`、`state.rs`、`commands/mod.rs` 实现 transaction + state-owned same-ID rerun reset，复用既有 conversion pipeline，原子清除旧 items/counters/representative artwork/error 并清理 orphan artwork；覆盖 same ID/count/name/request/timestamps、新旧歌曲、busy/nonterminal/missing/failure/cancel/竞态测试。（direct reset 覆盖独占/共享 artwork、terminal/missing；rerun scan-failure/cancel 与 camel-case event `runId` 回归已覆盖。）
+- [x] T7.3 在 `HistoryDetail.tsx`/`history.css` 把返回入口改为可辨识 sticky pill/button，验证滚动重叠、hover/focus、light/dark 和窄窗口。（固定背景/边界/阴影和 focus 合约已接通。）
+- [x] T7.4 抽取或实现 compact expandable filter controls，把四个 clear 放入控件尾部并收紧 outcome/sort；覆盖 debounce、focus blur、已有值保持展开、独立 clear、page reset、keyboard 和 reduced-motion。（三个文本筛选采用 focus/value expand，四项 clear 置于 field 内。）
+- [x] T7.5 重构歌曲行为媒体资料库 grid：补零序号/hover play、两行 title+artist、独立 album/format/size+bitrate/actions，整行非交互点击播放、artist/album 点击筛选并隔离 actions；覆盖 active/paused/disabled/unknown/long text/responsive tests。（行/子操作隔离与 artist 筛选回归通过。）
+- [x] T7.6 将详情 pagination 右对齐并加入与 persistent player/safe-area 协调的响应式间距；补 layout class regression 与原生页面底部 QA。（right-aligned safe-area bottom spacing 已接通；原生 QA 留 T8.5。）
+
+- [x] T8.1 把 `MetadataEditor.tsx`/`history.css` 拆成 viewport-bounded dialog shell、可滚动 body/candidate region 和固定 actions，保持 focus trap/object URL cleanup，并覆盖长候选与矮 viewport tests。（header/body/actions contract 与 internal scroll 已覆盖。）
+- [x] T8.2 修复 `PersistentPlayer.tsx` artwork 生命周期：ID 变化即清空旧 URL、防止迟到请求回写、null/error 显示当前占位；封面使用圆形且旋转 class 只绑定 `playing`，覆盖 cleanup/race/pause/reduced-motion tests。（player/detail 的 URL replacement/race/null 回归已覆盖；真实封面暂停时维持既有 animation identity、只改 play state。）
+- [x] T8.3 重排播放器 expanded/collapsed DOM/CSS：播放按钮位于进度条左、collapsed 唱片 hover/focus overlay、左右箭头与流畅/reduced-motion 收展；给唯一 `<audio>` 启用单曲 `loop` 并覆盖 ended/replay、音量和跨 route 回归。（expanded content 保持 mounted、以 inert 防止重复焦点，容器/content transition 已接通；cover running→paused style 回归已覆盖。）
+- [x] T8.4 更新中/英/日可访问文案与 parity tests（筛选展开、序号播放、播放器左右收展等），并复验所有 icon-only 控件 title/aria-label。（复用已有三语言可访问 key；新增 icon-only controls 均有 title/aria-label，locale parity 纳入完整 VP test。）
+- [x] T8.5 已更新 `ARCHITECTURE.md` 的 rerun 生命周期为 same-ID transactional reset；完整 Rust/Vite+/Tauri gates 与工作区 absolute debug bundle 的 macOS 原生截图场景 QA 均通过。Windows T6.3 外部缺口保持不变，不以 macOS 证据替代。
+
 ## Validation Strategy
 
 ### Automated core and CLI
@@ -248,7 +310,7 @@ Last updated: 2026-08-24
 - `rtk vp -C desktop test`
 - `rtk vp -C desktop build`
 
-重点断言：IPC fixture parity、rename/rerun 状态、全局单例播放器跨 route/page/filter、60% 默认/持久音量和静音恢复、row 无 slider、fixed navigation、四个独立清空、metadata modal accessibility/upload/candidates、palette persistence/menu、macOS/Windows density token 和三语言 key parity。
+重点断言：IPC fixture parity、same-ID rerun 状态、全局单例播放器跨 route/page/filter、60% 默认/持久音量和静音恢复、native loop、无封面切换、playing-only 封面旋转、媒体资料库 row、fixed navigation、compact filters/内部独立清空、viewport-safe metadata modal、palette reserved check slot、macOS/Windows density token 和三语言 key parity。
 
 ### Automated desktop Rust and packaging
 
@@ -258,17 +320,17 @@ Last updated: 2026-08-24
 - `rtk cargo test --locked -p unlockm-desktop --test license_audit`
 - `rtk vp -C desktop exec tauri build --debug --no-bundle`
 
-重点断言：v1/v2/new schema migration、bounded legacy repair、run rename/snapshot、rerun state gate、ID-only copied playback、metadata pending recovery、artwork candidate query、symlink/invalid bytes rejection，以及 capability/CSP 未扩大。
+重点断言：v1/v2/new schema migration、bounded legacy repair、run rename/snapshot、same-ID rerun reset/state gate/old-item replacement/orphan cleanup、ID-only copied playback、metadata pending recovery、artwork candidate query、symlink/invalid bytes rejection，以及 capability/CSP 未扩大。
 
 ### Manual native QA
 
 1. 转换包含 encrypted music、普通 MP3/FLAC、大 ID3 MP3、非音频 companion 和坏 `.mp3` 的目录；核对列表数量、copied/converted/skipped、格式和码率。
-2. 新增音乐后重跑历史任务；确认使用原输出/设置、只产生新输出、任务名复制、旧任务不变。重命名后重启应用确认持久化。
-3. 首次播放前确认音量为 60% 而不是 100%；调整音量、静音/恢复后翻页、改变筛选、回主页、再进详情并 seek，音频和音量均不中断/重置。重启后确认最后的显式音量保持；切歌、收起、展开、结束、删除对应记录和输出失效均有确定行为。
-4. 长列表滚动后验证右下返回顶部，详情验证固定左上主页按钮；键盘、reduced motion、窄窗口下均可达且无遮挡。
-5. 分别编辑 MP3/FLAC 的三字段和封面，测试同专辑建议、搜索已有封面、合法上传、坏图/超限图；用外部标签读取器复核并确认源文件 hash 不变。
-6. 逐个组合筛选并只清空其中一个，确认其余值和排序保持。
-7. 检查 blue/emerald/violet/amber × light/dark、三种语言、长路径/长标题、无封面和错误态。
+2. 记录任务总数和 run ID，在源目录新增音乐后重跑；确认使用原输出/设置、只产生新输出、返回相同 ID、总数不变、名称保留、旧歌曲明细被新扫描事实替换且该 ID 的列表位置保持稳定。重命名后重启应用确认持久化。
+3. 首次播放前确认音量为 60% 而不是 100%；调整音量、静音/恢复后翻页、改变筛选、回主页、再进详情并 seek，音频和音量均不中断/重置。顺序验证有封面→无封面、播放→暂停→恢复→自然播完循环；收展左右箭头、hover 播放覆盖和动画均正确。
+4. 长列表滚动后验证右下返回顶部，详情验证固定左上主页 pill/button；键盘、reduced motion、窄窗口下均可达且不与内容重叠。滚到底确认右对齐分页不被播放器遮挡。
+5. 分别编辑 MP3/FLAC 的三字段和封面，测试同专辑建议、搜索已有封面、合法上传、坏图/超限图；在 920×600 矮窗口确认候选/表单可滚动且 Save/Cancel 始终可见，再用外部标签读取器复核并确认源文件 hash 不变。
+6. 逐个 focus/填写搜索、歌手、专辑，验证空值坍缩、focus/值展开；组合筛选并只点击输入框内部的一个 `×`，确认其余值和排序保持。点击歌曲行、序号播放、歌手和专辑，确认播放/筛选及操作按钮互不串扰。
+7. 检查 blue/emerald/violet/amber × light/dark、三种语言、长路径/长标题、无封面和错误态；逐项切换 palette 时菜单文字列完全不移动。
 8. macOS 默认/更多空间/较大文字及可用的内外接显示器、Windows 100%、125%、150%、200% 及跨 DPI 显示器移动，检查字体/图标/控件均更易读、主要页面空白减少、工具栏/modal/player/fixed controls 无裁切遮挡，并确认没有 native factor 二次放大。
 
 ## Risks and Mitigations
@@ -283,9 +345,28 @@ Last updated: 2026-08-24
 - **新增控件会挤压 920px 最小窗口。** 播放器、toolbar、run actions 和 modal 使用响应式断点/safe-area；固定控件位置纳入视觉 QA。
 - **本地封面搜索可能泄漏大 blob 或拖慢查询。** 列表只返回 metadata/ID，SQL limit/cursor + SHA 去重，图片沿用 lazy byte command 和 10 MiB 上限。
 - **preferences/IPC 字段扩展可能破坏旧库或前端 fixture。** Rust 新字段使用 serde default，migration/reopen 和 Rust-generated fixture parity 是 release gate。
+- **原位重跑先清旧条目会失去旧执行快照。** 这是用户明确要求的替换语义；reset 在单个 SQLite transaction 内完成且仅在输入/输出重新验证、目标仍 terminal、无其他 active/mutation 后执行。后续转换失败时同一 run 明确保留新的 failed/cancelled 事实，不伪装回旧结果。
+- **same-ID 重跑与 delete/clear/metadata edit 可能竞态。** `begin_rerun` 必须使用与 conversion start/history mutation 相同的 active mutex，并在锁内完成 terminal recheck + transaction reset；并发测试以 barrier 验证不能交错。
+- **整行播放容易吞掉歌手/专辑或文件操作。** 仅非交互区域的鼠标 click 冒泡到 row handler；原生 button/link/input/select 以及 action 容器都排除，序号按钮保留完整键盘语义和可见 focus。
+- **坍缩筛选可能隐藏当前状态或造成横向抖动。** 有值时强制展开并显示独立 clear；动画只改变受 clamp 的 inline-size，不改变 label 顺序，reduced-motion 下即时切换，窄窗口允许 toolbar wrap。
+- **播放器动画可能持续耗电或错误表达状态。** 旋转严格由 `playing && artwork` 控制，暂停/结束/reduced-motion 禁用；收展动画只作用于小型固定容器并可中断，不对整页使用 transform/zoom。
 
 ## Progress
 
+- [x] 2026-08-24：用户授权将本轮 reviewed 修复发布为 `0.3.1`：创建本地 annotated `v0.3.1` tag、仅推送 `main` 提交到 `origin`/`github`（明确不推送新 tag），并仅在本机编译、ad-hoc 签名和安装 macOS app。版本权威文件已统一准备为 `0.3.1`；Windows T6.3 不因此关闭。
+- [x] 2026-08-24：独立 review-plan re-review 返回 Pass with Notes、无剩余代码 findings；两条新增 Minor Review Notes 均由 reviewer 验证并勾选 resolved。独立命令：rerun 定向 Rust 7 tests、PersistentPlayer/PlaybackProvider 7 tests、`git diff --check` 全部通过。计划继续 `In Review`，只因既有 Windows T6.3 外部 QA 缺口。
+- [x] 2026-08-24：review remediation：新增 same-ID rerun scan-failure/cancellation event-stream tests。scan-failure 在 reset 后同 ID terminal Failed、旧 facts 清空、历史计数稳定、active slot release 且无误导事件；cancel hook 在 mark-running 后触发，捕获到的所有 camel-case `runId` 为原 ID，Completed `cancelled=true`。修正 `ConversionEventDto` fields 的 serde camel case。播放器真实 artwork 保持 spin animation，暂停只切换 `animation-play-state: paused`，不重置角度。`rtk cargo test --locked -p unlockm-desktop --lib rerun_ -- --test-threads=1`（7 tests）与 player test（2）通过。
+- [x] 2026-08-24：主代理完成最终自动化复验：`rtk cargo fmt --all -- --check`、workspace clippy `-D warnings`、`rtk cargo test --locked --all-targets --all-features`（150 passed / 14 suites）、VP fmt/check/test（17 files / 63 tests）/build、`rtk vp -C desktop exec tauri build --debug --bundles app` 与 `rtk git diff --check` 全部通过。Vite dynamic-import/chunk-size 仍为非失败建议。
+- [x] 2026-08-24：主代理用 absolute workspace bundle `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app` 完成 macOS 原生 QA：same-ID 重跑后任务数保持 1 且 30 首明细刷新；palette 固定 check 列；sticky Back pill；compact filter focus/值展开及内部 `×`；媒体资料库行/hover/歌手专辑筛选；圆形真实封面、暂停/循环、真实封面→无封面清理、左右收展；920×600 metadata dialog 内部纵向滚动且 actions 固定；右对齐分页不被展开播放器遮挡。QA 先发现 collapsed inert grid 留下空白竖卡片及 modal 泛化 flex 造成横向表单，两项均修复、补测试、重建并复验通过。
+- [x] 2026-08-24：native macOS QA 发现 `.metadata-modal div` 的过宽 descendant flex 规则覆盖 body grid，导致 1080×760 下表单横向排列并出现水平滚动。移除该规则，限定 flex 到 `.metadata-actions`，并让 body 显式 vertical-grid/hidden-x contract。MetadataEditor 回归验证 body/actions sibling 与运行时 display/overflow，`rtk vp -C desktop fmt . --check`、check、metadata test（5）、full test（63）/build 与 `git diff --check` 均通过；Vite warning 仍为非失败建议。
+- [x] 2026-08-24：native macOS QA 发现 collapsed player 的 inert expanded grid 仍参与 block sizing，形成空白竖卡片。修复为 mounted expanded content 的显式 `block-size`/`max-block-size` 收展到 0，并改用零像素 grid track；保留可中断 transition 与 reduced-motion instant fallback。PersistentPlayer contract 回归覆盖 dedicated collapsed-content class，`rtk vp -C desktop fmt .`、check、player test（2）、full test（62）和 build 均通过，`rtk git diff --check` 通过。
+- [x] 2026-08-24：review remediation：rerun 前通过 shared `PlaybackController.releaseForRun` 释放同 run 音源，失败不恢复 stale item；补 reset 的 direct SQLite regression（facts/request/shared-orphan artwork/nonterminal/missing），以及 PersistentPlayer UI 回归（null/race artwork、playing class、layout/arrow/progress/focus contract）。`rtk cargo fmt --all -- --check` + direct reset test、`rtk vp -C desktop fmt .`/check + focused 4-file test（25 tests）均通过。
+- [x] 2026-08-24：T8.5 的 architecture 文档与自动 gates 已完成；当前 agent 无可用本机 Computer Use surface 运行 macOS native screenshot matrix，故不把该手工 QA 计为通过。Windows T6.3 缺口未改变。
+- [x] 2026-08-24：完成 T8.1–T8.4：metadata dialog 采用 viewport-bounded scroll body/fixed actions；播放器 artwork 切换立即 revoke/clear、仅 playing 旋转、native loop、收起唱片 hover/focus overlay、左右箭头和进度左侧播放键；新增 icon title/aria coverage。`rtk vp -C desktop fmt . --check`、check、test（16 files / 57 tests）与 build 均通过；`rtk cargo fmt --all -- --check`、desktop clippy `-D warnings`、desktop all-target tests（56）与 no-bundle Tauri build 通过。Vite dynamic-import/chunk-size 仍为非失败建议。
+- [x] 2026-08-24：完成 T7.3–T7.6：详情 Back 改为 sticky pill；toolbar 改为 compact expandable field，clear 内嵌；歌曲行改为单行资料库 grid（序号 hover play、独立 album/format/facts/actions、artist/album filter）；分页右对齐并预留播放器/safe-area 底距。`rtk vp -C desktop test -- HistoryDetail.test.tsx` 通过（14 tests），`rtk vp -C desktop check --no-fmt` 通过。
+- [x] 2026-08-24：完成 T7.2。same-ID reset 在 active mutex 内触发单个 SQLite transaction，删除旧 items/orphan artwork 并清零执行事实，再复用统一 conversion pipeline；`rtk cargo test --locked -p unlockm-desktop --lib rerun -- --test-threads=1` 通过（4 tests）。
+- [x] 2026-08-24：完成 T7.1 palette 固定尾部 check slot；`rtk vp -C desktop test -- App.test.tsx` 通过（10 tests）。
+- [x] 2026-08-24：收到 v0.3.0 使用反馈与 6 张视觉参考，确认 8 项修订。读取 `plan-doc`/`implement-plan`/`review-plan`/`frontend-design`、仓库指导、`docs/PLANS.md`、完整 active ExecPlan、架构与相关 React/Rust/CSS；将重跑语义从“新建 run”改为“same-ID transaction reset”，新增 M7–M8/T7.1–T8.5。此计划更新阶段未修改生产代码。
 - [x] 2026-08-24：用户授权提交并发布 `v0.3.0`，同时推送 `origin` 与 `github`。权威版本号开始从 `0.2.1` 升至 `0.3.0`；release tag/workflow 仍须通过全部双平台打包与发布校验。该发布不豁免 T6.3 的 Windows DPI/runtime/跨显示器人工证据缺口。
 - [x] 2026-08-24：第二位独立 reviewer 返回 Pass with Notes，确认无剩余代码 findings，10 条 Review Notes 全部 resolved。未请求或创建 commit；计划保留 `In Review`，唯一未完成项为 Windows runtime/DPI/跨显示器 T6.3 QA。
 - [x] 2026-08-23：latest remediation 的 `rtk vp -C desktop exec tauri build --debug --no-bundle` exit 0，产物为 `desktop/src-tauri/target/debug/unlockm-desktop`；Vite 仅报告既有 dynamic-import/chunk-size 非失败建议。计划继续 `In Review`，Review Notes 保留独立 reviewer 处理。
@@ -330,6 +411,11 @@ Last updated: 2026-08-24
 - 2026-08-23 CSS 审查：`App.css` 曾被审查指出的 0.62–0.72rem 正文均已提升至至少 0.75rem；当前 App/history/player/modal 的非装饰正文最低为 0.75rem，未保留需要豁免的更小正文。
 - macOS WKWebView 不保证 `window.prompt` 提供可用交互；桌面关键写操作应使用 React 控制的内联或 modal UI，而非浏览器 prompt/confirm 弹窗。
 - 同一“取消”动作在转换和编辑上下文中语义不同；metadata modal 必须使用 neutral edit-cancel copy，不能复用 conversion cancellation 文案。
+- same-ID rerun 刷新了执行时间戳，但 `HistoryStore::list_runs` 使用 `runs.id DESC` 的 ID-keyset 游标；若改成更新时间排序，现有单字段 cursor 将不再稳定并需要复合游标迁移。用户只要求记录数不增加，因此保留 ID 顺序更符合“同一任务位置稳定”的最小变更。
+- 原位重跑会删除该 run 的旧 item ID；若播放器仍播放该 run，后续 range 请求会引用已不存在的 item。前端必须在发起 rerun 前通过共享 playback controller 释放匹配 run，和 delete 的安全顺序保持一致。
+- 第一轮 M8 实现只有 collapsed overlay opacity transition，expanded content 仍条件卸载，不能形成完整的流畅收展；实现和测试需覆盖容器 layout/content 的进入退出，而不仅是图标替换。
+- CSS `inert` 只移除交互，不会移除 grid intrinsic size；mounted 收展内容还必须显式压缩 block axis，否则零宽 grid 会因内部布局换行而保留异常高度。
+- `.metadata-modal div` 这类 descendant rule 会覆盖 body/candidate grid 的同等或更低 specificity；dialog layout 只能由命名区域选择器控制，body/actions 增加运行时 layout contract 以防止横向 flex 回归。
 
 ## Decision Log
 
@@ -352,9 +438,22 @@ Last updated: 2026-08-24
 - **2026-08-23 — D17:** macOS WKWebView 不依赖 `window.prompt`；详情页标题内联完成重命名，自动 focus/select，Enter 保存、Escape/Cancel 放弃，空白值不提交，失败保持编辑状态并显示既有错误。
 - **2026-08-23 — D18:** metadata、delete 和 clear 必须通过 state-owned idle mutation guard 与 conversion start 互斥；guard 覆盖候选写入、文件发布及 SQLite reconciliation，避免 disk/history 的跨请求交错。
 - **2026-08-24 — D19:** 发布版本定为 `0.3.0`，使用现有 checksum-backed unsigned-preview tag workflow；同一 reviewed commit 与 annotated `v0.3.0` tag 推送到 `origin`/`github`。Windows CI 的 build/package/PE-subsystem 证据可以记录为发布证据，但不能替代 T6.3 的 Windows DPI/runtime/跨显示器人工 QA。
+- **2026-08-24 — D20（取代 D1 的产品语义）:** 重跑不再创建新历史记录。它保留同一 run ID、display name 和 Rust-owned request snapshot，以 transaction reset 删除旧 item/counters/error/representative artwork 后复用统一 pipeline 写入最新事实；历史任务总数保持不变，输出文件仍遵守 `overwrite = false`。
+- **2026-08-24 — D21:** palette menu 的每项永久包含 `swatch | label | check-slot` 三列；未选中只隐藏 check glyph，不移除尾列，避免文字移动。
+- **2026-08-24 — D22:** 筛选使用 compact-expandable 控件而不是整块 filter drawer：空值 blur 时坍缩，focus 或有值时展开，clear 固定在控件内部；这样保留一键访问同时减少工具栏占用。
+- **2026-08-24 — D23:** 歌曲列表采用媒体资料库式单行 grid。序号按钮是键盘主播放入口，整行非交互区域提供 pointer shortcut，歌手/专辑和三项文件操作保持独立可点击边界。
+- **2026-08-24 — D24:** 元数据候选采用 viewport-bounded 内部滚动而非新增后端分页协议；现有 bounded 12-item 查询保持不变，dialog header/actions 固定可达。
+- **2026-08-24 — D25:** 播放器使用单曲 native loop；圆形封面仅在真实播放时旋转，收起态唱片优先、hover/focus 才显示播放控制，左右箭头表达收展方向。
+- **2026-08-24 — D26:** same-ID rerun 不改变历史 ID-keyset 排序或 cursor 契约。时间戳表示最新执行事实，但任务保留原列表相对位置；若未来产品要求“最近重跑置顶”，应另行设计 `(updated_at_ms, id)` 复合游标，而不是在本修订中暗改分页。
+- **2026-08-24 — D27:** 发起 same-ID rerun 前 UI 释放该 run 的活动播放器 source，不尝试把旧 item ID 恢复到新明细；播放器的收展必须具有真实 layout/content 动画，并为 expanded 状态移除不可见的重复播放按钮焦点。
+- **2026-08-24 — D28:** 本轮补丁版本为 `0.3.1`。`v0.3.1` 只创建在本地，远程仅接收 reviewed `main` commit；不得执行 `git push --tags`、`git push <remote> v0.3.1` 或触发 tag release workflow。macOS 产物仅本地构建、签名和安装。
 
 ## Completion Evidence
 
+- 2026-08-24：本轮 M7/M8 独立 review 最终为 Pass with Notes、无未闭环代码 finding；same-ID failure/cancel/event ID 与 cover frozen-angle 两条 Minor 已由原 reviewer 复验关闭。仅 Windows T6.3 仍开放，因此计划保持 `In Review` 而非 `Done`。
+- 2026-08-24：M7–M8 implementation 与两轮 native-QA remediation 已完成；主代理完整 Rust/VP gates、macOS debug app bundle build 和 absolute-bundle Computer Use 矩阵均通过。用户给出的 8 项修订在 macOS 1080×760 与 920×600 场景完成可见验证；未创建 commit/tag/push。
+- 2026-08-24：same-ID rerun 在真实 30 首任务上返回同一记录，首页始终显示 `1 records`；输出仍按 no-overwrite skipped，详情保持 30 首。真实 metadata 上传把 QA MP3 从 1.8 KB 更新到 63.6 KB 并立即展示圆形封面；随后切到无封面曲目时播放器改为当前占位而非保留旧图。1 秒音频经过自然时长仍保持播放，验证 native loop。
+- 2026-08-24：Windows 100/125/150/200% DPI、跨显示器移动和本轮新增布局/播放器/metadata runtime QA 仍并入既有 T6.3 外部缺口；此缺口不否定 macOS 本轮验收，但计划在独立 review 后仍不会标记 `Done`。
 - 2026-08-24：第二位独立 code review 结论为 Pass with Notes；无未闭环代码 findings，Review Notes 全部 resolved。未创建 commit；T6.3 Windows native QA 是保持 `In Review` 的唯一原因。
 - 2026-08-23：latest remediation 的 macOS no-bundle Tauri debug build exit 0，产物 `desktop/src-tauri/target/debug/unlockm-desktop`；Vite dynamic-import/chunk-size 为既有非失败建议。
 - 2026-08-23：主代理最终复验通过 desktop Rust fmt/check/clippy `-D warnings`/all-target tests（51 lib tests + license/security integration suites）及 `git diff --check`；计划状态为 `In Review`。Windows 100/125/150/200%、跨 DPI display 与 runtime QA 仍为 T6.3 唯一平台验证缺口，Review Notes 未由 implementer 勾选。
@@ -376,3 +475,5 @@ Last updated: 2026-08-24
 - [x] Major — Resolved on second re-review: normal metadata publish calls authoritative output reconciliation, transactionally returning text/duration/artwork/representative-artwork/bytes/format/bitrate/probe facts; a cover-size-changing command test verifies the returned byte count.
 - [x] Major — Resolved on second re-review: `IdleHistoryMutationGuard` holds the idle active-run lock across lookup, candidate creation, publication, and reconciliation, and is shared with conversion start/delete/clear; state and command contention tests verify the ordering.
 - [x] Review — Second independent code re-review passed. Windows runtime/DPI and cross-monitor QA remains the explicit external T6.3 validation gap; it is not inferred from macOS evidence.
+- [x] Minor — Resolved on re-review: deterministic same-ID scan-failure and cancellation tests now retain the original terminal ID, replace old facts, release the active slot, and assert captured camel-case event `runId` values (including `completed.cancelled=true`).
+- [x] Minor — Resolved on re-review: cover animation is installed permanently and switches only `animation-play-state` between running and paused, preserving the current transform when playback pauses; focused player tests cover both states.

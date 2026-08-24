@@ -199,9 +199,13 @@ export function AppHeader({
                     <span>
                       {t(`app.palette${value.slice(0, 1).toUpperCase()}${value.slice(1)}`)}
                     </span>
-                    {palette === value ? (
-                      <Check aria-hidden="true" size={16} weight="bold" />
-                    ) : null}
+                    <span
+                      className="palette-check-slot"
+                      aria-hidden="true"
+                      data-selected={palette === value}
+                    >
+                      <Check size={16} weight="bold" />
+                    </span>
                   </button>
                 ))}
               </div>

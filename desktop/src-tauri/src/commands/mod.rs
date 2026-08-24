@@ -136,7 +136,11 @@ pub struct MetadataPatchRequest {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ConversionEventDto {
     PlanningStarted {
         run_id: i64,
@@ -816,15 +820,8 @@ pub async fn rerun_conversion(
 ) -> CommandResult<crate::history::RunSummary> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let (request, display_name) = rerun_snapshot(state.history(), run_id)?;
-        let result = start_conversion_blocking(state.clone(), request, on_event)?;
-        state
-            .history()
-            .rename_run(result.id, &display_name)
-            .map_err(CommandError::history)?
-            .ok_or_else(|| {
-                CommandError::invalid_input("rerun did not reach a terminal history state")
-            })
+        let request = rerun_snapshot(state.history(), run_id)?;
+        start_conversion_blocking_for(state, request, on_event, Some(run_id))
     })
     .await
     .map_err(|error| CommandError {
@@ -836,7 +833,7 @@ pub async fn rerun_conversion(
 fn rerun_snapshot(
     history: &crate::history::HistoryStore,
     run_id: i64,
-) -> CommandResult<(StartConversionRequest, String)> {
+) -> CommandResult<StartConversionRequest> {
     let previous = history
         .run(run_id)
         .map_err(CommandError::history)?
@@ -846,20 +843,29 @@ fn rerun_snapshot(
             run_id,
         }));
     }
-    Ok((
-        StartConversionRequest {
-            input_path: previous.input_path,
-            output_path: Some(previous.output_path),
-            settings: previous.settings,
-        },
-        previous.display_name,
-    ))
+    Ok(StartConversionRequest {
+        input_path: previous.input_path,
+        output_path: Some(previous.output_path),
+        settings: previous.settings,
+    })
 }
 
 fn start_conversion_blocking(
     state: AppState,
     request: StartConversionRequest,
     on_event: Channel<ConversionEventDto>,
+) -> CommandResult<crate::history::RunSummary> {
+    start_conversion_blocking_for(state, request, on_event, None)
+}
+
+/// Shared conversion pipeline for both a new run and a same-ID replay. Only
+/// the state entry action differs; scanning, observer persistence and terminal
+/// finalization are intentionally identical.
+fn start_conversion_blocking_for(
+    state: AppState,
+    request: StartConversionRequest,
+    on_event: Channel<ConversionEventDto>,
+    rerun_id: Option<i64>,
 ) -> CommandResult<crate::history::RunSummary> {
     let validated = validate_input_path(request.input_path)?;
     let output_path = validate_output_dir(request.output_path)?;
@@ -876,8 +882,9 @@ fn start_conversion_blocking(
     .build()
     .map_err(|error| CommandError::invalid_input(error.to_string()))?;
     let config = Arc::new(config);
-    let active = state
-        .begin_run(CreateRun {
+    let active = match rerun_id {
+        Some(run_id) => state.begin_rerun(run_id),
+        None => state.begin_run(CreateRun {
             input_kind: if config.input_is_dir {
                 InputKind::Directory
             } else {
@@ -887,15 +894,16 @@ fn start_conversion_blocking(
             output_path: config.output.clone(),
             settings: request.settings,
             total_items: 0,
-        })
-        .map_err(|error| CommandError {
-            code: if matches!(error, crate::state::StateError::Busy { .. }) {
-                "busy"
-            } else {
-                "state_error"
-            },
-            detail: error.to_string(),
-        })?;
+        }),
+    }
+    .map_err(|error| CommandError {
+        code: if matches!(error, crate::state::StateError::Busy { .. }) {
+            "busy"
+        } else {
+            "state_error"
+        },
+        detail: error.to_string(),
+    })?;
     let paths = match scan_for_run(&config) {
         Ok(paths) => paths,
         Err(error) => {
@@ -912,6 +920,10 @@ fn start_conversion_blocking(
             &active,
             format!("could not mark scanned run active: {error}"),
         ));
+    }
+    #[cfg(test)]
+    if FORCE_CANCEL_AFTER_MARK_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+        state.cancel_run(active.run_id);
     }
     config.presentation.begin_batch(paths.len());
 
@@ -1072,6 +1084,10 @@ static FORCE_RUNTIME_FAILURE: std::sync::atomic::AtomicBool =
 static FORCE_SCAN_FAILURE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+#[cfg(test)]
+static FORCE_CANCEL_AFTER_MARK_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 fn scan_for_run(
     config: &Arc<unlockm::config::RunConfig>,
 ) -> Result<Vec<PathBuf>, unlockm::error::AppError> {
@@ -1218,11 +1234,10 @@ mod tests {
             .finish_run(run.id, RunStatus::Completed, None, None)
             .unwrap();
         history.rename_run(run.id, "Album rerun").unwrap();
-        let (request, name) = rerun_snapshot(&history, run.id).unwrap();
+        let request = rerun_snapshot(&history, run.id).unwrap();
         assert_eq!(request.settings, settings);
         assert_eq!(request.input_path, directory.path().join("input"));
         assert_eq!(request.output_path, Some(directory.path().join("output")));
-        assert_eq!(name, "Album rerun");
         assert_eq!(
             rerun_snapshot(&history, run.id + 1).unwrap_err().code,
             "invalid_input"
@@ -1853,15 +1868,14 @@ mod tests {
             .finish_run(run.id, RunStatus::Completed, None, None)
             .unwrap();
         history.rename_run(run.id, "Library").unwrap();
-        let (request, name) = rerun_snapshot(&history, run.id).unwrap();
-        assert_eq!(name, "Library");
+        let request = rerun_snapshot(&history, run.id).unwrap();
         assert_eq!(request.input_path, input);
         assert_eq!(request.output_path, Some(output));
         assert_eq!(request.settings, conversion_settings());
     }
 
     #[test]
-    fn rerun_scans_new_files_skips_existing_outputs_and_keeps_old_run_unchanged() {
+    fn rerun_replaces_terminal_run_in_place_and_keeps_its_request_name_and_id() {
         let _guard = start_test_guard();
         let directory = tempfile::tempdir().unwrap();
         let input = directory.path().join("input");
@@ -1887,23 +1901,121 @@ mod tests {
             .unwrap();
         fs::write(input.join("later.ncm"), silent_ncm()).unwrap();
 
-        let (request, display_name) = rerun_snapshot(state.history(), original.id).unwrap();
-        let rerun = start_conversion_blocking(state.clone(), request, channel()).unwrap();
-        let rerun = state
-            .history()
-            .rename_run(rerun.id, &display_name)
-            .unwrap()
-            .unwrap();
+        let request = rerun_snapshot(state.history(), original.id).unwrap();
+        let rerun =
+            start_conversion_blocking_for(state.clone(), request, channel(), Some(original.id))
+                .unwrap();
 
         assert_eq!(rerun.display_name, "Downloads");
+        assert_eq!(rerun.id, original.id);
         assert_eq!(rerun.converted, 1);
         assert_eq!(rerun.skipped, 1);
         assert!(output.join("first.mp3").is_file());
         assert!(output.join("later.mp3").is_file());
-        let original_after = state.history().run(original.id).unwrap().unwrap();
-        assert_eq!(original_after.completed_items, 1);
-        assert_eq!(original_after.converted, 1);
-        assert_eq!(original_after.skipped, 0);
+        let after = state.history().run(original.id).unwrap().unwrap();
+        assert_eq!(after.completed_items, 2);
+        assert_eq!(after.converted, 1);
+        assert_eq!(after.skipped, 1);
+        assert_eq!(state.history().list_runs(None, 10).unwrap().runs.len(), 1);
+    }
+
+    #[test]
+    fn rerun_scan_failure_replaces_old_facts_without_emitting_misleading_events() {
+        let _guard = start_test_guard();
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("input");
+        let output = directory.path().join("output");
+        fs::create_dir(&input).unwrap();
+        fs::write(input.join("track.ncm"), silent_ncm()).unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+        let original = start_conversion_blocking(
+            state.clone(),
+            StartConversionRequest {
+                input_path: input,
+                output_path: Some(output),
+                settings: conversion_settings(),
+            },
+            channel(),
+        )
+        .unwrap();
+        let events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let received = events.clone();
+        let event_channel = Channel::new(move |body| {
+            received
+                .lock()
+                .unwrap()
+                .push(body.deserialize::<serde_json::Value>().unwrap());
+            Ok(())
+        });
+        FORCE_SCAN_FAILURE.store(true, Ordering::SeqCst);
+        let request = rerun_snapshot(state.history(), original.id).unwrap();
+        let result =
+            start_conversion_blocking_for(state.clone(), request, event_channel, Some(original.id));
+        FORCE_SCAN_FAILURE.store(false, Ordering::SeqCst);
+        assert_eq!(result.unwrap_err().code, "conversion_startup_failed");
+        let failed = state.history().run(original.id).unwrap().unwrap();
+        assert_eq!(failed.id, original.id);
+        assert_eq!(failed.status, RunStatus::Failed);
+        assert_eq!(failed.completed_items, 0);
+        assert_eq!(failed.music_count, 0);
+        assert_eq!(state.history().list_runs(None, 10).unwrap().runs.len(), 1);
+        assert!(state.active_run().is_none());
+        assert!(events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn rerun_cancellation_keeps_the_original_event_run_id() {
+        let _guard = start_test_guard();
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("input");
+        let output = directory.path().join("output");
+        fs::create_dir(&input).unwrap();
+        fs::write(input.join("track.ncm"), silent_ncm()).unwrap();
+        let state =
+            AppState::new(HistoryStore::open(directory.path().join("history.sqlite")).unwrap())
+                .unwrap();
+        let original = start_conversion_blocking(
+            state.clone(),
+            StartConversionRequest {
+                input_path: input,
+                output_path: Some(output),
+                settings: conversion_settings(),
+            },
+            channel(),
+        )
+        .unwrap();
+        let events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let received = events.clone();
+        let event_channel = Channel::new(move |body| {
+            received
+                .lock()
+                .unwrap()
+                .push(body.deserialize::<serde_json::Value>().unwrap());
+            Ok(())
+        });
+        FORCE_CANCEL_AFTER_MARK_RUNNING.store(true, Ordering::SeqCst);
+        let request = rerun_snapshot(state.history(), original.id).unwrap();
+        let rerun =
+            start_conversion_blocking_for(state.clone(), request, event_channel, Some(original.id));
+        FORCE_CANCEL_AFTER_MARK_RUNNING.store(false, Ordering::SeqCst);
+        let rerun = rerun.unwrap();
+        assert_eq!(rerun.id, original.id);
+        assert_eq!(rerun.status, RunStatus::Cancelled);
+        assert!(state.active_run().is_none());
+        let events = events.lock().unwrap();
+        assert!(!events.is_empty());
+        assert!(
+            events
+                .iter()
+                .all(|event| event.get("runId") == Some(&serde_json::json!(original.id))),
+            "unexpected event run IDs: {events:?}"
+        );
+        assert!(events.iter().any(|event| {
+            event.get("type") == Some(&serde_json::json!("completed"))
+                && event.get("cancelled") == Some(&serde_json::json!(true))
+        }));
     }
 
     #[test]

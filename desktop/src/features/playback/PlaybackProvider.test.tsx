@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { HistoryItem } from "../../lib/contracts";
-import { PlaybackProvider, usePlayback } from "./PlaybackProvider";
+import { PlaybackProvider, type PlaybackController, usePlayback } from "./PlaybackProvider";
 
 const { convertFileSrc } = vi.hoisted(() => ({
   convertFileSrc: vi.fn((path: string, protocol: string) => `${protocol}:///${path}`),
@@ -94,6 +94,7 @@ test("writes 60% before the first play", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Play" }));
   await waitFor(() => expect(convertFileSrc).toHaveBeenCalledWith("17", "unlockm-audio"));
   expect(volumeAtPlay).toBe(0.6);
+  expect(document.querySelector("audio")?.loop).toBe(true);
 });
 
 test("persists explicit zero and mute restores the most recent audible volume", async () => {
@@ -153,4 +154,18 @@ test("release detaches media before restore loads the updated item", async () =>
   order.length = 0;
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
   await waitFor(() => expect(order).toEqual(["pause", "load", "play"]));
+});
+
+test("releasing a different run leaves the active audio identity attached", async () => {
+  const controllerRef = { current: null as PlaybackController | null };
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+  render(
+    <PlaybackProvider controllerRef={controllerRef}>
+      <Controls />
+    </PlaybackProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Play" }));
+  await waitFor(() => expect(convertFileSrc).toHaveBeenCalledWith("17", "unlockm-audio"));
+  expect(controllerRef.current?.releaseForRun(99)).toBeNull();
+  expect(document.querySelector("audio")?.getAttribute("src")).toContain("17");
 });

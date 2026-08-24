@@ -88,8 +88,18 @@
 }
 .palette-option {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) 16px;
   text-align: left;
+}
+
+.palette-check-slot {
+  display: grid;
+  place-items: center;
+  visibility: hidden;
+}
+
+.palette-check-slot[data-selected="true"] {
+  visibility: visible;
 }
 
 .icon-button {
