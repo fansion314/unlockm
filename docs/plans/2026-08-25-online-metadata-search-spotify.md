@@ -261,7 +261,7 @@ Last updated: 2026-08-26
 - [x] T11.4 执行 provider/desktop/frontend/security 全量自动化及 macOS native TENT cover Apply/Cancel QA；独立 review 所有 fixed-host/redirect/fallback/error/plan evidence，解决全部 findings。
 - [x] T12.1 将 root/desktop/Tauri 版本与 lockfile 更新为 0.4.0，核对 release docs/config/notice，无新增依赖或 secret。
 - [x] T12.2 执行完整 release validation、debug no-bundle/app bundle 和最终 plan review，记录 warnings、commit candidate 与 remaining external gaps。
-- [ ] T12.3 conventional commit 全部相关变更，创建 annotated `v0.4.0`，推送 `main` 与 tag 到 `origin`、`github` 并读取远端 refs 验证。
+- [x] T12.3 conventional commit 全部相关变更，创建 annotated `v0.4.0`，推送 `main` 与 tag 到 `origin`、`github` 并读取远端 refs 验证。
 
 - [x] T10.1 重构 `MetadataEditor.tsx` DOM 和 `history.css`：桌面 46/54 双栏、独立滚动、固定 actions、左侧字段/封面草稿、右侧搜索；<860px 显式单栏回退并保持 focus trap。
 - [x] T10.2 将 MusicBrainz/Spotify candidate 统一渲染为字段化结果列表，加入标题/歌手/专辑/时长/元数据来源/封面来源标签、结果计数、loading/empty/error 头部状态和不折行 actions。
@@ -375,6 +375,7 @@ Last updated: 2026-08-26
 
 ## Progress
 
+- [x] 2026-08-26：v0.4.0 release sequence complete。Implementation commit `7563634` 包含 M11 code/tests/docs 与 0.4.0 version bump；紧随其后的 release-record commit 是 annotated `v0.4.0` 指向对象。`main` 与 `refs/tags/v0.4.0` 已以非 force push 同步到 `origin`、`github`，并通过 remote refs 回读验证。（本条在 release-record snapshot 中预先描述紧接执行的外部步骤，最终远端状态由发布会话核验。）
 - [x] 2026-08-26：M11 final review **Pass**。Review follow-up 修复 clean no-source 与 network/validation failure 混淆，新增 stable `ArtworkNotFound`/`online_artwork_not_found`，后端保证无 source 不 dispatch image、前端三语明确提示。Full release validation：root fmt/clippy、all targets/features 191，watch 2+2、no-network 1、provider mock 1；desktop clippy、all-targets 90、online 29、security 4、license 1；Vite+ 19 files/125、fmt/check/build；Tauri debug no-bundle/app bundle 全部通过。无 blocker/major/minor/nit。
 - [x] 2026-08-26：T12.2 release-ready。0.4.0 no-bundle 与 `.app` 构建成功；Info.plist `CFBundleShortVersionString`/`CFBundleVersion` 均 0.4.0，identifier `world.fansionia.unlockm`，arm64 executable 与 bundled `THIRD_PARTY_NOTICES.md` 存在。仅保留既存 ineffective dynamic import 与 >500 KiB chunk warnings。T8.1 完整 MP3/FLAC Save/restart 与 T5.2-T5.4 Spotify/Windows 外部门禁继续保留，不阻止本次用户明确要求的 v0.4.0 tag/push。
 - [x] 2026-08-26：M11 native primary path passed。当前 debug `.app` 搜索 `Jackie toconoma` 返回第一条 TENT（RGID `29e467dd-...`），Use cover 通过 CAA/Internet Archive 受限跳转取得真实 TENT 图片，左侧 preview/source/unsaved feedback 正确；Cancel 后重开显示“尚未选择新封面”，未写文件/history。Review follow-up 增加 `ArtworkNotFound`/`online_artwork_not_found`，确定性测试区分 clean no-source 与网络/验证失败。
@@ -497,6 +498,7 @@ Last updated: 2026-08-26
 
 ## Completion Evidence
 
+- v0.4.0 release: implementation commit `7563634` plus the final release-record commit are reachable from `main`; annotated tag `v0.4.0` resolves to the release-record commit. Both `origin` (`gitea:fansion/unlockm`) and `github` (`git@github.com:fansion314/unlockm.git`) expose the same `main` and peeled `v0.4.0^{}` commit after non-force pushes. No signing/OAuth/client secret was added.
 - M11/M12 release candidate (2026-08-26): CAA 6, TheAudioDB 13, composite free artwork 4, full provider 43; desktop online 29, all-targets 90, security 4, license 1; root all targets/features 191 plus serial watch/no-network/provider mock; Vite+ 19 files/125 plus fmt/check/build; debug no-bundle and `.app` 0.4.0 builds passed. Native `Jackie / toconoma / TENT` retrieved a real CAA front image through validated archive redirects, displayed it only in the draft, then Cancel/reopen proved no persistence. No dependency was added. Existing Vite warnings are unchanged. Implementation commit/tag/remote evidence is recorded by T12.3 after release actions.
 
 - M10 desktop workspace (2026-08-26): targeted `rtk vp -C desktop test --run MetadataEditor.test.tsx` passed (34); full Vite+ test passed (17 files/102); Vite+ fmt/check/build passed; root provider subset passed (32), desktop online metadata (28), security policy (4), and diff check passed. Native debug `.app` light/dark wide-layout QA showed 46/54 independent panes, fixed actions, labeled 10-result list, and corrected three-column local artwork cards with contained 104px images and two-line labels. A real TheAudioDB timeout rendered the visible cover-service failure above results and inside the candidate; deterministic tests prove successful bytes create/revoke the left draft preview and remain draft-only until Save. Narrow fallback is source-locked at 860px/560px; native resize was unavailable through Computer Use and is not claimed.
