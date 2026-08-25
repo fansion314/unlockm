@@ -313,6 +313,41 @@ complete. Source size and modification time are checked again before
 publication, and metadata recovery never replaces valid decrypted audio with a
 partially modified file.
 
+## Desktop online metadata search
+
+The default desktop search is MusicBrainz: it is free for non-commercial use,
+needs no account or API key, and runs only after the user explicitly searches.
+UnlockM identifies itself with a meaningful User-Agent and limits itself to one
+MusicBrainz request per second. TheAudioDB artwork uses its public `123` key
+only after **Use cover** or **Fill all**; it is never fetched automatically.
+Commercial/high-volume MusicBrainz use needs the separate MetaBrainz service
+or an appropriate agreement. Both providers use fixed Rust-only hosts, bounded
+no-redirect requests, and return no remote URL to the webview.
+
+The desktop metadata editor can optionally search Spotify after an explicit
+user action. Spotify is a secondary, Premium-required provider. Opening the app
+or editor never contacts Spotify. Set the public
+build-time `UNLOCKM_SPOTIFY_CLIENT_ID` for a configured build and register
+`http://127.0.0.1/callback` in the Spotify dashboard; desktop OAuth uses PKCE,
+never a client secret. Without that ID the editor remains usable and reports
+that search is unavailable.
+
+Refresh credentials live only in the operating system credential store
+(Keychain on macOS, Credential Manager on Windows). Access tokens, OAuth
+codes, PKCE values, searches, and catalog responses are not stored in SQLite,
+browser storage, telemetry, or logs. **Disconnect Spotify** deletes the local
+credential; Spotify authorization itself is managed in the Spotify account
+Apps page. Reauthorize before the current six-month refresh-token lifetime.
+
+Spotify Development Mode requires a Premium app owner and currently permits at
+most five allowlisted users. Public production enablement requires Extended
+Quota (or an explicitly allowlisted preview) and the project owner to confirm
+Spotify policy terms. Search results carry attribution and a Spotify
+track link. Album art is fetched only after a user selects it, held only as a
+short-lived Rust-only handle and current editor draft, then written only by
+the existing Save action. UnlockM does not cache a Spotify catalog, download
+audio previews, or send telemetry.
+
 ## License and notices
 
 New project code is MIT licensed. See [LICENSE](LICENSE) and

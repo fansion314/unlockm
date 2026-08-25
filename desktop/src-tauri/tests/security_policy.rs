@@ -1,5 +1,16 @@
 use serde_json::Value;
 use std::{fs, path::Path};
+use unlockm::metadata::provider::{
+    OnlineMetadataCandidate, OnlineMetadataProviderKind,
+    musicbrainz::{HOST as MUSICBRAINZ_HOST, ROOT as MUSICBRAINZ_ROOT, USER_AGENT},
+    spotify::{
+        SPOTIFY_ACCOUNTS_HOST, SPOTIFY_API_HOST, SPOTIFY_AUTHORIZE_ENDPOINT, SPOTIFY_IMAGE_HOSTS,
+        SPOTIFY_OPEN_HOST, SPOTIFY_SEARCH_ENDPOINT, SPOTIFY_TOKEN_ENDPOINT, open_track_url,
+    },
+    theaudiodb::{
+        API_HOST as THEAUDIODB_API_HOST, IMAGE_HOST as THEAUDIODB_IMAGE_HOST, PUBLIC_KEY,
+    },
+};
 
 fn workspace_file(relative: &str) -> String {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -96,6 +107,141 @@ fn windows_release_gui_subsystem_and_payload_check_are_configured() {
     assert!(release_workflow.contains("$optionalHeaderSize -lt 70"));
     assert!(release_workflow.contains("IMAGE_SUBSYSTEM_WINDOWS_GUI"));
     assert!(release_workflow.contains("$subsystem -ne 2"));
+}
+
+#[test]
+fn online_metadata_boundary_is_handle_only_and_release_has_no_secret_path() {
+    let commands = workspace_file("src/commands/online_metadata.rs");
+    let store = workspace_file("src/online_metadata/credential_store.rs");
+    let spotify = workspace_file("../../src/metadata/provider/spotify.rs");
+    let musicbrainz = workspace_file("../../src/metadata/provider/musicbrainz.rs");
+    let theaudiodb = workspace_file("../../src/metadata/provider/theaudiodb.rs");
+    let provider_contract = workspace_file("../../src/metadata/provider/mod.rs");
+    let contracts = workspace_file("../src/lib/contracts.ts");
+    let release = workspace_file("../../.github/workflows/desktop-release.yml");
+    let build = workspace_file("build.rs");
+    let config: Value = serde_json::from_str(&workspace_file("tauri.conf.json")).unwrap();
+    for forbidden in ["url: String", "token: String", "image_url", "imageUrl"] {
+        assert!(!commands.contains(forbidden));
+    }
+    assert!(commands.contains("cover_handle: String"));
+    assert!(commands.contains("provider: OnlineMetadataProviderKind,\n    query: String"));
+    assert!(commands.contains("provider: OnlineMetadataProviderKind,\n    cover_handle: String"));
+    assert!(commands.contains("spotify::open_track_url(&item_id)"));
+    assert!(commands.contains("musicbrainz::open_recording_url(&item_id)"));
+    assert!(!commands.contains("open_url(item_id"));
+    assert!(!contracts.contains("imageUrl"));
+    assert!(!contracts.contains("releaseGroupId"));
+    assert!(provider_contract.contains("#[serde(skip_serializing)]\n    pub release_group_id"));
+    let candidate = OnlineMetadataCandidate {
+        provider: OnlineMetadataProviderKind::MusicBrainz,
+        requires_authorization: false,
+        artwork_source: Some("TheAudioDB"),
+        attribution: "MusicBrainz; artwork on demand from TheAudioDB",
+        item_id: "11111111-1111-1111-1111-111111111111".into(),
+        title: "title".into(),
+        artists: vec!["artist".into()],
+        album: "album".into(),
+        duration_ms: 1,
+        cover_handle: Some("opaque".into()),
+        release_group_id: Some("22222222-2222-2222-2222-222222222222".into()),
+        credited_artist: Some("artist feat. guest".into()),
+    };
+    let dto = serde_json::to_value(candidate).unwrap();
+    assert_eq!(dto["coverHandle"], "opaque");
+    assert!(dto.get("releaseGroupId").is_none());
+    assert!(dto.get("creditedArtist").is_none());
+    assert!(store.contains("SystemCredentialStore"));
+    assert!(store.contains("keyring::Entry"));
+    assert!(!store.contains("history.sqlite"));
+    assert!(!store.contains("std::fs"));
+    assert!(!store.contains("localStorage"));
+    for forbidden in [
+        "rusqlite",
+        "Connection::open",
+        "File::",
+        "OpenOptions",
+        "std::env::var",
+        "from_reader",
+        "to_writer",
+    ] {
+        assert!(
+            !store.contains(forbidden),
+            "credential store must not use {forbidden}"
+        );
+    }
+    assert_eq!(SPOTIFY_ACCOUNTS_HOST, "accounts.spotify.com");
+    assert_eq!(SPOTIFY_API_HOST, "api.spotify.com");
+    assert_eq!(SPOTIFY_OPEN_HOST, "open.spotify.com");
+    assert_eq!(
+        SPOTIFY_TOKEN_ENDPOINT,
+        "https://accounts.spotify.com/api/token"
+    );
+    assert_eq!(SPOTIFY_SEARCH_ENDPOINT, "https://api.spotify.com/v1/search");
+    assert_eq!(
+        SPOTIFY_AUTHORIZE_ENDPOINT,
+        "https://accounts.spotify.com/authorize"
+    );
+    assert_eq!(
+        SPOTIFY_IMAGE_HOSTS,
+        ["i.scdn.co", "image-cdn-ak.spotifycdn.com"]
+    );
+    assert_eq!(
+        open_track_url("0123456789ABCDEFGHIJKL").unwrap().as_str(),
+        "https://open.spotify.com/track/0123456789ABCDEFGHIJKL"
+    );
+    assert!(spotify.contains("Policy::none"));
+    assert_eq!(MUSICBRAINZ_ROOT, "https://musicbrainz.org/ws/2/");
+    assert_eq!(MUSICBRAINZ_HOST, "musicbrainz.org");
+    assert!(USER_AGENT.starts_with("UnlockM/"));
+    assert!(USER_AGENT.contains("https://git.fansionia.world/fansion/unlockm"));
+    assert!(musicbrainz.contains("USER_AGENT"));
+    assert!(musicbrainz.contains("OneRequestPerSecond"));
+    assert!(musicbrainz.contains("Policy::none"));
+    assert_eq!(THEAUDIODB_API_HOST, "www.theaudiodb.com");
+    assert_eq!(THEAUDIODB_IMAGE_HOST, "r2.theaudiodb.com");
+    assert_eq!(PUBLIC_KEY, "123");
+    assert!(theaudiodb.contains("Policy::none"));
+    assert!(theaudiodb.contains("validate_cover"));
+    let csp = config["app"]["security"]["csp"].as_str().unwrap();
+    assert_eq!(
+        csp_sources(csp, "connect-src"),
+        [
+            "ipc:",
+            "http://ipc.localhost",
+            "http://127.0.0.1:1420",
+            "ws://127.0.0.1:1420"
+        ]
+    );
+    assert_eq!(csp_sources(csp, "img-src"), ["'self'", "blob:", "data:"]);
+    assert_eq!(
+        csp_sources(csp, "media-src"),
+        ["'self'", "unlockm-audio:", "http://unlockm-audio.localhost"]
+    );
+    assert!(release.contains("Validate public Spotify configuration"));
+    assert!(release.contains("UNLOCKM_SPOTIFY_CLIENT_ID"));
+    assert!(release.contains("forbidden=\"SPOTIFY_CLIENT\"\"_SECRET\""));
+    assert!(release.contains("vars.UNLOCKM_SPOTIFY_CLIENT_ID"));
+    assert_eq!(
+        release
+            .matches("UNLOCKM_SPOTIFY_CLIENT_ID: ${{ vars.UNLOCKM_SPOTIFY_CLIENT_ID || '' }}")
+            .count(),
+        2
+    );
+    assert!(!release.contains("${{ secrets."));
+    assert!(!release.contains("secrets.UNLOCKM_SPOTIFY"));
+    assert!(!release.contains("SPOTIFY_CLIENT_SECRET"));
+    assert!(build.contains("rerun-if-env-changed=UNLOCKM_SPOTIFY_CLIENT_ID"));
+    assert!(!build.contains("SPOTIFY_CLIENT_SECRET"));
+}
+
+fn csp_sources<'a>(csp: &'a str, directive: &str) -> Vec<&'a str> {
+    csp.split(';')
+        .map(str::trim)
+        .find_map(|entry| entry.strip_prefix(directive).map(str::trim))
+        .expect("required CSP directive")
+        .split_whitespace()
+        .collect()
 }
 
 fn rust_sources(directory: &Path) -> Vec<String> {

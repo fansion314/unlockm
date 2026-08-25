@@ -13,6 +13,10 @@ import type {
   RunSummary,
   StartConversionRequest,
   ValidatedInput,
+  OnlineMetadataCandidate,
+  OnlineMetadataProviderCapability,
+  OnlineMetadataProvider,
+  OnlineMetadataStatus,
 } from "./contracts";
 
 export type DesktopApi = {
@@ -52,6 +56,20 @@ export type DesktopApi = {
   openRunItem(itemId: number): Promise<boolean>;
   getArtwork(artworkId: number): Promise<ArrayBuffer>;
   getArtworkMime(artworkId: number): Promise<{ id: number; mimeType: string }>;
+  onlineMetadataStatus(provider: OnlineMetadataProvider): Promise<OnlineMetadataStatus>;
+  onlineMetadataProviderCapabilities(): Promise<OnlineMetadataProviderCapability[]>;
+  startOnlineMetadataLogin(provider: OnlineMetadataProvider): Promise<OnlineMetadataStatus>;
+  cancelOnlineMetadataLogin(provider: OnlineMetadataProvider): Promise<boolean>;
+  disconnectOnlineMetadata(provider: OnlineMetadataProvider): Promise<OnlineMetadataStatus>;
+  searchOnlineMetadata(
+    provider: OnlineMetadataProvider,
+    query: string,
+  ): Promise<OnlineMetadataCandidate[]>;
+  getOnlineMetadataCoverPreview(
+    provider: OnlineMetadataProvider,
+    coverHandle: string,
+  ): Promise<ArrayBuffer>;
+  openOnlineMetadataResult(provider: OnlineMetadataProvider, itemId: string): Promise<boolean>;
 };
 
 export const desktopApi: DesktopApi = {
@@ -94,4 +112,20 @@ export const desktopApi: DesktopApi = {
   getArtwork: (artworkId) => invoke<ArrayBuffer>("get_artwork", { artworkId }),
   getArtworkMime: (artworkId) =>
     invoke<{ id: number; mimeType: string }>("get_artwork_mime", { artworkId }),
+  onlineMetadataStatus: (provider) =>
+    invoke<OnlineMetadataStatus>("online_metadata_status", { provider }),
+  onlineMetadataProviderCapabilities: () =>
+    invoke<OnlineMetadataProviderCapability[]>("online_metadata_provider_capabilities"),
+  startOnlineMetadataLogin: (provider) =>
+    invoke<OnlineMetadataStatus>("start_online_metadata_login", { provider }),
+  cancelOnlineMetadataLogin: (provider) =>
+    invoke<boolean>("cancel_online_metadata_login", { provider }),
+  disconnectOnlineMetadata: (provider) =>
+    invoke<OnlineMetadataStatus>("disconnect_online_metadata", { provider }),
+  searchOnlineMetadata: (provider, query) =>
+    invoke<OnlineMetadataCandidate[]>("search_online_metadata", { provider, query }),
+  getOnlineMetadataCoverPreview: (provider, coverHandle) =>
+    invoke<ArrayBuffer>("get_online_metadata_cover_preview", { provider, coverHandle }),
+  openOnlineMetadataResult: (provider, itemId) =>
+    invoke<boolean>("open_online_metadata_result", { provider, itemId }),
 };

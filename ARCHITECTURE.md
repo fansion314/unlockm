@@ -98,6 +98,7 @@ Watch mode performs the same initial scan, then converts normalized create, modi
 - Only `io::atomic` may replace a destination. Adapters must write to the provided temporary sink and must not create final paths.
 - `desktop/src-tauri` links `unlockm` directly and owns local history/IPC. It may construct validated desktop defaults but cannot duplicate format logic, the path planner, metadata rules, or publication.
 - The desktop webview cannot access generic filesystem, database, shell, process, sidecar, asset-protocol, or opener capabilities. Its only core grants are event `listen`/`unlisten` for native drag/drop plus dialog open for choosing roots; Rust revalidates every selected path. ID-only custom commands may reveal/open previously persisted outputs, rerun an existing run, edit a validated music output with bounded fields/bytes, and query stored artwork candidates; the custom audio protocol may read bounded ranges from a validated persisted music item. None of those surfaces accepts a path from JavaScript.
+- Online metadata is a separate, explicit desktop provider seam. MusicBrainz is the no-login primary text provider (meaningful User-Agent and process-wide 1 rps gate); TheAudioDB `123` artwork lookup is explicit/on-demand only. Spotify OAuth, token exchange, fixed-host HTTP, loopback callbacks, credential persistence, and external navigation remain optional secondary Rust-only behavior. The webview receives provider-neutral text candidates and short-lived opaque cover handles, never tokens, callback values, raw provider payloads, or image URLs. Cover bytes are validated and may only enter the existing metadata draft; Save remains the sole atomic file publication path.
 - Production modules must not import test fixtures or benchmark helpers.
 
 ## 6. Architectural Invariants
@@ -117,6 +118,7 @@ Watch mode performs the same initial scan, then converts normalized create, modi
 - Desktop event persistence is commit-before-IPC and one-active-run. A coordinator/database failure requests cancellation and releases active ownership; it cannot make an already published output unsafe.
 - No conversion host may spawn the CLI, invoke a conversion process/shell, or package an `unlockm` sidecar. Tauri/webview implementation processes are outside this conversion-process boundary. The narrow opener adapter is allowed only after an explicit user gesture and ID-based Rust validation of an existing history output.
 - Ambiguous metadata is never committed. Existing tags and covers win over guesses.
+- Opening an editor does not make an online request. Online search, login, retry, preview, and external navigation require a user gesture; provider sessions and cover handles are invalidated on Disconnect/new search/expiry. Refresh tokens are OS-credential-store-only; access tokens and OAuth/PKCE material are process-memory-only.
 - Watch events for a path are coalesced; if a file changes during processing, exactly one follow-up run is scheduled. Watch jobs share the batch runner's job semaphore, key indexes, metadata cache, and output reservations.
 
 ## 7. Cross-Cutting Concerns

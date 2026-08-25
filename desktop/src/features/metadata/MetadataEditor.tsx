@@ -1,8 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ArtworkCandidate, HistoryItem } from "../../lib/contracts";
+import type {
+  ArtworkCandidate,
+  HistoryItem,
+  OnlineMetadataCandidate,
+  OnlineMetadataProviderCapability,
+  OnlineMetadataProvider,
+  OnlineMetadataStatus,
+} from "../../lib/contracts";
 import { desktopApi } from "../../lib/ipc";
 import { usePlayback } from "../playback/PlaybackProvider";
+
+function onlineErrorCode(reason: unknown) {
+  return typeof reason === "object" && reason && "code" in reason && typeof reason.code === "string"
+    ? reason.code
+    : "provider_unavailable";
+}
+
+function onlineErrorKey(provider: OnlineMetadataProvider, reason: unknown) {
+  const code = onlineErrorCode(reason);
+  if (
+    code === "rate_limited" ||
+    code === "provider_unavailable" ||
+    code === "request_timeout" ||
+    code === "provider_malformed_response"
+  ) {
+    return `${provider === "musicBrainz" ? "musicbrainz" : "spotify"}_${code}`;
+  }
+  return code;
+}
 
 function CandidateArtwork({ candidate }: { candidate: ArtworkCandidate }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -27,6 +53,31 @@ function CandidateArtwork({ candidate }: { candidate: ArtworkCandidate }) {
   return url ? <img src={url} alt="" /> : <span aria-hidden="true">♪</span>;
 }
 
+// Kept as an isolated preview primitive for explicit callers. The editor does
+// not mount it for MusicBrainz results: TheAudioDB lookup must begin only when
+// the user chooses Use cover or Fill all.
+export function OnlineCover({ candidate }: { candidate: OnlineMetadataCandidate }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!candidate.coverHandle) return;
+    let active = true;
+    let objectUrl: string | null = null;
+    void desktopApi
+      .getOnlineMetadataCoverPreview(candidate.provider, candidate.coverHandle)
+      .then((bytes) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(new Blob([bytes]));
+        setUrl(objectUrl);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [candidate.coverHandle, candidate.provider]);
+  return url ? <img className="metadata-online-cover" src={url} alt="" /> : null;
+}
+
 export function MetadataEditor({
   item,
   onClose,
@@ -48,8 +99,29 @@ export function MetadataEditor({
   const [candidates, setCandidates] = useState<ArtworkCandidate[]>([]);
   const [existingArtworkId, setExistingArtworkId] = useState<number | undefined>();
   const [candidateSearch, setCandidateSearch] = useState(item.album ?? "");
+  const [onlineStatus, setOnlineStatus] = useState<OnlineMetadataStatus | null>(null);
+  const [onlineQuery, setOnlineQuery] = useState(
+    [item.title, item.artist, item.album].filter(Boolean).join(" "),
+  );
+  const [onlineResults, setOnlineResults] = useState<OnlineMetadataCandidate[]>([]);
+  const [onlineProvider, setOnlineProvider] = useState<OnlineMetadataProvider>("musicBrainz");
+  const [onlineBusy, setOnlineBusy] = useState(false);
+  const [onlineError, setOnlineError] = useState<string | null>(null);
+  const [onlineApplied, setOnlineApplied] = useState(false);
+  const [onlineSearched, setOnlineSearched] = useState(false);
+  const searchGeneration = useRef(0);
+  const onlineProviderRef = useRef<OnlineMetadataProvider>("musicBrainz");
+  const mounted = useRef(true);
   const titleRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const mountedRef = mounted;
+    const generationRef = searchGeneration;
+    return () => {
+      mountedRef.current = false;
+      ++generationRef.current;
+    };
+  }, []);
   useEffect(() => {
     titleRef.current?.focus();
     const keydown = (event: KeyboardEvent) => {
@@ -92,6 +164,116 @@ export function MetadataEditor({
     }, 180);
     return () => window.clearTimeout(timer);
   }, [candidateSearch, item.id]);
+  useEffect(() => {
+    void desktopApi
+      .onlineMetadataStatus("musicBrainz")
+      .then(setOnlineStatus)
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    // This is a local capability read, not a provider request. It lets Rust
+    // keep the no-auth primary ordering authoritative while opening the editor
+    // remains free of MusicBrainz, TheAudioDB, or Spotify network traffic.
+    void Promise.resolve(desktopApi.onlineMetadataProviderCapabilities())
+      .then((capabilities: OnlineMetadataProviderCapability[] | undefined) => {
+        const defaultProvider = capabilities
+          ?.filter((capability) => !capability.requiresAuthorization)
+          .sort((left, right) => left.primaryOrder - right.primaryOrder)[0]?.provider;
+        if (defaultProvider && onlineProviderRef.current === "musicBrainz") {
+          onlineProviderRef.current = defaultProvider;
+          setOnlineProvider(defaultProvider);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+  const searchOnline = async () => {
+    const generation = ++searchGeneration.current;
+    const provider = onlineProvider;
+    setOnlineBusy(true);
+    setOnlineError(null);
+    setOnlineSearched(true);
+    try {
+      const results = await desktopApi.searchOnlineMetadata(provider, onlineQuery);
+      if (generation === searchGeneration.current && onlineProviderRef.current === provider) {
+        setOnlineResults(results);
+      }
+    } catch (reason) {
+      if (generation === searchGeneration.current && onlineProviderRef.current === provider) {
+        setOnlineError(onlineErrorKey(provider, reason));
+        const status = await desktopApi.onlineMetadataStatus(provider).catch(() => undefined);
+        if (status) setOnlineStatus(status);
+      }
+    } finally {
+      if (generation === searchGeneration.current && onlineProviderRef.current === provider) {
+        setOnlineBusy(false);
+      }
+    }
+  };
+  const selectOnlineProvider = (provider: OnlineMetadataProvider) => {
+    ++searchGeneration.current;
+    onlineProviderRef.current = provider;
+    setOnlineProvider(provider);
+    setOnlineResults([]);
+    setOnlineSearched(false);
+    setOnlineError(null);
+    setOnlineBusy(false);
+    void Promise.resolve(desktopApi.onlineMetadataStatus(provider))
+      .then((status) => {
+        if (onlineProviderRef.current === provider) setOnlineStatus(status);
+      })
+      .catch(() => undefined);
+  };
+  const connectOnline = () => {
+    setOnlineError(null);
+    setOnlineStatus({ provider: "spotify", state: "authorizing", retryAtMs: null });
+    void desktopApi
+      .startOnlineMetadataLogin("spotify")
+      .then(setOnlineStatus)
+      .catch(async (reason) => {
+        setOnlineError(onlineErrorCode(reason));
+        const status = await desktopApi.onlineMetadataStatus("spotify").catch(() => undefined);
+        if (status) setOnlineStatus(status);
+      });
+  };
+  const applyText = (candidate: OnlineMetadataCandidate) => {
+    setTitle(candidate.title);
+    setArtist(candidate.artists.join(", "));
+    setAlbum(candidate.album);
+    setOnlineApplied(true);
+  };
+  const applyCover = async (candidate: OnlineMetadataCandidate) => {
+    if (!candidate.coverHandle) return;
+    const generation = searchGeneration.current;
+    setOnlineBusy(true);
+    setOnlineError(null);
+    try {
+      const bytes = await desktopApi.getOnlineMetadataCoverPreview(
+        candidate.provider,
+        candidate.coverHandle,
+      );
+      if (!mounted.current || generation !== searchGeneration.current) return;
+      if (onlineProviderRef.current !== candidate.provider) return;
+      setCover(new Uint8Array(bytes));
+      setExistingArtworkId(undefined);
+      setOnlineApplied(true);
+    } catch (reason) {
+      if (
+        mounted.current &&
+        generation === searchGeneration.current &&
+        onlineProviderRef.current === candidate.provider
+      ) {
+        setOnlineError(onlineErrorKey(candidate.provider, reason));
+      }
+    } finally {
+      if (
+        mounted.current &&
+        generation === searchGeneration.current &&
+        onlineProviderRef.current === candidate.provider
+      ) {
+        setOnlineBusy(false);
+      }
+    }
+  };
   const save = async () => {
     let released = null;
     setBusy(true);
@@ -143,6 +325,225 @@ export function MetadataEditor({
               onChange={(event) => setTitle(event.target.value)}
             />
           </label>
+          <section className="metadata-online" aria-label={t("app.onlineMetadata")}>
+            <h3>{t("app.onlineMetadata")}</h3>
+            <label>
+              {t("app.onlineProvider")}
+              <select
+                value={onlineProvider}
+                onChange={(event) =>
+                  selectOnlineProvider(event.target.value as OnlineMetadataProvider)
+                }
+              >
+                <option value="musicBrainz">{t("app.onlineMusicBrainz")}</option>
+                <option value="spotify">{t("app.onlineSpotify")}</option>
+              </select>
+            </label>
+            {onlineProvider === "musicBrainz" ? (
+              <>
+                <p>{t("app.onlineMusicBrainzHint")}</p>
+                <label>
+                  {t("app.onlineSearchMusicBrainz")}
+                  <input
+                    value={onlineQuery}
+                    maxLength={200}
+                    onChange={(event) => setOnlineQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void searchOnline();
+                      }
+                    }}
+                  />
+                </label>
+                <div className="metadata-online-actions">
+                  <button
+                    type="button"
+                    disabled={
+                      onlineBusy ||
+                      Boolean(
+                        onlineStatus?.provider === "musicBrainz" &&
+                        onlineStatus.retryAtMs &&
+                        onlineStatus.retryAtMs > Date.now(),
+                      )
+                    }
+                    onClick={() => void searchOnline()}
+                  >
+                    {t("app.onlineSearchMusicBrainz")}
+                  </button>
+                </div>
+                {onlineResults.map((candidate) => (
+                  <article
+                    className="metadata-online-result"
+                    key={`${candidate.itemId}-${candidate.album}`}
+                  >
+                    <div>
+                      <strong>{candidate.title}</strong>
+                      <small>
+                        {candidate.artists.join(", ")} · {candidate.album} ·{" "}
+                        {Math.round(candidate.durationMs / 1000)}s · {candidate.attribution}
+                      </small>
+                    </div>
+                    <div>
+                      <button type="button" onClick={() => applyText(candidate)}>
+                        {t("app.onlineApplyText")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!candidate.coverHandle || onlineBusy}
+                        onClick={() => void applyCover(candidate)}
+                      >
+                        {t("app.onlineApplyCover")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={onlineBusy}
+                        onClick={() => {
+                          applyText(candidate);
+                          void applyCover(candidate);
+                        }}
+                      >
+                        {t("app.onlineApplyAll")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void desktopApi.openOnlineMetadataResult(
+                            candidate.provider,
+                            candidate.itemId,
+                          )
+                        }
+                      >
+                        {t("app.onlineOpenMusicBrainz")}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {onlineSearched && !onlineBusy && onlineResults.length === 0 && !onlineError ? (
+                  <small>{t("app.onlineNoResultsMusicBrainz")}</small>
+                ) : null}
+                {onlineStatus?.provider === "musicBrainz" &&
+                onlineStatus.retryAtMs &&
+                onlineStatus.retryAtMs > Date.now() ? (
+                  <small role="status">{t("errors.musicbrainz_rate_limited")}</small>
+                ) : null}
+              </>
+            ) : !onlineStatus || onlineStatus.state === "notConfigured" ? (
+              <p>{t("app.onlineNotConfigured")}</p>
+            ) : onlineStatus.state === "credentialUnavailable" ? (
+              <p role="alert">{t("app.onlineCredentialUnavailable")}</p>
+            ) : onlineStatus.state === "authorizing" ? (
+              <button
+                type="button"
+                onClick={() => void desktopApi.cancelOnlineMetadataLogin("spotify")}
+              >
+                {t("app.cancelEdit")}
+              </button>
+            ) : onlineStatus.state === "connected" ? (
+              <>
+                <label>
+                  {t("app.onlineSearch")}
+                  <input
+                    value={onlineQuery}
+                    maxLength={200}
+                    onChange={(event) => setOnlineQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void searchOnline();
+                      }
+                    }}
+                  />
+                </label>
+                <div className="metadata-online-actions">
+                  <button
+                    type="button"
+                    disabled={
+                      onlineBusy ||
+                      Boolean(
+                        onlineStatus?.provider === "spotify" &&
+                        onlineStatus.retryAtMs &&
+                        onlineStatus.retryAtMs > Date.now(),
+                      )
+                    }
+                    onClick={() => void searchOnline()}
+                  >
+                    {t("app.onlineSearch")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      ++searchGeneration.current;
+                      setOnlineResults([]);
+                      setOnlineSearched(false);
+                      setOnlineBusy(false);
+                      void desktopApi.disconnectOnlineMetadata("spotify").then(setOnlineStatus);
+                    }}
+                  >
+                    {t("app.onlineDisconnect")}
+                  </button>
+                </div>
+                {onlineResults.map((candidate) => (
+                  <article className="metadata-online-result" key={candidate.itemId}>
+                    {candidate.coverHandle ? <OnlineCover candidate={candidate} /> : null}
+                    <div>
+                      <strong>{candidate.title}</strong>
+                      <small>
+                        {candidate.artists.join(", ")} · {candidate.album} ·{" "}
+                        {Math.round(candidate.durationMs / 1000)}s · {candidate.attribution}
+                      </small>
+                    </div>
+                    <div>
+                      <button type="button" onClick={() => applyText(candidate)}>
+                        {t("app.onlineApplyText")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!candidate.coverHandle || onlineBusy}
+                        onClick={() => void applyCover(candidate)}
+                      >
+                        {t("app.onlineApplyCover")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={onlineBusy}
+                        onClick={() => {
+                          applyText(candidate);
+                          void applyCover(candidate);
+                        }}
+                      >
+                        {t("app.onlineApplyAll")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void desktopApi.openOnlineMetadataResult(
+                            candidate.provider,
+                            candidate.itemId,
+                          )
+                        }
+                      >
+                        {t("app.onlineOpenSpotify")}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {onlineSearched && !onlineBusy && onlineResults.length === 0 && !onlineError ? (
+                  <small>{t("app.onlineNoResultsSpotify")}</small>
+                ) : null}
+              </>
+            ) : (
+              <button type="button" disabled={onlineBusy} onClick={connectOnline}>
+                {onlineStatus.state === "reauthorizationRequired"
+                  ? t("app.onlineReconnect")
+                  : t("app.onlineConnect")}
+              </button>
+            )}
+            {onlineApplied ? <p role="status">{t("app.onlineAppliedUnsaved")}</p> : null}
+            {onlineError ? (
+              <p role="alert">{t(`errors.${onlineError}`, { defaultValue: t("app.error") })}</p>
+            ) : null}
+          </section>
           <label>
             {t("app.artist")}
             <input

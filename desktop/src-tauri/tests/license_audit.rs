@@ -44,6 +44,11 @@ fn bundled_font_license_and_notices_are_complete_and_declared_as_resources() {
     );
 
     let notices = desktop_file("../../THIRD_PARTY_NOTICES.md");
+    let cargo = desktop_file("Cargo.toml");
+    let lock = desktop_file("../../Cargo.lock");
+    assert!(cargo.contains("keyring = \"=4.1.6\""));
+    assert!(lock.contains("name = \"apple-native-keyring-store\""));
+    assert!(lock.contains("name = \"windows-native-keyring-store\""));
     for required in [
         "Fontsource",
         "Bricolage Grotesque",
@@ -51,6 +56,7 @@ fn bundled_font_license_and_notices_are_complete_and_declared_as_resources() {
         "SIL OFL-1.1",
         "@phosphor-icons/react",
         "tauri-plugin-opener",
+        "keyring` 4.1.6",
         "Apache-2.0 OR MIT",
     ] {
         assert!(

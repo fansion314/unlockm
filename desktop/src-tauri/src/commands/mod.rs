@@ -1,3 +1,5 @@
+pub mod online_metadata;
+
 use crate::{
     PRODUCT_NAME,
     history::{

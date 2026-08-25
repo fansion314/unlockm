@@ -268,6 +268,31 @@ unlockm ~/Music/Encrypted -o ~/Music/Unlocked --watch --overwrite
 不越界，并且只有同目录下的私有临时文件完整后，目标文件才会变为可见。发布前会再次
 检查源文件大小和修改时间；元数据恢复也绝不会用部分修改的文件替换有效的已解密音频。
 
+## 桌面端在线元数据搜索
+
+桌面端默认使用 MusicBrainz 搜索：它面向非商业使用免费、无需账号或 API key，且只会在用户
+明确发起搜索后联网。UnlockM 会发送有意义的 User-Agent，并将 MusicBrainz 请求限制为每秒
+一次。TheAudioDB 使用公开 `123` key 查找封面，但仅在点击“使用封面”或“全部填入”后进行，
+不会自动下载。商业或高流量的 MusicBrainz 使用需要另行采用 MetaBrainz 服务或取得适当协议。
+两个免费服务均只能由 Rust 访问固定主机，使用有界、禁止重定向的请求，webview 不会收到远程 URL。
+
+Spotify 是需要 Premium 的可选 secondary provider；桌面端元数据编辑器仅在用户明确点击后才搜索
+Spotify，打开应用或编辑器不会联网。配置
+公开的构建期 `UNLOCKM_SPOTIFY_CLIENT_ID`，并在 Spotify Dashboard 注册
+`http://127.0.0.1/callback`。桌面 OAuth 使用 PKCE，绝不使用 client secret；未配置 ID
+时编辑器仍可使用，只会显示搜索不可用。
+
+refresh credential 只保存在系统安全凭证库（macOS Keychain、Windows Credential
+Manager）。access token、OAuth code、PKCE 值、搜索与 catalog response 不会写入 SQLite、
+浏览器存储、遥测或日志。点击“断开 Spotify”会删除本地 credential；Spotify 授权本身请在
+Spotify 账号的 Apps 页面管理。请在当前约六个月 refresh-token 生命周期结束前重新授权。
+
+Spotify Development Mode 要求 Premium app owner，当前最多允许 5 位 allowlist 用户；公开生产
+启用需取得 Extended Quota（或明确作为 allowlist 预览），并由项目所有者确认 Spotify 政策。
+结果始终带来源与 track 链接。专辑封面只会在用户选择后下载，
+仅存在于短期 Rust handle 和当前编辑草稿，且仍只有既有“保存”会写文件。UnlockM 不缓存
+Spotify catalog、不下载 audio preview，也不发送遥测。
+
 ## 许可证与声明
 
 项目新增代码采用 MIT 许可证。复制代码和测试夹具的来源说明见 [LICENSE](LICENSE) 与

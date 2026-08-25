@@ -74,12 +74,30 @@ jobs:
             echo "UnlockM must link the Rust engine and must not package a conversion sidecar."
             exit 1
           fi
+      - name: Validate public Spotify configuration
+        shell: bash
+        env:
+          UNLOCKM_SPOTIFY_CLIENT_ID: ${{ vars.UNLOCKM_SPOTIFY_CLIENT_ID || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$UNLOCKM_SPOTIFY_CLIENT_ID" ] && ! [[ "$UNLOCKM_SPOTIFY_CLIENT_ID" =~ ^[A-Za-z0-9]{32}$ ]]; then
+            echo "Spotify public client ID must be 32 alphanumeric characters"
+            exit 1
+          fi
+          forbidden="SPOTIFY_CLIENT""_SECRET"
+          if git grep -nF "$forbidden" -- .github/workflows desktop/src-tauri/Cargo.toml desktop/src-tauri/build.rs desktop/src-tauri/tauri.conf.json; then
+            echo "Spotify client secrets are forbidden in release configuration"
+            exit 1
+          fi
       # tauri-apps/tauri-action action-v1.0.0; its command remains the vp-routed local CLI.
       - name: Build unsigned preview installer
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
         env:
           # Tauri's documented ad-hoc identity; no certificate or secret is used.
           APPLE_SIGNING_IDENTITY: ${{ matrix.id == 'macos' && '-' || '' }}
+          # Public OAuth client ID only; an empty value deliberately builds the
+          # feature-disabled state. Never add a Spotify client secret here.
+          UNLOCKM_SPOTIFY_CLIENT_ID: ${{ vars.UNLOCKM_SPOTIFY_CLIENT_ID || '' }}
         with:
           projectPath: desktop
           tauriScript: vp exec tauri

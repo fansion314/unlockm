@@ -7,6 +7,7 @@
 pub mod audio_protocol;
 pub mod commands;
 pub mod history;
+pub mod online_metadata;
 pub mod state;
 
 use std::path::{Path, PathBuf};
@@ -205,6 +206,7 @@ pub fn run() {
             let history = history::HistoryStore::open(history_path_with_legacy_backup(&app_data)?)?;
             let state = state::AppState::new(history)?;
             app.manage(state);
+            app.manage(online_metadata::state::OnlineMetadataState::from_build_config());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -228,6 +230,14 @@ pub fn run() {
             commands::start_conversion,
             commands::rerun_conversion,
             commands::cancel_conversion,
+            commands::online_metadata::online_metadata_status,
+            commands::online_metadata::online_metadata_provider_capabilities,
+            commands::online_metadata::start_online_metadata_login,
+            commands::online_metadata::cancel_online_metadata_login,
+            commands::online_metadata::disconnect_online_metadata,
+            commands::online_metadata::search_online_metadata,
+            commands::online_metadata::get_online_metadata_cover_preview,
+            commands::online_metadata::open_online_metadata_result,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run UnlockM");

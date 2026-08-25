@@ -73,6 +73,9 @@ jobs:
       - name: Test desktop Rust
         if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
         run: cargo test --locked -p unlockm-desktop --all-targets
+      - name: Enforce desktop online-metadata security boundary
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: cargo test --locked -p unlockm-desktop --test security_policy
       - name: Audit bundled Fontsource license resources
         if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
         run: cargo test --locked -p unlockm-desktop --test license_audit

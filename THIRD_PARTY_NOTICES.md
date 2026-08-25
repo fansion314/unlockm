@@ -64,6 +64,10 @@ dependency.
 is MIT licensed. `tauri-plugin-opener` 2.5.4 supplies the platform adapter used
 only after Rust resolves and validates a persisted run/item output; it is
 licensed Apache-2.0 OR MIT. The webview receives no generic opener permission.
+`keyring` 4.1.6 supplies the desktop host's only refresh-token persistence API:
+native Keychain on macOS and native Credential Manager on Windows. It and its
+native-store components are licensed MIT OR Apache-2.0. UnlockM does not add a
+file, SQLite, or browser-storage credential fallback.
 
 ### Fontsource bundled fonts (SIL OFL-1.1)
 

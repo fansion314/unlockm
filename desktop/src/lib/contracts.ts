@@ -150,6 +150,55 @@ export type MetadataPatch = {
   existingArtworkId?: number;
 };
 
+export type OnlineMetadataProvider = "musicBrainz" | "spotify";
+export type OnlineMetadataConnection =
+  | "notConfigured"
+  | "disconnected"
+  | "authorizing"
+  | "connected"
+  | "reauthorizationRequired"
+  | "credentialUnavailable";
+export type OnlineMetadataStatus = {
+  provider: OnlineMetadataProvider;
+  state: OnlineMetadataConnection;
+  retryAtMs: number | null;
+};
+export type OnlineMetadataProviderCapability = {
+  provider: OnlineMetadataProvider;
+  primaryOrder: number;
+  requiresAuthorization: boolean;
+  artworkSource: string | null;
+  attribution: string;
+};
+export type OnlineMetadataCandidate = {
+  provider: OnlineMetadataProvider;
+  requiresAuthorization: boolean;
+  artworkSource: string | null;
+  attribution: string;
+  itemId: string;
+  title: string;
+  artists: string[];
+  album: string;
+  durationMs: number;
+  coverHandle: string | null;
+};
+
+export type OnlineMetadataCommandError = {
+  code:
+    | "not_configured"
+    | "reauthorization_required"
+    | "rate_limited"
+    | "authorization_busy"
+    | "authorization_cancelled"
+    | "authorization_failed"
+    | "credential_unavailable"
+    | "provider_unavailable"
+    | "request_timeout"
+    | "provider_malformed_response"
+    | "invalid_input";
+  detail: string;
+};
+
 export type ArtworkCandidate = {
   artworkId: number;
   album: string | null;
