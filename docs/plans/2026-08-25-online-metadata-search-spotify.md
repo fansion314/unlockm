@@ -4,7 +4,7 @@
 
 In Review
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## Objective
 
@@ -25,6 +25,8 @@ Last updated: 2026-08-25
 - Rust 侧限制固定 HTTPS 主机、禁用重定向、限制响应体/查询长度/并发/超时，并正确处理 401、429 `Retry-After`、5xx、断网和畸形响应。
 - Spotify API 返回的 image URL 永不进入 webview。Rust 仅把经过 Spotify CDN allowlist 验证的 URL 绑定到随机、不透明、短期内存的候选封面 handle；webview 只能以 handle 请求懒加载的已验证图片 bytes。handle 最多对应当前 10 个结果，在新搜索、Disconnect 或 TTL 到期时清除，不写 SQLite 或 catalog cache。
 - 更新中/英/日文案、隐私/配置说明、安全测试、第三方依赖声明、CI/release 配置和 `ARCHITECTURE.md`。
+- 将桌面元数据编辑器改为本地草稿/联网搜索左右工作区；结果以有字段标签的候选列表呈现，窄窗口回退为单栏，左右内容保持各自可滚动且底部 Save actions 固定可达。
+- 在线封面获取成功后必须在本地草稿区立即显示预览和来源/未保存状态；失败或无封面时在搜索控件附近显示可见、可恢复的提示，不能把反馈放在长结果列表末尾。
 
 ## Non-Goals
 
@@ -62,7 +64,7 @@ Last updated: 2026-08-25
 ### 0. Free-primary revision (official constraints confirmed)
 
 - MusicBrainz root is `https://musicbrainz.org/ws/2/`; non-commercial use is free, no API key is needed, a meaningful User-Agent is mandatory, and each client starts at most one request per second. Use `UnlockM/<pkg version> (https://git.fansionia.world/fansion/unlockm)` with an injectable scheduler. Source: [MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API).
-- Search recordings with bounded Lucene-escaped/dismax query and limit≤10; consume title, artist-credit, length, releases and release-group, flatten/dedupe recording+release-group.
+- Search recordings with a bounded plain-text `dismax=true` query (MusicBrainz escapes special syntax and searches default recording-index fields) and limit≤10; consume title, artist-credit, length, releases and release-group, flatten/dedupe recording+release-group.
 - TheAudioDB public key `123` is non-secret; album-mb uses release-group MBID first, searchalbum is only a unique normalized exact artist+album fallback. Exact hosts: API `www.theaudiodb.com`, image `r2.theaudiodb.com`; artwork is on-demand only.
 - Free primary search has no auth status or credential persistence. Spotify remains optional secondary and its Premium live path does not block M6–M8.
 
@@ -113,9 +115,12 @@ Last updated: 2026-08-25
 ### 6. Metadata editor UX
 
 - 在现有文本字段与封面区域之间加入可折叠 online section。初始 query 由当前草稿生成，用户可编辑；Enter/按钮搜索，Escape 仍关闭整个 dialog，Tab 顺序继续受现有 focus trap 管理。
+- 桌面宽度下 dialog 使用左右工作区：左侧编辑 title/artist/album、当前封面草稿和本地封面候选；右侧选择 provider、搜索和浏览联网候选。结果列表按标题、歌手、专辑、时长、元数据来源、封面来源显示明确字段标签；不使用无语义的点分隔长文本。
+- modal actions 独立于两个滚动区；小于 860px 时显式回退单列并恢复整体纵向滚动。所有 CTA 在桌面保持单行，深浅主题继续使用现有 semantic tokens。
 - 未登录显示 Connect Spotify；登录中显示 cancel；已连接显示搜索框、Search 和 Disconnect；即将/已经过期显示 Reconnect。notConfigured 与 credentialUnavailable 给出可操作但不泄露内部路径的说明。
 - 每条 result 是键盘可达的 Apply button/row，展示 title、artists、album、duration 和 Spotify attribution，并提供独立“Open in Spotify”操作；两者点击不能触发 Save 或关闭 dialog。
 - Apply 只替换 title/artist/album state，保留 cover/upload/local candidate 和 search results，设置可见的“已填入，尚未保存”反馈。取消 dialog 丢弃应用结果；保存继续调用唯一 `updateRunItemMetadata`。
+- Use cover/Fill all 获取到 bytes 后创建仅供当前草稿显示的 object URL，并在左侧封面区显示预览及成功状态；替换、切换本地封面或卸载时 revoke。lookup/fetch 失败在搜索头部和对应候选处提示，草稿与已有封面保持不变。
 - 搜索错误与文件保存错误使用不同 state/alert，Retry 语义不混用；迟到搜索不能覆盖更新后的 query/result，登录或断开不会清空用户已编辑的 metadata fields。
 
 ### 7. Compatibility, policy, and documentation
@@ -128,6 +133,20 @@ Last updated: 2026-08-25
 ## Milestones
 
 > 2026-08-25 priority revision: M1–M4 record completed/reviewed Spotify-secondary foundation work. Before further implementation, define new primary-provider milestones for MusicBrainz text search and TheAudioDB artwork after official API constraints are verified. M5 native QA must test the free primary path first; Spotify QA becomes optional Premium-account coverage.
+
+### M9 — User-acceptance regression fixes
+
+- Goal: 修复原生编辑器中标题输入框持续抢回焦点，以及 MusicBrainz 在 TLS 建连完成前被 3 秒 connect timeout 截断的问题。
+- Dependencies: M6–M7 implemented provider/editor paths; user-provided native reproduction.
+- Acceptance: 初始标题聚焦只发生一次，父组件使用新 callback identity 重渲染后其他控件仍保有焦点；MusicBrainz DNS/TCP/TLS 建连有 10 秒上限、完整请求仍受 20 秒总上限约束；title+artist 自由文本输入使用 MusicBrainz dismax 跨字段语义并返回相关候选；fixed-host/no-redirect/1rps/body cap 不变。
+- Validation: frontend rerender/focus regression test、MusicBrainz timeout/query constants and unit fixtures、exact production-client probe、native debug UI focus/search checks、targeted/full automated checks。
+
+### M10 — Desktop metadata workspace and visible artwork draft
+
+- Goal: 用适合桌面的双栏工作区替换单列长弹窗，并让候选字段和在线封面应用结果清晰可见。
+- Dependencies: M7 provider-neutral editor UX and M9 reliable/relevant MusicBrainz search.
+- Acceptance: ≥860px 左编辑/右搜索且各自滚动，窄屏单列；候选以字段化列表显示且按钮不折行；online cover 成功即时显示左侧预览/来源/未保存状态，失败/无封面有可见提示；Apply 仍只改草稿，Save 边界不变。
+- Validation: DOM/layout/locale/cover object-URL success/error/stale cleanup tests，full Vite+ fmt/check/test/build，debug `.app` 双主题与原生宽/窄窗口 QA。
 
 ### M6 — Free primary provider core
 
@@ -221,8 +240,19 @@ Last updated: 2026-08-25
 
 ## Task Breakdown
 
+- [x] T10.1 重构 `MetadataEditor.tsx` DOM 和 `history.css`：桌面 46/54 双栏、独立滚动、固定 actions、左侧字段/封面草稿、右侧搜索；<860px 显式单栏回退并保持 focus trap。
+- [x] T10.2 将 MusicBrainz/Spotify candidate 统一渲染为字段化结果列表，加入标题/歌手/专辑/时长/元数据来源/封面来源标签、结果计数、loading/empty/error 头部状态和不折行 actions。
+- [x] T10.3 修复 online cover 草稿可见性：成功创建/revoke object URL、显示左侧预览和来源反馈；失败/无封面显示候选级及头部 alert；上传/本地候选替换时清理不再生效的在线预览。
+- [x] T10.4 更新中英日文案与 `MetadataEditor.test.tsx`，覆盖 split layout、字段标签、结果计数、cover success/error/stale cleanup/draft-only Save；完成全量 Vite+ 和原生 debug `.app` 宽屏浅/深主题 QA。窄屏由 860px CSS source contract 覆盖；Computer Use 无可靠窗口 resize，作为已记录工具限制而非原生通过。
+- [x] T10.5 修复本地封面候选 grid 的 intrinsic image overflow：稳定三列/固定图片行、卡片 overflow containment、两行专辑名和滚动高度；增加多候选 CSS source contract 与原生视觉复验。
+
+- [x] T9.1 拆分 `MetadataEditor.tsx` 的一次性初始聚焦与 Escape/Tab listener lifecycle；新增父组件以新 `onClose` identity 重渲染时不会抢回标题焦点的回归测试。
+- [x] T9.2 将 MusicBrainz production connect timeout 从 3 秒修正为 10 秒，同时保留 20 秒 total timeout；新增常量断言并用仓库真实 client 复测 TLS 建连不再在约 3 秒提前失败。
+- [x] T9.3 更新计划/架构中的网络与焦点约束，执行定向前端、provider、desktop check 和 diff validation，记录真实端点仍可能返回的服务端状态而不误判为客户端超时。
+- [x] T9.4 修复 MusicBrainz `recording:("title artist")` 与 `dismax=true` 组合导致结果退化为通用 “Recording” 的 live relevance finding；改用 bounded plain-text dismax query，更新 request fixture，并在原生 debug UI 证明 `relive toconoma` 返回相关候选。
+
 - [x] T6.1 在 `src/metadata/provider/musicbrainz.rs` 定义固定 root、meaningful UA、可注入全局 1rps scheduler、bounded/no-redirect client 和 recording search request；用 local fixture 验证 UA、rate scheduler、host/redirect/oversize/503/timeout/offline。（M6 re-review fixes：dismax、production scheduler semantics、root spoof/slow timeout。）
-- [x] T6.2 实现 MusicBrainz query/hint bound、Lucene escape/dismax、recording JSON mapping、artist-credit/release/release-group flatten 与 recording+release-group dedupe；保留 MB recording/release-group IDs，limit clamp10。（M6 re-review fixes：DTO artist clean names，Rust-only credited cover hint。）
+- [x] T6.2 实现 MusicBrainz query/hint bound、plain-text dismax/provider-side syntax escaping、recording JSON mapping、artist-credit/release/release-group flatten 与 recording+release-group dedupe；保留 MB recording/release-group IDs，limit clamp10。（M6 re-review fixes：DTO artist clean names，Rust-only credited cover hint；M9 review 修正跨字段 relevance。）
 - [x] T6.3 在 `src/metadata/provider/theaudiodb.rs` 实现公开 key `123` 的固定 endpoint、album-mb 优先与唯一 normalized artist+album `searchalbum` fallback；API/image exact host allowlist、no redirect、body/image cap 和 `validate_cover`。
 - [x] T6.4 扩展 online state 的 cover binding 为 `MusicBrainz { release_group_id, artist, album }`；仅 Use cover/Fill all 懒触发 TheAudioDB lookup+fetch，最多一 lookup、复用 image permits、TTL/single-flight/generation/disconnect/new-search cleanup。
 - [x] T6.5 扩展 provider-neutral Rust DTO/error/capability 与 commands：MusicBrainz 默认 status requiresAuthorization=false、fixed recording opener、cover attribution；Spotify 保持 secondary。
@@ -322,6 +352,17 @@ Last updated: 2026-08-25
 
 ## Progress
 
+- [x] 2026-08-26：M10 implementation complete and ready for review。用户追加的 local cover grid finding 已修复：真实 debug `.app` 左 pane 显示稳定三列，两行中/英/日 album name 均未被图片或下一行覆盖。宽屏浅色/深色 split workspace、fixed actions、empty/results、独立 pane scroll 通过原生视觉 QA；theme 已恢复、草稿 Cancel、app 退出。TheAudioDB timeout 在顶部/候选可见，且修正为独立封面服务失败文案。Targeted editor 34/34、full Vite+ 17 files/102 tests、fmt/check/build、provider 32、desktop online 28、security 4、diff check 均通过；一次 Node type reference check failure 已局部修复并复验通过。状态恢复 In Review。
+- [x] 2026-08-26：M10 native visual QA finding。宽屏 split/results UI 通过，真实 Jackie query 显示 10 个字段化候选；TheAudioDB 首次 cover fetch timeout 已在列表上方和候选内可见，但错误归因仍误写为 MusicBrainz，已改为独立 online-cover failure 文案。用户截图进一步发现 local candidate image intrinsic height 溢出 grid row、遮挡后续卡片和 album name，打开 T10.5；M10 继续 In Progress。
+- [x] 2026-08-26：T10.1-T10.3 implemented。`MetadataEditor` 改为 split-workspace DOM，左侧 metadata/cover draft、右侧 provider/search/labeled result list；CSS 使用现有 semantic tokens、1120px dialog、独立 pane scroll、860px/560px 单栏回退和 reduced-motion skeleton。候选使用 `dl` 显示 6 个字段与 mm:ss 时长，头部反馈不再落在长列表末端。online cover 成功生成左侧 preview object URL/来源/未保存状态，失败显示顶部与候选 alert，upload/local replacement 清理 preview。三语文案已补；targeted editor 33/33 passed，Vite+ check passed。
+- [x] 2026-08-26：用户原生验收新增 M10，计划由 In Review 回到 In Progress。Design audit（preserve mode，variance 4 / motion 2 / density 6）确认：460px 单列 dialog 让 MB 无预览结果仍占 3.5rem 空列，字段点分隔文本在窄列逐词折行，反馈位于十条结果之后；`applyCover` 只写 `cover` bytes/`existingArtworkId`，未设置 `preview` 或成功来源，导致操作不可见。目标为现有 token/字体/主题内的桌面双栏，不新增依赖或网络能力。
+- [x] 2026-08-26：M9 final re-review **Pass**。Major relevance finding 已修复且原生复验通过；没有剩余 blocker/major/minor/nit。修复后独立重跑 root fmt/clippy/all-targets-all-features（180 tests）、no-network/mock gates、desktop clippy/all-targets（87 tests）/security（4）/license（1）、Vite+ fmt/check/full tests（17 files/99）/production build、Tauri debug no-bundle build 和 diff check，全部通过。Build 仅有既存 ineffective dynamic import 与 >500 KiB chunk warnings。计划保持 In Review 仅因 T8.1 与 T5.2–T5.4 原有外部/跨平台门禁，不因 M9 finding。
+- [x] 2026-08-25：T9.4 Major relevance finding resolved and ready for final re-review。官方 API 文档确认 `dismax=true` 即 plain indexed search 并自动转义特殊语法；客户端删除手工 Lucene escape 与 `recording:(...)` title-only 包装，保留 trim/200 scalars/URL encoding/limit10/1rps。request fixture 断言 `query=a%2Bb` 且不存在 `recording%3A`；MB 9、provider 32、desktop online 28、security 4 passed。重建 debug `.app` 后，歌手栏 focus 3s 稳定，`relive toconoma` 约 8s 返回，第一条为 `Relive / toconoma / TENT / 301s`。QA 使用 Cancel 且退出 app，未写媒体文件。
+- [x] 2026-08-25：M9 review Needs Changes（Major relevance）。完整自动 review 门禁均通过，原生 debug UI 也证明焦点在歌手栏稳定保持；但首次 MB 请求收到可恢复 503 后，重试虽返回 10 candidates，却全部是通用 “Recording” 结果。对照 API 发现当前 `recording:("relive toconoma")` 把 title+artist 输入错误限制在 recording/title 字段，且与 dismax 组合产生错误匹配。打开 T9.4，计划回到 In Progress；当前 QA 草稿已 Cancel，未保存或改写媒体文件。
+- [x] 2026-08-25：M9 user-acceptance regression fixes complete and ready for review。全量前端 17 files/99 tests、fmt/check passed；root provider 32、desktop online metadata 28、desktop cargo check、Rust fmt 与 diff check passed。计划恢复 In Review；未改变 T8.1 与 T5.2–T5.4 的既有原生/外部 QA 缺口。
+- [x] 2026-08-25：T9.1/T9.2 implemented。初始 title focus 改为 mount-only effect；Escape/Tab listener 只安装一次并通过 ref 调用最新 `onClose`。新增 rerender regression 证明 artist input 保持焦点且 Escape 不调用旧 callback；`MetadataEditor.test.tsx` 31/31 passed。MusicBrainz 新增 10s `CONNECT_TIMEOUT`（20s total 不变）与常量断言，provider 9/9 passed。修改后的 exact `MusicBrainzClient` 首次在 5.80s 收到服务端 unavailable（不再 timeout），随后以 `relive toconoma` 在 6.89s 成功返回 10 candidates；诊断 example 已移除。
+- [x] 2026-08-25：用户原生验收发现两个回归，计划由 In Review 重新进入 In Progress。焦点根因是初始 `titleRef.focus()` 与依赖 `onClose` 的键盘 listener 共用 effect；`HistoryDetail` 每次 render 都创建新 callback，导致 effect 反复把焦点抢回标题。MusicBrainz 根因由 exact client probe 复现：当前 `MusicBrainzClient` 在 3.007s 返回 `RequestTimeout`；同机 TUN 直连和显式 `127.0.0.1:7897` 代理在放宽 connect bound 后均约 5.52s 完成 TLS、5.73s 收到 HTTP 响应，证明遗留的 3s `connect_timeout` 在 20s total timeout 之前提前截断请求。Tauri command 已使用 `spawn_blocking`，无需改变执行模型。
+
 - [x] 2026-08-25：M6 T6.1/T6.2 完成。`MusicBrainzClient` 固定 `https://musicbrainz.org/ws/2/`，发送 `UnlockM/<version> (https://git.fansionia.world/fansion/unlockm)` User-Agent，使用 process-wide `OnceLock` 1rps gate（scheduler trait 可注入）；recording 搜索固定 no-redirect、3s connect/8s total timeout、512KiB capped streaming、limit 1–10、Lucene escape。local TCP fixture 验证 UA/query/limit/scheduler 与 503，mapping tests 覆盖 joinphrase、recording+release-group dedupe、missing release fallback/duration。`rtk proxy cargo test --locked -p unlockm metadata::provider::musicbrainz -- --test-threads=1` passed (4 tests)。
 - [x] 2026-08-25：M6 READY FOR REVIEW。完成 T6.3–T6.5：TheAudioDB 固定 public key `123`、API/image exact hosts、no redirect、bounded read 和 `validate_cover`；local fixtures 覆盖畸形 image bytes、无 Content-Length 的 chunked MAX+1、image/API 302 及 production-host spoof pre-dispatch（server broken pipe 忽略）。`OnlineMetadataState` 新增可注入 free-provider seam：MB search 不会自动 TheAudioDB lookup/fetch；同 handle lookup 合并，lookup 完成后图片复用两许可 preview budget；new search、Disconnect、TTL 和 post-fetch generation/binding 均拒绝旧 bytes。capability contract 证明 MusicBrainz primary_order=0/no-auth/TheAudioDB attribution，固定 recording opener；Spotify 仍 secondary。
 - [x] 2026-08-25：M7 READY FOR REVIEW。editor 从 Rust capability IPC 读取 no-auth primary order，默认 MusicBrainz；provider switch 清理 generation/results，MB 显示 Free/no-login、不会显示 Spotify auth controls，TheAudioDB artwork 只从 Use cover/Fill all 发起。Spotify 明示 Premium-required optional。三语言、draft-only/stale/on-demand tests、精确 host/UA/public-key security assertions、README/README.zh/ARCHITECTURE 已更新。
@@ -388,6 +429,11 @@ Last updated: 2026-08-25
 - Refresh token 的 issued-at 是授权生命周期的安全边界：access refresh 没有返回新 refresh token 时不能重置它；只有 Spotify rotation 返回新 refresh token 才重置 6-month 计时。
 - 当前可由 Computer Use 发现的 `world.fansionia.unlockm` 是已有安装实例而非本 worktree 刚构建的 debug artifact；其 metadata editor 没有在线搜索区域。为了不关闭或覆盖用户的 live application，原生 free-provider QA 只能记录为未执行，不能从该实例推断本分支结果。
 - 合并 main 后的 debug app 可构建并运行，但其 GUI child network 在本 QA environment 中仍无法完成 MusicBrainz 请求；同端点 elevated curl 约 11.15s 返回 200。20s client timeout 使正常慢响应不被过早截断，却不能绕过 GUI child network restriction。TheAudioDB cover test 依赖 live MB result，因此同样被阻断。
+- 用户当前启用了 TUN，且同机直连与显式系统代理对照具有相同的约 5.52s TLS 建连时间；实际失败不是缺少代理发现，而是 `connect_timeout(3s)` 先于 20s total timeout 触发。`reqwest` connect timeout 覆盖 DNS/TCP/TLS 建连，因而此前只提高 total timeout 的修复不完整。
+- 编辑器的 focus trap 边界本身只在 Tab 到首尾元素时循环；持续抢焦点来自初始 focus 与依赖不稳定 `onClose` callback 的 listener effect 错误耦合，而不是 trap 的 Tab 分支。
+- MusicBrainz 编辑器 query 是 title、artist、album 的组合自由文本，不应整体限定为 `recording` title 字段。原生 live 结果证明 `recording:("relive toconoma")` + dismax 会返回通用 “Recording” 候选；同一 endpoint 的 free-text dismax 查询能跨 recording/artist 等默认字段获得相关结果。
+- 当前 MusicBrainz result 没有自动图片却仍使用预留 3.5rem 图片列；在 460px modal 中有效文本宽度过窄，点分隔 attribution 会逐词换行。封面成功 bytes 只存在 React draft，现有 `preview` 仅由 file input 更新，因此用户无法确认远程封面是否成功应用。
+- local artwork 图片的 intrinsic aspect-ratio 高度大于未约束的 outer grid auto row；`max-block-size` 只裁剪容器、不限制 card/image，导致图片跨行覆盖且单行 ellipsis title 被下一行遮挡。需要显式 grid row/card/image block size 与 overflow containment。
 
 ## Decision Log
 
@@ -405,8 +451,19 @@ Last updated: 2026-08-25
 - **2026-08-25 — D12:** 用户确认 Spotify 搜索需要 Premium 且当前不可用。Spotify 降为明确 Premium requirement 的 optional secondary provider；计划的默认/primary 路径改为无登录 MusicBrainz 文本 metadata 与 TheAudioDB 专辑封面。等待官方 API 约束核对后再细化实现任务。
 - **2026-08-25 — D13:** 使用 `keyring` 4.1.6 的 native v1 API 作为 Spotify optional login 的唯一 persistent credential backend；其 API failure 映射为 `credential_unavailable`，不实现 file/SQLite fallback。
 - **2026-08-25 — D14:** MusicBrainz production total timeout 设置为 20s，而非测试/local transport timeout；本轮外部 endpoint 的已授权 curl evidence 为 11.150974s HTTP 200。该调整只避免把可用但慢的 public response 误分类为 timeout；response cap、fixed host、no redirect 和 1rps gate 不变。
+- **2026-08-25 — D15:** 初始标题聚焦改为 mount-only effect；Escape/Tab listener 通过 callback ref 读取最新 `onClose`，使 listener 无需因父组件 callback identity 改变而重新安装或重跑初始 focus。
+- **2026-08-25 — D16:** MusicBrainz production connect timeout 从 3s 提高到 10s，并继续由 20s total timeout 封顶。该值覆盖本机已观测约 5.52s TLS 建连而仍保持断网有界；不新增 proxy adapter、不放宽目标 host/redirect/body/rate 安全边界。
+- **2026-08-25 — D17:** MusicBrainz 搜索改用 trim 后的 plain-text query 并保留 `dismax=true`，不再手工 Lucene escape 或把组合 title+artist+album 输入包装为 `recording:(...)`。MusicBrainz 官方说明 dismax 会自动转义特殊查询语法并使用 plain indexed search；这样可沿用默认跨字段语义，同时继续限制 200 scalars/limit10/fixed host/1rps。
+- **2026-08-26 — D18:** 编辑器采用 preserve-mode 原生 CSS Grid 双工作区，不引入新设计系统。桌面左 46% 本地草稿、右 54% 联网搜索并各自滚动；<860px 单栏。候选使用语义化 `dl` 字段列表，来源不再拼进无标签句子。在线封面点击即选入草稿，成功必须显示 object-URL 预览/来源，失败必须在长列表上方可见；不新增“下载后再选择”的第二阶段，以免产生与现有 Apply 语义冲突。
+- **2026-08-26 — D19:** 本地封面候选在左 pane 使用 `repeat(auto-fill, minmax(112px, 1fr))`，典型桌面宽度形成三列；button 固定 `104px + two-line label` rows 且 `overflow:hidden`，图片使用固定 block-size/`object-fit:cover`。不再依赖 replaced image intrinsic aspect ratio 参与 outer grid row sizing。
 
 ## Completion Evidence
+
+- M10 desktop workspace (2026-08-26): targeted `rtk vp -C desktop test --run MetadataEditor.test.tsx` passed (34); full Vite+ test passed (17 files/102); Vite+ fmt/check/build passed; root provider subset passed (32), desktop online metadata (28), security policy (4), and diff check passed. Native debug `.app` light/dark wide-layout QA showed 46/54 independent panes, fixed actions, labeled 10-result list, and corrected three-column local artwork cards with contained 104px images and two-line labels. A real TheAudioDB timeout rendered the visible cover-service failure above results and inside the candidate; deterministic tests prove successful bytes create/revoke the left draft preview and remain draft-only until Save. Narrow fallback is source-locked at 860px/560px; native resize was unavailable through Computer Use and is not claimed.
+
+- M9 regression fixes: `rtk vp -C desktop test --run MetadataEditor.test.tsx` passed (31); full `rtk vp -C desktop test` passed (17 files/99); `rtk vp -C desktop fmt . --check` and `check --no-fmt` passed. `rtk cargo test --locked metadata::provider::musicbrainz -- --test-threads=1` passed (9); full provider subset passed (32); desktop `online_metadata` subset passed (28); `rtk cargo check --locked -p unlockm-desktop`, `rtk cargo fmt --all -- --check`, and `rtk git diff --check` passed. A transport-only production-client probe changed from 3.007s `RequestTimeout` before the timeout fix to 6.888s `Ok(10)`; it did not inspect relevance, which the subsequent native review correctly reopened. One intermediate 5.797s `Unavailable` was a real provider response and not a client timeout. The temporary probe source was removed.
+- M9 relevance fix: official MusicBrainz Search documentation and a live API comparison established that `dismax=true` is plain indexed search with provider-side syntax escaping. Targeted checks passed: MusicBrainz 9, all provider 32, desktop online metadata 28, security policy 4, Rust fmt and diff check. A rebuilt `target/debug/bundle/macos/UnlockM.app` native run kept artist focus for 3s and returned `Relive / toconoma / TENT / 301s` first for `relive toconoma` in about 8s; the draft was cancelled without Save.
+- M9 final re-review/pass (2026-08-26): `rtk cargo fmt --all -- --check`; root `clippy --all-targets --all-features -D warnings`; root `test --all-targets --all-features` (180); `no_network_by_default` (1); `metadata_provider_mock` (1); desktop clippy; desktop all-targets (87), security (4), license (1); Vite+ fmt/check/full test (17 files/99)/build; `rtk vp -C desktop exec tauri build --debug --no-bundle`; and `rtk git diff --check` all passed. No M9 review finding remains open. Existing build warnings are unchanged and non-blocking.
 
 - M1 automated: `rtk cargo check -p unlockm-desktop --locked` passed; `rtk cargo test -p unlockm-desktop online_metadata --locked -- --test-threads=1` passed. `Cargo.lock` now records `keyring` 4.1.6 and `getrandom` 0.3.4.
 - M1 re-review evidence (reviewed/pass): `rtk cargo check -p unlockm-desktop --locked` passed; `rtk cargo test -p unlockm-desktop online_metadata --locked -- --test-threads=1` passed (8); `rtk cargo test --locked metadata::provider::spotify` passed (2); `rtk cargo test -p unlockm-desktop --test license_audit --locked` passed (1).

@@ -1,8 +1,13 @@
+/// <reference types="node" />
+
+import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import "../../i18n";
 import "../../styles/history.css";
 import { MetadataEditor, OnlineCover } from "./MetadataEditor";
+
+const historyCssSource = readFileSync("src/styles/history.css", "utf8");
 
 const api = vi.hoisted(() => ({
   listArtworkCandidates: vi.fn(),
@@ -177,6 +182,42 @@ test("MusicBrainz quick-fill exposes clean artist names to the editable draft", 
   expect(inputs.some((input) => (input as HTMLInputElement).value === "A, B")).toBe(true);
 });
 
+test("online candidates render as a counted list with labeled fields", async () => {
+  api.listArtworkCandidates.mockResolvedValue([]);
+  api.searchOnlineMetadata.mockResolvedValue([
+    {
+      provider: "musicBrainz",
+      requiresAuthorization: false,
+      artworkSource: "TheAudioDB",
+      attribution: "MusicBrainz; artwork on demand from TheAudioDB",
+      itemId: "11111111-1111-1111-1111-111111111111",
+      title: "Labeled result",
+      artists: ["First artist", "Second artist"],
+      album: "Result album",
+      durationMs: 262000,
+      coverHandle: "opaque-cover",
+    },
+  ]);
+  render(<MetadataEditor item={item} onClose={vi.fn()} onSaved={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Search MusicBrainz" }));
+  const result = await screen.findByRole("listitem", {
+    name: "Online match for Labeled result",
+  });
+  expect(Array.from(result.querySelectorAll("dt"), (label) => label.textContent)).toEqual([
+    "Title",
+    "Artist",
+    "Album",
+    "Duration",
+    "Metadata source",
+    "Cover source",
+  ]);
+  expect(result.textContent).toContain("First artist, Second artist");
+  expect(result.textContent).toContain("Result album");
+  expect(result.textContent).toContain("4:22");
+  expect(result.textContent).toContain("TheAudioDB");
+  expect(screen.getByText("1 matches")).toBeTruthy();
+});
+
 test("edits metadata, chooses a local artwork and supports Escape", async () => {
   onlineConnected();
   api.listArtworkCandidates.mockResolvedValue([
@@ -206,19 +247,56 @@ test("edits metadata, chooses a local artwork and supports Escape", async () => 
   expect(close).toHaveBeenCalled();
 });
 
-test("modal owns a vertical-scroll body and keeps the actions outside it", () => {
+test("parent rerenders do not steal focus and Escape uses the latest close callback", () => {
+  onlineConnected();
+  api.listArtworkCandidates.mockResolvedValue([]);
+  const firstClose = vi.fn();
+  const latestClose = vi.fn();
+  const { rerender } = render(
+    <MetadataEditor item={item} onClose={firstClose} onSaved={vi.fn()} />,
+  );
+  const artistInput = screen.getByRole("textbox", { name: "Artist" });
+  artistInput.focus();
+  expect(document.activeElement).toBe(artistInput);
+
+  rerender(<MetadataEditor item={item} onClose={latestClose} onSaved={vi.fn()} />);
+
+  expect(document.activeElement).toBe(artistInput);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(firstClose).not.toHaveBeenCalled();
+  expect(latestClose).toHaveBeenCalledTimes(1);
+});
+
+test("modal owns a split workspace and keeps the actions outside it", () => {
   onlineConnected();
   api.listArtworkCandidates.mockResolvedValue([]);
   render(<MetadataEditor item={item} onClose={vi.fn()} onSaved={vi.fn()} />);
-  const body = document.querySelector('[data-layout="vertical-scroll"]')!;
+  const body = document.querySelector('[data-layout="split-workspace"]')!;
   const actions = document.querySelector('[data-layout="actions-row"]')!;
+  const editorPane = document.querySelector(".metadata-editor-pane")!;
+  const onlinePane = document.querySelector(".metadata-online")!;
   expect(body.classList.contains("metadata-modal-body")).toBe(true);
   expect(actions.classList.contains("metadata-actions")).toBe(true);
   expect(body.contains(actions)).toBe(false);
+  expect(body.contains(editorPane)).toBe(true);
+  expect(body.contains(onlinePane)).toBe(true);
   expect(document.querySelector(".metadata-modal")?.children).toContain(actions);
-  expect(getComputedStyle(body).display).toBe("grid");
-  expect(getComputedStyle(body).overflowX).toBe("hidden");
-  expect(getComputedStyle(actions).display).toBe("flex");
+});
+
+test("local cover grid contains intrinsic images and reserves two title lines", () => {
+  expect(historyCssSource).toContain("grid-auto-rows: 150px");
+  expect(historyCssSource).toContain(
+    "grid-template-columns: repeat(auto-fill, minmax(112px, 1fr))",
+  );
+  expect(historyCssSource).toMatch(
+    /\.metadata-candidate-grid button \{[^}]*grid-template-rows: 104px minmax\(0, 2\.6em\);[^}]*overflow: hidden;/s,
+  );
+  expect(historyCssSource).toMatch(
+    /\.metadata-candidate-grid small \{[^}]*-webkit-line-clamp: 2;[^}]*overflow: hidden;/s,
+  );
+  expect(historyCssSource).toMatch(
+    /@media \(max-width: 860px\)[\s\S]*?\.metadata-modal-body \{[^}]*display: block;[^}]*overflow: auto;/,
+  );
 });
 
 test("releases before metadata IPC and restores updated or original track", async () => {
@@ -300,12 +378,16 @@ test("online text apply only changes the draft until Save", async () => {
 });
 
 test("online cover apply remains a draft change until Save", async () => {
-  onlineConnected();
+  const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:online-cover-draft");
+  const revoke = vi.spyOn(URL, "revokeObjectURL");
   api.listArtworkCandidates.mockResolvedValue([]);
   api.searchOnlineMetadata.mockResolvedValue([
     {
-      provider: "spotify",
-      itemId: "0123456789ABCDEFGHIJKL",
+      provider: "musicBrainz",
+      requiresAuthorization: false,
+      artworkSource: "TheAudioDB",
+      attribution: "MusicBrainz; artwork on demand from TheAudioDB",
+      itemId: "11111111-1111-1111-1111-111111111111",
       title: "Online title",
       artists: ["Online artist"],
       album: "Online album",
@@ -316,13 +398,18 @@ test("online cover apply remains a draft change until Save", async () => {
   api.getOnlineMetadataCoverPreview.mockResolvedValue(new ArrayBuffer(8));
   api.updateRunItemMetadata.mockResolvedValue(item);
   playback.releaseForItem.mockReturnValue({ track: item, wasPlaying: true });
-  render(<MetadataEditor item={item} onClose={vi.fn()} onSaved={vi.fn()} />);
+  const view = render(<MetadataEditor item={item} onClose={vi.fn()} onSaved={vi.fn()} />);
   await waitFor(() => expect(api.onlineMetadataStatus).toHaveBeenCalled());
-  await selectSpotify();
-  fireEvent.click(screen.getByRole("button", { name: "Search Spotify" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search MusicBrainz" }));
   expect(await screen.findByRole("button", { name: "Use cover" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Use cover" }));
   await waitFor(() => expect(api.getOnlineMetadataCoverPreview).toHaveBeenCalled());
+  expect(document.querySelector(".metadata-cover-preview")?.getAttribute("src")).toBe(
+    "blob:online-cover-draft",
+  );
+  expect(
+    screen.getAllByRole("status").some((status) => status.textContent?.includes("TheAudioDB")),
+  ).toBe(true);
   expect(api.updateRunItemMetadata).not.toHaveBeenCalled();
   expect(playback.releaseForItem).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -332,6 +419,41 @@ test("online cover apply remains a draft change until Save", async () => {
       expect.objectContaining({ cover: expect.any(Uint8Array) }),
     ),
   );
+  view.unmount();
+  expect(revoke).toHaveBeenCalledWith("blob:online-cover-draft");
+  create.mockRestore();
+  revoke.mockRestore();
+});
+
+test("online cover failure is visible above the result list and preserves the draft", async () => {
+  api.listArtworkCandidates.mockResolvedValue([]);
+  api.searchOnlineMetadata.mockResolvedValue([
+    {
+      provider: "musicBrainz",
+      requiresAuthorization: false,
+      artworkSource: "TheAudioDB",
+      attribution: "MusicBrainz; artwork on demand from TheAudioDB",
+      itemId: "11111111-1111-1111-1111-111111111111",
+      title: "No cover result",
+      artists: ["Artist"],
+      album: "Album",
+      durationMs: 1000,
+      coverHandle: "missing-cover",
+    },
+  ]);
+  api.getOnlineMetadataCoverPreview.mockRejectedValue({
+    code: "provider_unavailable",
+    detail: "private",
+  });
+  render(<MetadataEditor item={item} onClose={vi.fn()} onSaved={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Search MusicBrainz" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Use cover" }));
+  const alerts = await screen.findAllByRole("alert");
+  expect(
+    alerts.some((alert) => alert.textContent?.includes("The cover could not be fetched")),
+  ).toBe(true);
+  expect(document.querySelector(".metadata-cover-preview")).toBeNull();
+  expect(api.updateRunItemMetadata).not.toHaveBeenCalled();
 });
 
 test("a stale cover response cannot alter the next provider draft or busy state", async () => {
@@ -430,7 +552,7 @@ test("Fill all and Open in Spotify do not save or release playback", async () =>
   render(<MetadataEditor item={item} onClose={vi.fn()} onSaved={vi.fn()} />);
   await selectSpotify();
   fireEvent.click(await screen.findByRole("button", { name: "Search Spotify" }));
-  expect(await screen.findByText("Online")).toBeTruthy();
+  expect(await screen.findByRole("listitem", { name: "Online match for Online" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Open in Spotify" }));
   await waitFor(() =>
     expect(api.openOnlineMetadataResult).toHaveBeenCalledWith("spotify", "0123456789ABCDEFGHIJKL"),

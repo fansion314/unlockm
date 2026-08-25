@@ -19,6 +19,7 @@ pub const USER_AGENT: &str = concat!(
 pub const HOST: &str = "musicbrainz.org";
 pub const MAX_QUERY_SCALARS: usize = 200;
 pub const MAX_SEARCH_RESULTS: u8 = 10;
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 
@@ -96,10 +97,14 @@ impl MusicBrainzClient {
         Ok(Self {
             client: Client::builder()
                 .redirect(Policy::none())
-                .connect_timeout(Duration::from_secs(3))
+                // This bound includes DNS, TCP, and TLS establishment. TLS to
+                // the public service can exceed three seconds even when the
+                // request succeeds, so keep it bounded independently without
+                // cutting off the observed healthy path.
+                .connect_timeout(CONNECT_TIMEOUT)
                 // MusicBrainz search can take more than ten seconds during
-                // normal public-service load. Keep connection establishment
-                // tight, but give an accepted request enough time to finish.
+                // normal public-service load. Give the complete request an
+                // independent deadline after allowing connection setup.
                 .timeout(REQUEST_TIMEOUT)
                 .build()
                 .map_err(request_error)?,
@@ -186,7 +191,12 @@ pub fn recording_query(query: &str) -> Result<String, super::OnlineMetadataError
     if value.is_empty() || value.chars().count() > MAX_QUERY_SCALARS {
         return Err(super::OnlineMetadataError::InvalidInput);
     }
-    Ok(format!("recording:(\"{}\")", escape_lucene(value)))
+    // `dismax=true` selects MusicBrainz plain indexed search, which escapes
+    // special query syntax itself and searches the recording index's default
+    // fields. The editor combines title, artist, and album hints, so wrapping
+    // the whole value in `recording:` would incorrectly restrict every term
+    // to the recording-title field.
+    Ok(value.to_owned())
 }
 pub fn is_mbid(value: &str) -> bool {
     value.len() == 36
@@ -254,19 +264,6 @@ impl OnlineMetadataProvider for MusicBrainzProvider {
     fn kind(&self) -> OnlineMetadataProviderKind {
         OnlineMetadataProviderKind::MusicBrainz
     }
-}
-
-pub fn escape_lucene(value: &str) -> String {
-    value
-        .chars()
-        .flat_map(|c| {
-            if "+-!(){}[]^\"~*?:\\/".contains(c) {
-                vec!['\\', c]
-            } else {
-                vec![c]
-            }
-        })
-        .collect()
 }
 
 #[derive(Deserialize)]
@@ -486,9 +483,12 @@ mod tests {
         Url::parse(&format!("http://{address}/")).unwrap()
     }
     #[test]
-    fn escapes_reserved_query_syntax() {
-        assert_eq!(escape_lucene("a+b"), "a\\+b");
+    fn builds_bounded_plain_dismax_query() {
+        assert_eq!(recording_query("  a+b  ").unwrap(), "a+b");
+        assert!(recording_query("   ").is_err());
+        assert!(recording_query(&"x".repeat(MAX_QUERY_SCALARS + 1)).is_err());
         assert!(USER_AGENT.contains("UnlockM/"));
+        assert_eq!(CONNECT_TIMEOUT, Duration::from_secs(10));
         assert_eq!(REQUEST_TIMEOUT, Duration::from_secs(20));
     }
 
@@ -513,7 +513,8 @@ mod tests {
         assert!(request.contains(USER_AGENT));
         assert!(request.contains("limit=10"));
         assert!(request.contains("dismax=true"));
-        assert!(request.contains("recording%3A%28%22a%5C%2Bb%22%29"));
+        assert!(request.contains("query=a%2Bb"));
+        assert!(!request.contains("recording%3A"));
         assert_eq!(scheduler.0.load(Ordering::SeqCst), 1);
     }
     #[test]
