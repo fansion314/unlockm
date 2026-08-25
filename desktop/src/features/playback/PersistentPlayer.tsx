@@ -1,6 +1,6 @@
 import {
-  CaretLeft,
-  CaretRight,
+  ArrowLineLeft,
+  ArrowLineRight,
   Pause,
   Play,
   SpeakerHigh,
@@ -89,11 +89,13 @@ export function PersistentPlayer() {
         />
         <button
           className="play-button collapsed-play"
+          aria-hidden={!collapsed}
           aria-label={
             playback.playing ? t("app.pauseSong", { title }) : t("app.playSong", { title })
           }
           title={playback.playing ? t("app.pauseSong", { title }) : t("app.playSong", { title })}
           disabled={!collapsed}
+          tabIndex={collapsed ? 0 : -1}
           type="button"
           onClick={() => void playback.toggle(playback.track!)}
         >
@@ -165,12 +167,18 @@ export function PersistentPlayer() {
         ) : null}
       </div>
       <button
+        className="icon-button player-collapse-toggle"
+        data-collapse-direction={collapsed ? "expand-right" : "collapse-left"}
         type="button"
         onClick={() => setCollapsed((value) => !value)}
         aria-label={collapsed ? t("app.expandPlayer") : t("app.collapsePlayer")}
         title={collapsed ? t("app.expandPlayer") : t("app.collapsePlayer")}
       >
-        {collapsed ? <CaretRight aria-hidden="true" /> : <CaretLeft aria-hidden="true" />}
+        {collapsed ? (
+          <ArrowLineRight aria-hidden="true" size={19} weight="bold" />
+        ) : (
+          <ArrowLineLeft aria-hidden="true" size={19} weight="bold" />
+        )}
       </button>
     </aside>
   );

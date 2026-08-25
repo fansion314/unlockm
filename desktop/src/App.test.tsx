@@ -139,7 +139,7 @@ test("home omits rename while detail owns rename and rerun stays on the row", as
   await user.type(input, "Downloads");
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(api.renameRun).toHaveBeenCalledWith(partialRun.id, "Downloads");
-  await user.click(screen.getByRole("button", { name: "Back to conversions" }));
+  await user.click(screen.getByRole("button", { name: "Home" }));
   await user.click(await screen.findByRole("button", { name: "Run conversion again" }));
   expect(api.rerunConversion).toHaveBeenCalledWith(partialRun.id, expect.any(Function));
 });
@@ -287,10 +287,10 @@ test("dedicated row controls keep detail, reveal, and deletion isolated", async 
   });
   detail.focus();
   await user.keyboard("{Enter}");
-  expect(await screen.findByRole("button", { name: /Back to conversions/ })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Home" })).toBeTruthy();
   expect(api.deleteRun).not.toHaveBeenCalled();
 
-  await user.click(screen.getByRole("button", { name: /Back to conversions/ }));
+  await user.click(screen.getByRole("button", { name: "Home" }));
   await user.click(await screen.findByRole("button", { name: "Remove record" }));
   expect(confirm).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(api.deleteRun).toHaveBeenCalledWith(partialRun.id));

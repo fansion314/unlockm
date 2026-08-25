@@ -51,6 +51,9 @@
   --radius-large: 20px;
   --radius-round: 999px;
 
+  --topbar-block-size: 68px;
+  --detail-sticky-gap: 10px;
+
   --motion-fast: 160ms;
   --motion-standard: 220ms;
   --motion-page: 260ms;

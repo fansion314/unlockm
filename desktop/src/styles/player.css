@@ -1,4 +1,5 @@
 .persistent-player {
+  --player-disc-size: 42px;
   align-items: center;
   background: var(--surface-card);
   border: 1px solid var(--border-control);
@@ -23,18 +24,39 @@
   grid-template-columns: auto 0 auto;
   padding-inline: 10px;
 }
+
+.persistent-player.is-collapsed .player-collapse-toggle {
+  margin-inline-start: 8px;
+}
 .collapsed-artwork {
+  block-size: var(--player-disc-size);
+  inline-size: var(--player-disc-size);
   position: relative;
 }
 .collapsed-play {
+  align-items: center;
+  block-size: var(--player-disc-size) !important;
+  border-radius: 50%;
+  display: grid !important;
   inset: 0;
+  inline-size: var(--player-disc-size) !important;
+  justify-content: center;
   opacity: 0;
   position: absolute;
   transition: opacity 160ms ease;
+  visibility: hidden;
 }
 .persistent-player.is-collapsed:hover .collapsed-play,
 .persistent-player.is-collapsed:focus-within .collapsed-play {
   opacity: 1;
+}
+.persistent-player.is-collapsed .collapsed-play {
+  pointer-events: auto;
+  visibility: visible;
+}
+.persistent-player:not(.is-collapsed) .collapsed-play {
+  pointer-events: none;
+  visibility: hidden;
 }
 .player-expanded {
   align-items: center;
@@ -65,9 +87,9 @@
   animation: player-cover-spin 12s linear infinite;
   animation-play-state: paused;
   border-radius: 50%;
-  height: 42px;
+  height: var(--player-disc-size);
   object-fit: cover;
-  width: 42px;
+  width: var(--player-disc-size);
 }
 .player-cover-placeholder {
   align-items: center;
@@ -86,6 +108,15 @@
 .persistent-player .play-button {
   height: 40px;
   width: 40px;
+}
+.player-collapse-toggle {
+  align-self: center;
+  block-size: 42px;
+  inline-size: 42px;
+  line-height: 0;
+}
+.player-collapse-toggle svg {
+  display: block;
 }
 .player-progress {
   align-items: center;

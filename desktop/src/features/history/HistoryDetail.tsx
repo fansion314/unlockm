@@ -10,7 +10,7 @@ import {
   PencilSimple,
 } from "@phosphor-icons/react";
 import { motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { pageTransition } from "../../app/page-motion";
 import type {
@@ -25,6 +25,12 @@ import { formatBytes, formatDuration, formatTimestamp } from "../../lib/format";
 import { desktopApi } from "../../lib/ipc";
 import { usePlayback } from "../playback/PlaybackProvider";
 import { MetadataEditor } from "../metadata/MetadataEditor";
+import {
+  clampTitleAlbumRatio,
+  MAX_TITLE_ALBUM_RATIO,
+  MIN_TITLE_ALBUM_RATIO,
+  visibleItemNumber,
+} from "./layout";
 
 type HistoryDetailProps = {
   layoutId: string;
@@ -34,6 +40,22 @@ type HistoryDetailProps = {
   onRename: (runId: number, displayName: string) => Promise<void>;
   onError: (this: void, error: unknown) => void;
 };
+
+function useWideSongLayout(): boolean {
+  const query = "(min-width: 821px)";
+  const [wide, setWide] = useState(
+    () => typeof window.matchMedia !== "function" || window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(query);
+    const update = () => setWide(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return wide;
+}
 
 export function Artwork({
   artworkId,
@@ -146,9 +168,14 @@ export function HistoryDetail({
   );
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [titleAlbumRatio, setTitleAlbumRatio] = useState(60);
   const requestSequence = useRef(0);
+  const draggingSeparatorPointer = useRef<number | null>(null);
+  const draggingSeparatorTarget = useRef<HTMLElement | null>(null);
+  const stopWindowSeparatorDrag = useRef<(() => void) | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const playback = usePlayback();
+  const wideSongLayout = useWideSongLayout();
 
   useEffect(() => {
     if (!renaming) return;
@@ -235,6 +262,69 @@ export function HistoryDetail({
   }, [page, pageCount]);
 
   const runDuration = run.finishedAtMs === null ? null : run.finishedAtMs - run.createdAtMs;
+  const mediaRowStyle = {
+    "--title-track": `${titleAlbumRatio}fr`,
+    "--album-track": `${100 - titleAlbumRatio}fr`,
+  } as CSSProperties;
+  const updateTitleAlbumRatioFromPointer = (target: HTMLElement, clientX: number) => {
+    const grid = target.closest<HTMLElement>(".song-layout-grid");
+    const titleCell = grid?.querySelector<HTMLElement>(".song-title-track");
+    const albumCell = grid?.querySelector<HTMLElement>(".song-album-track");
+    if (!titleCell || !albumCell) return;
+    const start = titleCell.getBoundingClientRect().left;
+    const end = albumCell.getBoundingClientRect().right;
+    if (end <= start) return;
+    setTitleAlbumRatio(clampTitleAlbumRatio(((clientX - start) / (end - start)) * 100));
+  };
+  const finishSeparatorDrag = (target: HTMLElement, pointerId: number) => {
+    if (draggingSeparatorPointer.current !== pointerId) return;
+    if (
+      typeof target.hasPointerCapture === "function" &&
+      target.hasPointerCapture(pointerId) &&
+      typeof target.releasePointerCapture === "function"
+    ) {
+      target.releasePointerCapture(pointerId);
+    }
+    draggingSeparatorPointer.current = null;
+    draggingSeparatorTarget.current = null;
+    stopWindowSeparatorDrag.current?.();
+    stopWindowSeparatorDrag.current = null;
+  };
+  const startSeparatorDrag = (target: HTMLElement, pointerId: number, clientX: number) => {
+    draggingSeparatorPointer.current = pointerId;
+    draggingSeparatorTarget.current = target;
+    target.focus({ preventScroll: true });
+    if (typeof target.setPointerCapture === "function") {
+      target.setPointerCapture(pointerId);
+    }
+    updateTitleAlbumRatioFromPointer(target, clientX);
+
+    const onWindowPointerMove = (event: PointerEvent) => {
+      if (draggingSeparatorPointer.current === event.pointerId && draggingSeparatorTarget.current) {
+        updateTitleAlbumRatioFromPointer(draggingSeparatorTarget.current, event.clientX);
+      }
+    };
+    const onWindowPointerEnd = (event: PointerEvent) => {
+      if (draggingSeparatorPointer.current === event.pointerId && draggingSeparatorTarget.current) {
+        finishSeparatorDrag(draggingSeparatorTarget.current, event.pointerId);
+      }
+    };
+    stopWindowSeparatorDrag.current?.();
+    stopWindowSeparatorDrag.current = () => {
+      window.removeEventListener("pointermove", onWindowPointerMove);
+      window.removeEventListener("pointerup", onWindowPointerEnd);
+      window.removeEventListener("pointercancel", onWindowPointerEnd);
+    };
+    window.addEventListener("pointermove", onWindowPointerMove);
+    window.addEventListener("pointerup", onWindowPointerEnd);
+    window.addEventListener("pointercancel", onWindowPointerEnd);
+  };
+  useEffect(
+    () => () => {
+      stopWindowSeparatorDrag.current?.();
+    },
+    [],
+  );
   const startRename = () => {
     setRenameValue(run.displayName || run.inputPath.split(/[\\/]/).pop() || run.inputPath);
     setRenameError(null);
@@ -268,7 +358,7 @@ export function HistoryDetail({
     <section className="detail-view" aria-labelledby="detail-title">
       <button className="back-button detail-back-pill" type="button" onClick={onBack}>
         <ArrowLeft aria-hidden="true" size={18} />
-        {t("app.back")}
+        {t("app.backHome")}
       </button>
 
       <motion.header
@@ -363,7 +453,10 @@ export function HistoryDetail({
       </motion.header>
 
       <div className="detail-toolbar" data-reduced-motion={reducedMotion}>
-        <label className={`compact-filter search-control ${searchInput ? "is-expanded" : ""}`}>
+        <label
+          className={`compact-filter search-control ${searchInput ? "is-expanded has-clear" : ""}`}
+          data-has-clear={Boolean(searchInput)}
+        >
           <MagnifyingGlass aria-hidden="true" size={18} />
           <input
             aria-label={t("app.searchSongs")}
@@ -389,7 +482,7 @@ export function HistoryDetail({
         </label>
         <label className={`compact-filter ${artist ? "is-expanded" : ""}`}>
           <span>{t("app.artist")}</span>
-          <span className="filter-field">
+          <span className="filter-field" data-has-clear={Boolean(artist)}>
             <input
               list="artist-options"
               value={artist}
@@ -421,7 +514,7 @@ export function HistoryDetail({
         </label>
         <label className={`compact-filter ${album ? "is-expanded" : ""}`}>
           <span>{t("app.album")}</span>
-          <span className="filter-field">
+          <span className="filter-field" data-has-clear={Boolean(album)}>
             <input
               list="album-options"
               value={album}
@@ -453,7 +546,7 @@ export function HistoryDetail({
         </label>
         <label className="compact-select">
           <span>{t("app.result")}</span>
-          <span className="filter-field">
+          <span className="filter-field" data-has-clear={Boolean(outcome)}>
             <select
               value={outcome}
               onChange={(event) => {
@@ -508,12 +601,7 @@ export function HistoryDetail({
         </label>
       </div>
 
-      <div className="list-summary" aria-live="polite">
-        <span>{t("app.filteredSongs", { count: filteredTotal })}</span>
-        {companionCount > 0 ? <span>{t("app.companions", { count: companionCount })}</span> : null}
-      </div>
-
-      <div className="song-list" aria-busy={loading}>
+      <div className="song-list" aria-busy={loading} style={mediaRowStyle}>
         {loading ? (
           <div className="detail-skeletons" aria-hidden="true">
             {Array.from({ length: 6 }, (_, index) => (
@@ -532,8 +620,60 @@ export function HistoryDetail({
         {!loading && !loadError && items.length === 0 ? (
           <div className="empty-history">{t("app.noItems")}</div>
         ) : null}
+        {!loading && !loadError && items.length > 0 ? (
+          <div className="song-list-header song-layout-grid">
+            <span className="song-list-count" aria-live="polite">
+              {t("app.filteredSongs", { count: filteredTotal })}
+              {companionCount > 0 ? ` · ${t("app.companions", { count: companionCount })}` : null}
+            </span>
+            <span className="song-title-track">{t("app.columnSong")}</span>
+            {wideSongLayout ? (
+              <div
+                aria-label={t("app.adjustTitleAlbumColumns")}
+                aria-orientation="vertical"
+                aria-valuemax={MAX_TITLE_ALBUM_RATIO}
+                aria-valuemin={MIN_TITLE_ALBUM_RATIO}
+                aria-valuenow={titleAlbumRatio}
+                className="title-album-separator"
+                onKeyDown={(event) => {
+                  switch (event.key) {
+                    case "ArrowLeft":
+                      event.preventDefault();
+                      setTitleAlbumRatio((value) => clampTitleAlbumRatio(value - 5));
+                      break;
+                    case "ArrowRight":
+                      event.preventDefault();
+                      setTitleAlbumRatio((value) => clampTitleAlbumRatio(value + 5));
+                      break;
+                    case "Home":
+                      event.preventDefault();
+                      setTitleAlbumRatio(MIN_TITLE_ALBUM_RATIO);
+                      break;
+                    case "End":
+                      event.preventDefault();
+                      setTitleAlbumRatio(MAX_TITLE_ALBUM_RATIO);
+                      break;
+                  }
+                }}
+                role="separator"
+                tabIndex={0}
+                title={t("app.adjustTitleAlbumColumns")}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  startSeparatorDrag(event.currentTarget, event.pointerId, event.clientX);
+                }}
+              />
+            ) : (
+              <span className="title-album-spacer" aria-hidden="true" />
+            )}
+            <span className="song-album-track">{t("app.columnAlbum")}</span>
+            <span className="format-cell">{t("app.columnFormat")}</span>
+            <span className="file-facts">{t("app.columnFacts")}</span>
+            <span className="song-actions-heading">{t("app.columnActions")}</span>
+          </div>
+        ) : null}
         {!loading && !loadError
-          ? items.map((item) => {
+          ? items.map((item, index) => {
               const title = itemTitle(item);
               const active = playback.activeItemId === item.id;
               const playable =
@@ -543,12 +683,14 @@ export function HistoryDetail({
               const toggleTrack = () => void playback.toggle(item).catch(onError);
               return (
                 <article
-                  className={`music-item ${active ? "is-active" : ""}`}
+                  className={`music-item song-layout-grid ${active ? "is-active" : ""}`}
                   key={item.id}
                   onClick={(event) => {
                     if (
                       !playable ||
-                      (event.target as HTMLElement).closest("button, input, select, a")
+                      (event.target as HTMLElement).closest(
+                        "button, input, select, a, [role='separator']",
+                      )
                     ) {
                       return;
                     }
@@ -572,7 +714,7 @@ export function HistoryDetail({
                     onClick={toggleTrack}
                   >
                     <span className="track-number">
-                      {String(item.ordinal + 1).padStart(2, "0")}
+                      {String(visibleItemNumber(page, query.pageSize, index)).padStart(2, "0")}
                     </span>
                     <span className="track-toggle" aria-hidden="true">
                       {active && playback.playing ? (
@@ -583,37 +725,53 @@ export function HistoryDetail({
                     </span>
                   </button>
                   <VisibleArtwork artworkId={item.artworkId} title={title} />
-                  <div className="music-copy">
+                  <div className="music-copy song-title-track">
                     <strong>{title}</strong>
-                    <button
-                      className="metadata-link"
-                      type="button"
-                      onClick={() => {
-                        if (item.artist) {
-                          setArtist(item.artist);
+                    {item.artist ? (
+                      <button
+                        className="metadata-link"
+                        title={item.artist}
+                        type="button"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setArtist(item.artist!);
                           setPage(1);
-                        }
+                        }}
+                      >
+                        {item.artist}
+                      </button>
+                    ) : (
+                      <span className="metadata-value">{t("app.unknownArtist")}</span>
+                    )}
+                  </div>
+                  <span className="title-album-spacer" aria-hidden="true" />
+                  {item.album ? (
+                    <button
+                      className="album-cell song-album-track metadata-link"
+                      title={item.album}
+                      type="button"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setAlbum(item.album!);
+                        setPage(1);
                       }}
                     >
-                      {item.artist || t("app.unknownArtist")}
+                      {item.album}
                     </button>
-                  </div>
-                  <button
-                    className="album-cell metadata-link"
-                    type="button"
-                    onClick={() => {
-                      if (item.album) {
-                        setAlbum(item.album);
-                        setPage(1);
-                      }
-                    }}
-                  >
-                    {item.album || t("app.unknownAlbum")}
-                  </button>
+                  ) : (
+                    <span className="album-cell song-album-track metadata-value">
+                      {t("app.unknownAlbum")}
+                    </span>
+                  )}
                   <div className="format-cell">
                     <strong>{item.outputFormat?.toUpperCase() || t("app.unknownFormat")}</strong>
                     {!(["converted", "skipped"] as string[]).includes(item.outcome) ? (
-                      <small className={`outcome outcome-${item.outcome}`}>
+                      <small
+                        className={`outcome outcome-${item.outcome}`}
+                        title={t(`app.${item.outcome}`)}
+                      >
                         {t(`app.${item.outcome}`)}
                       </small>
                     ) : null}

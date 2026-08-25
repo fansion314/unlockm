@@ -4,11 +4,11 @@
 
 In Review
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 ## Objective
 
-改进 UnlockM 桌面端的长期音乐库使用体验：允许为历史转换任务命名并基于原配置原位重新扫描执行；让标准音频、格式与码率事实正确进入任务详情；把播放能力提升为跨主页/详情页和分页持续存在、带安全默认音量与单曲循环的全局播放器；提供安全、原子、可恢复且不溢出应用窗口的输出音乐元数据编辑；补齐长列表导航、紧凑筛选、单行媒体资料库布局、macOS/Windows 界面密度与多配色偏好。
+改进 UnlockM 桌面端的长期音乐库使用体验：允许为历史转换任务命名并基于原配置原位重新扫描执行；让标准音频、格式与码率事实正确进入任务详情；把播放能力提升为跨主页/详情页和分页持续存在、带安全默认音量与单曲循环的全局播放器；提供安全、原子、可恢复且不溢出应用窗口的输出音乐元数据编辑；补齐长列表导航、紧凑筛选、单行媒体资料库布局、macOS/Windows 界面密度与多配色偏好；并针对 v0.3.1 的实际界面反馈，精修 sticky 主页入口、多语言筛选宽度、可见结果序号、可拖动标题/专辑列和播放器收展控件几何。
 
 完成后，用户应能在不接触文件路径或数据库细节的前提下管理历史任务和输出音乐；CLI 的转换语义、源文件保留、原子发布、路径 containment、碰撞处理和有界处理等核心不变量保持不变。
 
@@ -16,13 +16,16 @@ Last updated: 2026-08-24
 
 - 历史任务新增可持久化名称、重命名入口和“重新执行”入口。
 - 重跑从历史记录读取原输入、输出和设置，重新扫描当前文件树并原位替换同一 run ID 的执行事实与歌曲明细；显示名保持不变、任务更新时间刷新、历史列表记录数不增加。
-- 主页与详情页的长列表提供滚动后出现的固定“返回顶部”按钮；详情页固定左上角“回到主页”入口使用有背景、边框和阴影的紧凑按钮，滚动时不能与内容文字混在一起。
+- 主页与详情页的长列表提供滚动后出现的固定“返回顶部”按钮；详情页固定左上角“返回主页”入口使用有背景、边框和阴影的紧凑按钮，sticky 后与 68px 顶栏之间保持明确视觉间隔，不能贴边或与内容文字混在一起。
 - 将唯一的 `<audio>` 引擎和播放状态提升到页面切换之外，增加左下角固定、可收起的播放器，展示圆形封面、歌曲名、歌手、专辑、进度和时长，并提供音量滑杆、静音/恢复、低于 100% 的安全默认音量和单曲循环。
-- 详情歌曲行改为紧凑单行媒体资料库布局：序号/悬停播放、封面、标题+歌手两行、独立专辑列、格式列、右对齐大小+码率列与操作列；整行的非操作区域可点击播放，歌手/专辑可点击并应用对应筛选。
+- 详情歌曲行改为紧凑单行媒体资料库布局：序号/悬停播放、封面、标题+歌手两行、独立专辑列、格式列、右对齐大小+码率列与操作列；序号按当前查询结果顺序连续显示，标题与专辑共同占满固定列以外的空间并可由用户拖动分割比例；整行的非操作区域可点击播放，歌手/专辑只有实际文本区域可点击并应用对应筛选。
 - 新增单曲元数据编辑弹窗，可编辑/清空标题、歌手和专辑，可上传不超过 10 MiB 的受支持图片，也可选择本地历史中已有的封面；相同专辑封面优先展示。弹窗和候选区域必须受当前应用 viewport 约束并提供内部滚动，底部操作始终可达。
 - 在任务详情中展示每首音乐的码率；标准音频即使走 passthrough copy，也作为音乐而不是 companion 显示、筛选和播放。
 - 修复带较大 ID3/APE 前置标签的 MP3 只读 8 KiB 后被显示为“未知格式”的问题，并修复可安全识别的旧历史事实。
-- 搜索、歌手、专辑、结果筛选各自拥有输入框内部的条件式小型清空按钮；搜索/歌手/专辑默认保持紧凑坍缩，仅在 focus 或已有值时平滑展开，结果和排序控件按内容宽度收紧。
+- 搜索、歌手、专辑、结果筛选各自拥有输入框内部的条件式小型清空按钮；搜索/歌手/专辑默认保持紧凑坍缩，但坍缩宽度仍须完整显示中/英/日当前占位文案，仅在 focus 或已有值时平滑展开，结果和排序控件按内容宽度收紧。
+- 独立播放器展开时彻底隐藏封面 hover 播放层；折叠时封面与播放层使用同一圆形尺寸并完全重合。收展入口使用 Phosphor 方向图标和专用居中 icon-button 几何，不显示形似原始 `<>` 字符的未对齐控件。
+- 折叠播放器的圆形封面与展开入口在共享 fixed geometry 中保留约 8px 的单一、不会双算的可见间隔。
+- 歌曲列表只在与行列严格对齐的紧凑 column header 中提供一个可访问的标题/专辑拖动 handle；歌曲行保留无视觉线、无交互/tab stop 的同一 spacer track，并显示歌曲/专辑/格式/大小与码率等本地化列标题。
 - 保留亮/暗模式，并新增默认蓝、翡翠绿、紫罗兰、暖橙四种配色风格，持久化到 Rust preferences。
 - 为 macOS 和 Windows 建立共用的界面密度基线：同步增大字体、图标、控件和列表信息密度，收紧当前过大的卡片空白、间距与 padding；再使用 Tauri 原生窗口缩放率和缩放变化事件做有上限的校准，避免整页 `zoom`/transform 造成模糊或布局溢出。
 - 更新中/英/日三套文案、Rust/TypeScript IPC 契约、自动化测试、手工 QA 清单及 `ARCHITECTURE.md`。
@@ -36,8 +39,13 @@ Last updated: 2026-08-24
 - 不改变 CLI 的复制开关、覆盖策略、输出布局、watch 模式或命令行界面；共享 runner 只补充媒体分类/事实，不改变发布结果。
 - 不自动覆盖重跑时已经存在的输出文件。重跑沿用历史快照中的 `overwrite = false`，已有输出记为 skipped，新下载的文件正常进入同一规划管线；“原位替换”只针对 SQLite 中该任务的执行事实和条目。
 - 不批量编辑整张专辑的标签；本计划只提供单曲编辑和相同专辑封面快捷选择。
+- 不修改 SQLite 查询、持久化 ordinal 或后端分页协议来实现界面序号；序号仅由当前筛选/排序结果中的分页位置派生，不写回持久化数据。
+- 不把标题/专辑分割比例写入 Rust preferences 或 SQLite；本轮只在当前详情会话内保持比例，重新打开应用使用经过验收的默认比例。
+- 不为窄于现有 820px 断点的布局强行保留专辑列或拖动手柄；该断点继续优先保证标题、播放和操作按钮可达。
 
 ## Current Context
+
+### 2026-08-23 原始基线（M1–M8 已实现，保留作决策背景）
 
 - `desktop/src/App.tsx` 同时拥有主页/详情页切换、历史列表和转换启动状态。任务显示名目前直接取 `inputPath` basename；历史行只有详情、显示输出目录和删除操作。
 - `desktop/src/features/history/HistoryDetail.tsx` 当前拥有唯一 `<audio>`、active item、播放时间和进度状态。组件卸载、分页或筛选导致活动条目离开当前 25 条结果时会执行 `stopAudio()`，因此返回主页或翻页会停止播放。
@@ -58,6 +66,16 @@ Last updated: 2026-08-24
 - 当前歌曲行把标题、歌手、专辑堆成三行，并单独常显播放按钮；需要改为资料库式列布局，同时保证编辑/显示目录/默认打开按钮不会被整行播放点击吞掉。
 - 当前 metadata modal 只有固定 `max-width`，没有 viewport 高度上限或滚动容器；12 个候选加表单已足以在较矮窗口中把操作按钮挤出可见区域。
 - 当前 `PlayerArtwork` 在 `artworkId` 变为 `null` 时提前 return 而不清除旧 object URL，封面动画只由“展开”状态控制；播放器 DOM 在收起时移除封面，播放按钮位于整条布局最左而不是进度条左侧，并使用加减号作为收展图标。
+
+### 2026-08-25 v0.3.1 当前修复基线
+
+- v0.3.1 当前基线是干净提交 `d0487d03e786967127aa35706522105d9c44dda4`，本地 annotated `v0.3.1` tag 未推送；M7–M8 的代码 findings 已闭环，但 Windows T6.3 原生 DPI/runtime/跨显示器 QA 仍开放。本轮是对同一活动计划的后续 UI 精修，因此重开为 `Ready`，不另建重复计划。
+- 2026-08-25 的四张 PixPin 截图分别位于 `/Users/peilin/Library/Application Support/PixPin/Temp/PixPin_2026-08-25_16-58-52.png`、`PixPin_2026-08-25_17-00-36.png`、`PixPin_2026-08-25_17-04-28.png` 和 `PixPin_2026-08-25_17-11-44.png`；它们显示 sticky 返回入口贴住顶栏、英文搜索占位被截断、筛选结果序号跳号/右侧列距失衡，以及播放器封面覆盖层/收展控件的几何问题。
+- `desktop/src/App.css` 把 `.topbar-inner` 高度硬编码为 `68px`，`desktop/src/styles/history.css` 又把 `.back-button` 的 `top` 写为同一个 `68px`，sticky 生效时没有额外间距；`desktop/src/i18n/locales/*` 的 `app.back` 仍是“返回转换列表 / Back to conversions / 変換一覧に戻る”。
+- 同一 CSS 将普通 compact filter 的坍缩宽度写死为 `112px`、搜索写死为 `144px`。搜索还要容纳 18px 图标、gap 和 padding，导致 `Search songs` 等文案在未 focus 时被截断；歌手/专辑的最长日文占位也没有原生窗口验收保障。
+- `HistoryDetail.tsx` 当前用 `item.ordinal + 1` 渲染序号；该 ordinal 是持久化的原扫描顺序，所以筛选或非 ordinal 排序后会出现 `02, 03, 05, 07`。`.music-item` 的 `1.25fr / 0.8fr / 68px / minmax(..., 0.45fr)` 轨道让大小/码率列继续吞掉剩余空间，形成格式列后的异常空白。
+- 歌手和专辑都是 `<button>` grid item；缺少 `justify-self: start`/intrinsic inline sizing 时会沿整列 stretch，视觉文字右侧的空白也成为筛选 hit area，与整行点击播放发生误操作。
+- `PersistentPlayer.tsx` 已使用 Phosphor `CaretLeft/CaretRight` SVG，但切换按钮没有专用 class/居中尺寸，视觉仍像未居中的 `<`/`>` 字符。封面是 `42px`，通用 `.persistent-player .play-button` 把覆盖按钮固定成 `40px`；展开态仅依靠 `.collapsed-play { opacity: 0 }` 和 `disabled`，不足以建立“不可见且不可命中”的强状态契约。
 
 ## Design and Decisions
 
@@ -127,6 +145,28 @@ Last updated: 2026-08-24
 - 歌手与专辑使用低装饰的文本按钮，点击后只设置对应筛选、清空其它无关状态不在本次范围，并回到第 1 页；空值继续显示不可点击的 unknown 文案。
 - metadata dialog 使用 `max-block-size: calc(100dvh - safe-area - margin)`；标题和底部 actions 固定在 dialog 内，表单主体与候选 grid 在中间滚动。候选区有可见、可键盘滚动的 bounded region，确保 920×600 等矮窗口中 Save/Cancel 始终可达。
 - 详情分页靠容器右侧对齐，并为 safe-area/播放器留出最小间距；在窄窗口播放器接近全宽时，分页可换行到独立行但不能位于播放器下方不可点击。
+
+### 9. Sticky 主页入口与本地化 compact filter 宽度
+
+- 以共享 `--topbar-height`（或同等单一 token）驱动 `.topbar-inner` 高度和 `.detail-back-pill` 的 sticky offset；返回按钮的 `top` 为顶栏高度加一个稳定 spacing token，在 920×600、1080×760、native density 调整和 safe-area 下都保留约 8–12px 的清晰间隔。
+- 将可见文案改为 `返回主页 / Home / ホーム`，使用明确的 `app.backHome`（或等价专用 key）避免继续把主页导航叫作“转换列表”。箭头图标、按钮语义、focus ring 和现有 `onBack`/scroll reset 行为保持。
+- compact filter 的“坍缩”表示不占满剩余行，而不是裁掉自身提示。搜索、歌手、专辑分别设置能容纳当前支持语言最长占位、图标、clear-slot 和 padding 的 collapsed minimum；focus/有值后仍使用 clamp 展开，窄窗口允许整控件换行而不压缩内部文字。
+- CSS 不依赖实验性的 `field-sizing: content` 或运行时文字测量；使用可审查的 control-size variables/min-inline-size，并在中/英/日原生 WebView 下逐项确认。`prefers-reduced-motion` 仍关闭宽度动画。
+
+### 10. 当前结果序号与可拖动标题/专辑分栏
+
+- 展示序号由当前筛选/排序结果中的分页位置派生：`(page - 1) * pageSize + visibleIndex + 1`。完整结果从 `01` 开始，翻页后连续编号；例如 `pageSize=10` 时第二页从 `11` 开始。持久化 `item.ordinal` 仍只用于后端原始顺序排序，不改 schema/DTO，也不保存展示序号。
+- 桌面行把标题/歌手与专辑放入同一个“可分割的剩余空间”区域；格式、大小+码率和三项 actions 使用所有行共享的稳定 fixed CSS token tracks 与同一 column gap，不允许 facts 轨道继续按 `fr` 扩张或因单行事实文本改变。长标题/专辑使用 ellipsis，右侧信息和操作不漂移。
+- `HistoryDetail` 维护 session-only `titleAlbumRatio`，默认采用接近当前视觉的标题偏宽比例。歌曲列表 header 与各行使用相同 leading/flexible/trailing CSS grid tracks；header 是唯一渲染实际 line/drag handle 的位置，歌曲行只保留同宽、`aria-hidden` 的视觉空 spacer。因此任一 ratio 变化仍让全部行对齐，但不会重复出现竖线或 tab stop。pointer drag 使用 pointer capture 并把比例 clamp 在可读范围（建议标题占可变区 35%–75%），不会触发行播放。窗口 resize 后按比例重新布局，不存入 preferences。
+- header separator 使用 `role="separator"`、`aria-orientation="vertical"`、本地化 label/`aria-valuenow`，左右方向键以固定步长调整，Home/End 到达安全边界，focus ring 可见；820px 以下专辑列隐藏时 header、handle 和 tab stop 同步移除。header 至少以中/英/日显示歌曲、专辑、格式、大小与码率列；操作列可保持无文字标题。
+- 歌手/专辑按钮使用 intrinsic/fit-content hit area、`justify-self: start` 和 `max-inline-size: 100%`；可见文字被 ellipsis 时仍保留完整 accessible name/title。只有实际文字（加必要 focus padding）触发筛选，列内其余空白继续走整行播放。
+
+### 11. 播放器覆盖层、圆形几何与收展图标
+
+- 定义一个共享 `--player-disc-size`；`.collapsed-artwork`、真实封面、占位封面和 `.collapsed-play` 都使用同一 block/inline size、`border-radius: 50%`、`box-sizing: border-box` 和居中 grid，移除通用 40px play-button 对该覆盖层的尺寸覆盖。
+- 展开态对 `.collapsed-play` 同时应用 `opacity: 0`、`visibility: hidden`、`pointer-events: none`，并保持 disabled/不可聚焦；只有 `.is-collapsed:hover` 或 `.is-collapsed:focus-within` 才切换为可见。这样过渡仍平滑，但展开态不会留下淡色圆形或合成层残影。
+- 收展按钮使用 `ArrowLineLeft/ArrowLineRight`（或经原生 QA 确认等价的 Phosphor 方向 icon），配专用 `.player-collapse-toggle`：固定方形 hit target、`display: grid; place-items: center`、零 line-height 和一致 hover/focus surface。expanded 表示向左收起，collapsed 表示向右展开；不渲染文本尖括号。
+- 保留现有 mounted expanded-content 动画、`inert`、native loop、音量、旋转暂停角度和 reduced-motion 行为；本轮只修视觉/命中几何，不改变 PlaybackProvider 状态机。
 
 ## Milestones
 
@@ -239,6 +279,57 @@ Last updated: 2026-08-24
   - Modal tests 覆盖 viewport CSS contract、scroll region、12 个候选、矮窗口键盘访问、Escape/backdrop/Save/Cancel。
   - macOS 原生应用使用有封面→无封面、播放→暂停→恢复→单曲循环、展开→收起、长候选与滚动到底分页场景复验；记录 Windows 缺口但不以 macOS 代替。
 
+### M9 — 主页入口留白与完整 compact filter 文案
+
+- Goal: 详情页 sticky 导航与筛选工具栏在滚动、多语言和窄窗口下保持精致、清楚且不截断自身提示。
+- Dependencies: 已完成的 T3.5/T7.3/T7.4；共享 topbar/density token 和三语言 i18n。
+- Acceptance criteria:
+  - sticky “返回主页”按钮与顶栏在所有滚动位置保留稳定间隔，不触碰顶栏 border，也不覆盖详情标题或歌曲行；中/英/日视觉文案分别为 `返回主页 / Home / ホーム`。
+  - 搜索、歌手、专辑在空值且 blur 的 compact 状态完整显示当前语言的 placeholder；focus/有值平滑展开，清空后恢复 compact，工具栏仍能 wrap 且结果/排序不被迫拉长。
+  - 键盘 focus、reduced motion、light/dark 和 920×600 窄窗口行为不回归。
+- Validation:
+  - `HistoryDetail.test.tsx` 与 locale parity tests 覆盖新 key、既有 onBack/query/clear 语义和 compact state hooks。
+  - macOS native bundle 逐一切换中/英/日，在 920×600、1080×760 中截图核对 sticky gap 和五个工具栏控件；Windows 结果并入 T6.3。
+
+### M10 — 可见结果序号与可访问的标题/专辑分割
+
+- Goal: 歌曲行使用连续、可理解的界面序号，并让用户在不破坏右侧信息密度的前提下调整标题与专辑空间。
+- Dependencies: 已完成的 T7.5/T7.6；现有 server-side filter/sort/page query 保持不变。
+- Acceptance criteria:
+  - 任意筛选或排序后的完整结果集都从 `01` 连续编号；翻页后从上一页末尾继续，且 hover/active 仍在同一位置替换为 play/pause。
+  - 标题/歌手和专辑占满 fixed leading/trailing columns 之外的全部空间；格式、大小+码率和 actions 之间采用一致紧凑 gap，没有 screenshot 3 所示 FLAC 后大段空白。
+- 每个对齐的 separator 都可用 pointer 拖动并通过键盘调整同一比例，比例被 clamp、所有可见行同步对齐；820px 以下隐藏专辑列时不残留 handle 或 tab stop。
+  - 点击歌手/专辑实际文字才筛选；点击其列内空白播放当前行，编辑/reveal/open 继续隔离。
+- Validation:
+  - React tests 覆盖 filtered/sorted/page-relative numbering、ratio clamp/keyboard、separator ARIA/窄断点 hook、metadata-link 与 row click 隔离。
+  - 原生 QA 使用短/长/未知元数据、筛选后 ordinal 有缺口的真实 25+ 首列表，拖到最小/默认/最大比例并 resize 窗口，核对 ellipsis、列距和命中区域。
+
+### M11 — 播放器覆盖层与收展 icon 几何闭环
+
+- Goal: 播放器在展开/折叠/hover/focus 状态下只显示应有控件，圆形封面和所有 icon 精确对齐。
+- Dependencies: 已完成的 T8.2/T8.3；不修改 PlaybackProvider/audio 行为。
+- Acceptance criteria:
+  - 展开态封面上不存在可见或可命中的 collapsed play/pause 覆盖层；折叠态封面与覆盖按钮同尺寸、同圆心、无多出一圈或偏移。
+  - 收展按钮使用 Phosphor direction icon，固定方形 hit target 内水平/垂直居中，方向与 expanded/collapsed 状态一致，并保留 aria-label/title。
+  - hover/focus 过渡、封面旋转/暂停角度、native loop、音量和 reduced-motion 均不回归。
+- Validation:
+  - `PersistentPlayer.test.tsx` 覆盖 expanded hidden contract、collapsed enable/visibility、共享尺寸 class/token、toggle icon/state 和现有 playback assertions。
+  - macOS native bundle 在真实封面/占位封面、playing/paused、expanded/collapsed 与 hover/focus 中做高倍率截图；Windows 运行态检查并入 T6.3。
+
+### M12 — 结果内联列标题、可用拖动手柄与折叠播放器精确留白
+
+- Goal: 消除每首歌曲重复的分割线与可访问焦点，把结果计数和列标题合并为一行且让唯一拖动手柄在真实原生 WebView 中可靠工作；同时修正右侧列的视觉间距与折叠播放器唱片/展开按钮的拥挤几何。
+- Dependencies: M10 shared ratio/grid and M11 shared player disc token.
+- Acceptance criteria:
+  - 宽屏列表没有额外独立 header 行：结果计数（及 companion count）占 leading index+cover 区域，同一行依次显示歌曲、唯一 `role=separator`、专辑、格式、大小/码率和明确的操作列；行中没有可见竖线、role separator 或 tab stop，但 title/album/facts/actions 与该行共同 tracks 精确对齐。
+  - 唯一 handle 可通过真实 pointer drag、keyboard、ARIA 调整同一 session ratio；测试以有 geometry 的 pointerDown/move 验证 60 变为非 60。WKWebView 若 element pointer capture 不能持续，则 drag 生命周期改由 window listeners 可靠承接；820px 以下 album/handle 同时消失，不保留无效焦点。
+  - 有值 artist/album 按钮在真实和自动化环境都能触发独立筛选并重置 page，不触发行播放；unknown 保持非交互。
+  - 格式、facts、actions 使用更紧凑但所有行一致的 fixed CSS token tracks；format/facts 视觉上相邻，facts 到 actions 另有明确间隔。长或未知 outcome 不撑开 tracks、会 ellipsis/title 或安全换行，且不溢出。
+  - collapsed player 的封面与 expand button 保持同尺寸/圆心，各自 hit target 之间有约 8px 的单一视觉间隔，不因已收起的 0-width expanded grid track 造成双 gap。
+- Validation:
+  - React tests 覆盖唯一 header separator、行无 separator/tab stop、pointer/keyboard ratio、820px path、header/row shared tracks、长/未知 facts 和 collapsed spacing contract。
+  - 完整 Vite+ gates，以及只使用工作区 absolute debug bundle 的 920×600/1080×760 macOS QA；Windows 运行态继续进入 T6.3。
+
 ## Task Breakdown
 
 - [x] T1.1 在 `src/formats/audio.rs`、`src/crypto/audio.rs` 和 `src/formats.rs` 增加 checked、seek-based path probe，补齐大 ID3/APE、截断长度、真实 MP3 和伪装文件测试；验证相关 Rust 单测。（实现与测试已写，运行结果由复验记录。）
@@ -291,6 +382,24 @@ Last updated: 2026-08-24
 - [x] T8.4 更新中/英/日可访问文案与 parity tests（筛选展开、序号播放、播放器左右收展等），并复验所有 icon-only 控件 title/aria-label。（复用已有三语言可访问 key；新增 icon-only controls 均有 title/aria-label，locale parity 纳入完整 VP test。）
 - [x] T8.5 已更新 `ARCHITECTURE.md` 的 rerun 生命周期为 same-ID transactional reset；完整 Rust/Vite+/Tauri gates 与工作区 absolute debug bundle 的 macOS 原生截图场景 QA 均通过。Windows T6.3 外部缺口保持不变，不以 macOS 证据替代。
 
+- [x] T9.1 在 `desktop/src/styles/tokens.css`、`desktop/src/App.css` 与 `desktop/src/styles/history.css` 统一 topbar height/sticky gap token，更新 `HistoryDetail.test.tsx` 的 sticky hook，验证滚动后按钮与顶栏始终有间隔且 920×600 不遮挡正文。（`--topbar-block-size` 和 `--detail-sticky-gap` 已取代两个脱节的 `68px`；native 920×600 QA 合并到 T11.3。）
+- [x] T9.2 在 `desktop/src/i18n/locales/{zh-CN,en-US,ja-JP}.json` 将详情主页入口改为 `返回主页 / Home / ホーム` 的专用 key，更新 locale parity、`App.test.tsx`/`HistoryDetail.test.tsx` 查询并验证 onBack/scroll reset 不变。（`app.backHome` 已接入详情按钮；locale parity 和详情交互回归通过。）
+- [x] T9.3 重构 `history.css` 的 compact control size variables，使搜索/歌手/专辑的 collapsed minimum 能完整容纳三语言 placeholder、图标和 clear slot，同时保留 focus/value expand、wrap 和 reduced-motion；运行 focused frontend tests 并完成三语言原生截图 QA。（collapsed search 178px、artist/album 184px，expanded 统一 clamp；focused frontend tests 通过，三语言 native screenshot QA 合并到 T11.3。）
+
+- [x] T10.1 在 `desktop/src/features/history/HistoryDetail.tsx` 用 `(page - 1) * pageSize + map index + 1` 而不是 `item.ordinal` 渲染序号，必要时抽取纯 helper；在 `HistoryDetail.test.tsx` 覆盖筛选/非 ordinal 排序第一页从 `01` 开始、第二页从 `pageSize + 1` 开始，以及 hover/active 替换图标。（`visibleItemNumber()` 位于纯 `layout.ts`；含 ordinal 缺口、非 ordinal 排序和 page 2 的 `26` 回归。）
+- [x] T10.2 在 `HistoryDetail.tsx` 和 `history.css` 实现共享 `titleAlbumRatio`、每行相同语义的 pointer-capture/keyboard `role="separator"` 与 clamp 逻辑；所有行通过同一 CSS variable 对齐，820px 以下移除 separator。测试 pure clamp、Arrow/Home/End、ARIA、pointer up/cancel release 和窄断点状态。（35–75 clamp、pointer capture/release/cancel、Arrow/Home/End、ARIA 和每行共享 CSS tracks 已接通；820px hook 不渲染 separator/tab stop。）
+- [x] T10.3 调整 `history.css` 的 media row grid：标题/专辑吃满唯一 flexible region，format/facts/actions 使用稳定 fixed tracks 和统一 gap；歌手/专辑按钮使用 intrinsic hit area。补 row click isolation 回归，并用长/短元数据在最小/默认/最大 ratio 下完成原生布局验证。（右侧三轨统一为稳定 CSS token，不随每条 facts/outcome 文本改变；metadata buttons 使用 `fit-content`/`justify-self:start`/`max-inline-size`，长文本有 ellipsis/title、未知值为非交互文本；row/action isolation、long/short tracks 和 keyboard/sequencing tests 通过。默认 ratio 的实际短/unknown/有值 metadata layout 已在 T11.3 的 30 首 fixture 完成；真实超长 metadata 与 pointer 极值的 native 截图仍是非阻断的手工跟进，不能被上述 default-state QA 冒充。）
+
+- [x] T11.1 在 `desktop/src/features/playback/PersistentPlayer.tsx` 与 `desktop/src/styles/player.css` 统一 disc/overlay 尺寸，expanded 态以 visibility/pointer/focus 强契约隐藏 collapsed overlay，collapsed hover/focus 才显示；在 `PersistentPlayer.test.tsx` 覆盖真实/占位封面和 expanded/collapsed 状态。（disc 与 overlay 共用 `--player-disc-size`；expanded 时 `disabled + tabIndex=-1 + aria-hidden + visibility:hidden + pointer-events:none`，collapsed 时才可达。）
+- [x] T11.2 将收展入口替换为 Phosphor `ArrowLineLeft/ArrowLineRight`（或 native QA 通过的同类方向 icon）和专用 centered icon-button class，保留 label/title/reduced-motion；验证方向、尺寸、focus ring 和不再出现形似原始 `<>` 的偏心视觉。（采用 `ArrowLineLeft/Right` 与固定 42px `.player-collapse-toggle`，通过 `data-collapse-direction`/aria/title 回归状态；native 高倍率视觉检查留 T11.3。）
+- [x] T11.3 执行本轮完整 Vite+ format/check/test/build、Tauri macOS debug app bundle 与 `git diff --check`，使用用户四张截图对应场景完成 920×600/1080×760 native QA；把命令、截图结论和仍开放的 Windows T6.3 缺口写回 `Progress`/`Completion Evidence`。（完整 VP gates、absolute debug bundle 和三语言/两尺寸 native QA 均完成；debug bundle 的临时 sealed-resources 签名提示不作为 release 签名证据，Windows T6.3 保持开放。）本轮纯前端边界不要求修改 `ARCHITECTURE.md`，除非实现改变已记录的播放器所有权或 history query 契约。
+
+- [x] T12.1 在 `HistoryDetail.tsx`、`history.css` 和中/英/日 locales 中用与 rows 相同 CSS tracks 渲染紧凑列 header；将唯一 pointer/keyboard/ARIA separator 移入 header，行中改为非视觉、aria-hidden spacer。覆盖唯一 handle、行无 separator/tab stop、header/row ratio alignment、pointer capture/keyboard 和 820px hidden path。（header/row 均为 `.song-layout-grid` 和同一 `--music-grid-template`；定向 HistoryDetail 22 tests 覆盖唯一 separator、ratio、pointer lifecycle 与窄断点。）
+- [x] T12.2 收紧 `history.css` 的 format/facts/actions stable tokens，处理长/未知 outcome 文本；在 `player.css` 为 `.persistent-player.is-collapsed` 的 disc/toggle 建立单一约 8px 间隔，避免 0-width expanded track 与 grid gap 双算。补 compact token/ellipsis 与 collapsed spacing tests。（tracks 为 64px/78px/112px，1080px 以下 60px/76px/112px；outcome 有 title/ellipsis contract，action target 为 36px；collapsed toggle 的 8px margin 不依赖 grid gap。）
+- [x] T12.3 执行 focused 和完整 Vite+ format/check/test/build、`git diff --check`、Tauri macOS debug bundle，并在绝对工作区 bundle 的 920×600/1080×760 复验唯一 header handle、对齐列、compact trailing tracks 与 collapsed player 间隔；更新本计划并进入独立 review-plan。不得使用 `/Applications/UnlockM.app`，Windows T6.3 保持开放。（focused 3 files/27 tests，full 17 files/70 tests，absolute debug bundle QA 完成；未使用 `/Applications`。）
+- [x] T12.4 根据真实运行反馈重构 `HistoryDetail.tsx`/`history.css`：将结果/companion count 与列标题合并为同一共同 grid 行，增加三语言操作列标题；让唯一 separator 的真实 pointer drag 在 WKWebView 可靠更新 ratio，修复有值 artist/album 的筛选命中/事件隔离，并重新平衡 format/facts/actions 对齐。补 geometry pointer、artist/album query/non-playback、唯一 header、820px、long/unknown 和 spacing tests；用绝对 workspace bundle 在 920×600/1080×760 实拖并点击真实 metadata，随后独立复审。不得使用 `/Applications`，保持 collapsed 8px 与 Windows T6.3 缺口。（window pointermove/up/cancel fallback、24px transparent hit target/2px visible line、inline count/labels/actions、artist/album explicit isolation 与 visual trailing alignment 均完成；full VP 71 tests 和 native 60→49 drag/QA Artist+Album filter 通过。）
+- [x] T12.5 修复 CSS custom-property 解析边界：ratio variables 与引用它们的 `--music-grid-template` 必须在同一 `.song-list` element 计算，header/rows 不再各自写 inline ratio style；补 parent-owned ratio/template regression，并以真实 native 前/后 separator x 坐标证明拖动改变实际列宽。恢复完整中/英/日 facts 标题，删除 facts→actions 单独 margin，以同一 uniform grid gap 让 format—facts 和 facts—actions 视觉间隔一致，同时调整固定 facts track 与对齐。保持 count/header/actions、artist/album 和 collapsed 8px；完整验证/absolute bundle QA 后重新独立 review。（ratio inline style 现仅在 `.song-list`，focused 26/full 71 tests 通过；absolute bundle 1080×760 实拖 separator x≈485→385、60→41，920×600 验证完整 facts/actions 和等距 trailing layout。）
+
 ## Validation Strategy
 
 ### Automated core and CLI
@@ -309,8 +418,11 @@ Last updated: 2026-08-24
 - `rtk vp -C desktop check --no-fmt`
 - `rtk vp -C desktop test`
 - `rtk vp -C desktop build`
+- `rtk git diff --check`
 
-重点断言：IPC fixture parity、same-ID rerun 状态、全局单例播放器跨 route/page/filter、60% 默认/持久音量和静音恢复、native loop、无封面切换、playing-only 封面旋转、媒体资料库 row、fixed navigation、compact filters/内部独立清空、viewport-safe metadata modal、palette reserved check slot、macOS/Windows density token 和三语言 key parity。
+重点断言：IPC fixture parity、same-ID rerun 状态、全局单例播放器跨 route/page/filter、60% 默认/持久音量和静音恢复、native loop、无封面切换、playing-only 封面旋转、expanded overlay 强隐藏/折叠封面同圆心、媒体资料库 row、筛选/排序结果跨页连续序号、title/album ratio clamp 与可访问 separator、文本级 metadata hit area、fixed navigation/sticky gap、三语言完整 placeholder、compact filters/内部独立清空、viewport-safe metadata modal、palette reserved check slot、macOS/Windows density token 和三语言 key parity。
+
+M9–M11 是纯 React/CSS/i18n 修复，以上五项与下方 macOS app bundle 是最低门禁；若实现触及 Rust、Cargo、IPC contract 或 `ARCHITECTURE.md` 边界，则重新执行对应 core/desktop Rust 全量门禁，不用旧证据替代。
 
 ### Automated desktop Rust and packaging
 
@@ -319,6 +431,7 @@ Last updated: 2026-08-24
 - `rtk cargo test --locked -p unlockm-desktop --test security_policy`
 - `rtk cargo test --locked -p unlockm-desktop --test license_audit`
 - `rtk vp -C desktop exec tauri build --debug --no-bundle`
+- `rtk vp -C desktop exec tauri build --debug --bundles app`（macOS native QA 使用该工作区绝对 bundle，不启动 `/Applications` 中可能存在的旧版本）
 
 重点断言：v1/v2/new schema migration、bounded legacy repair、run rename/snapshot、same-ID rerun reset/state gate/old-item replacement/orphan cleanup、ID-only copied playback、metadata pending recovery、artwork candidate query、symlink/invalid bytes rejection，以及 capability/CSP 未扩大。
 
@@ -326,12 +439,13 @@ Last updated: 2026-08-24
 
 1. 转换包含 encrypted music、普通 MP3/FLAC、大 ID3 MP3、非音频 companion 和坏 `.mp3` 的目录；核对列表数量、copied/converted/skipped、格式和码率。
 2. 记录任务总数和 run ID，在源目录新增音乐后重跑；确认使用原输出/设置、只产生新输出、返回相同 ID、总数不变、名称保留、旧歌曲明细被新扫描事实替换且该 ID 的列表位置保持稳定。重命名后重启应用确认持久化。
-3. 首次播放前确认音量为 60% 而不是 100%；调整音量、静音/恢复后翻页、改变筛选、回主页、再进详情并 seek，音频和音量均不中断/重置。顺序验证有封面→无封面、播放→暂停→恢复→自然播完循环；收展左右箭头、hover 播放覆盖和动画均正确。
-4. 长列表滚动后验证右下返回顶部，详情验证固定左上主页 pill/button；键盘、reduced motion、窄窗口下均可达且不与内容重叠。滚到底确认右对齐分页不被播放器遮挡。
+3. 首次播放前确认音量为 60% 而不是 100%；调整音量、静音/恢复后翻页、改变筛选、回主页、再进详情并 seek，音频和音量均不中断/重置。顺序验证有封面→无封面、播放→暂停→恢复→自然播完循环；展开态封面上没有 collapsed overlay，折叠态封面/覆盖按钮同圆心，`ArrowLineLeft/Right` icon 居中且 hover/focus/动画正确。
+4. 长列表滚动后验证右下返回顶部，详情验证固定左上“返回主页” pill/button 与顶栏保留 8–12px 视觉间隔；键盘、reduced motion、窄窗口下均可达且不与内容重叠。滚到底确认右对齐分页不被播放器遮挡。
 5. 分别编辑 MP3/FLAC 的三字段和封面，测试同专辑建议、搜索已有封面、合法上传、坏图/超限图；在 920×600 矮窗口确认候选/表单可滚动且 Save/Cancel 始终可见，再用外部标签读取器复核并确认源文件 hash 不变。
-6. 逐个 focus/填写搜索、歌手、专辑，验证空值坍缩、focus/值展开；组合筛选并只点击输入框内部的一个 `×`，确认其余值和排序保持。点击歌曲行、序号播放、歌手和专辑，确认播放/筛选及操作按钮互不串扰。
+6. 中/英/日逐个验证搜索、歌手、专辑在未 focus 时完整显示 placeholder，focus/值时展开；组合筛选并只点击输入框内部的一个 `×`，确认其余值和排序保持。筛出原 ordinal 不连续的歌曲并切换 title/artist/album/size 排序，确认完整结果从 `01` 连续编号；当前 `pageSize=25` 时第二页从 `26` 开始。
 7. 检查 blue/emerald/violet/amber × light/dark、三种语言、长路径/长标题、无封面和错误态；逐项切换 palette 时菜单文字列完全不移动。
 8. macOS 默认/更多空间/较大文字及可用的内外接显示器、Windows 100%、125%、150%、200% 及跨 DPI 显示器移动，检查字体/图标/控件均更易读、主要页面空白减少、工具栏/modal/player/fixed controls 无裁切遮挡，并确认没有 native factor 二次放大。
+9. 在 1080×760 及 920×600 下拖动标题/专辑 separator 到最小、默认、最大值，再 resize 窗口；确认全部行同步、format/facts/actions 等距稳定。只点歌手/专辑文字应筛选，点同列文字外空白应播放行，三项文件操作仍不触发播放。
 
 ## Risks and Mitigations
 
@@ -350,9 +464,28 @@ Last updated: 2026-08-24
 - **整行播放容易吞掉歌手/专辑或文件操作。** 仅非交互区域的鼠标 click 冒泡到 row handler；原生 button/link/input/select 以及 action 容器都排除，序号按钮保留完整键盘语义和可见 focus。
 - **坍缩筛选可能隐藏当前状态或造成横向抖动。** 有值时强制展开并显示独立 clear；动画只改变受 clamp 的 inline-size，不改变 label 顺序，reduced-motion 下即时切换，窄窗口允许 toolbar wrap。
 - **播放器动画可能持续耗电或错误表达状态。** 旋转严格由 `playing && artwork` 控制，暂停/结束/reduced-motion 禁用；收展动画只作用于小型固定容器并可中断，不对整页使用 transform/zoom。
+- **本地化 placeholder 与 compact 密度相冲突。** 以中/英/日最长受支持文案决定每类 collapsed minimum，允许 toolbar wrap，不通过 overflow/ellipsis 隐藏控件用途；原生 WebView 截图是验收门禁。
+- **界面序号可能被误解为持久化扫描编号。** 明确它只表示当前筛选/排序结果中的分页位置：结果集从 1 开始并跨页连续；后端仍用 `item.ordinal` 提供“原始顺序”排序，展示序号不持久化，避免 schema/query 变更。
+- **拖动分栏可能挤掉右侧事实或误触播放。** 只分配 fixed columns 之外的 flexible region，ratio 双侧 clamp；separator 使用 pointer capture、独立 hit target 和 keyboard semantics，并拦截 row click。820px 以下隐藏专辑列时完全移除 handle。
+- **grid item 默认 stretch 会扩大歌手/专辑误触区。** 文本按钮显式 intrinsic sizing/左对齐/max-width，ellipsis 只裁视觉文本；空白区域交回 row playback，并用 pointer QA 验证真实 hit box。
+- **仅把播放器覆盖层设为透明仍可能残留合成层或焦点。** expanded 态同时使用 visibility、pointer-events、disabled/tab-order 契约；disc/overlay 共享单一尺寸 token 和圆形 box model，高倍率原生截图检查边缘与圆心。
 
 ## Progress
 
+- [x] 2026-08-25：主代理在 T12.5 re-review Pass 后完成最终独立复验：`rtk vp -C desktop fmt . --check`（58 files）、`rtk vp -C desktop check --no-fmt`（40 files clean）、`rtk vp -C desktop test`（17 files / 71 tests）、`rtk vp -C desktop build` 与 `rtk git diff --check` 全部通过；build 仅保留既有 ineffective dynamic import 和超过 500 kB chunk 的非失败建议。Computer Use 只操作绝对工作区 bundle `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app`：在 920px 窗口把 separator 从约 x=320/AX 41 拖至约 x=448/AX 75，标题/专辑列同步重排；同一截图确认“30 首歌曲”与列标题同一行、完整“大小与码率”/“操作”、format/facts/actions 对称 12px grid gap，以及有值 `QA Artist`/`QA Album` 的可访问按钮。未启动 `/Applications/UnlockM.app`。
+- [x] 2026-08-25：完成 T12.5，状态回到 `In Review` 等待原 M12 reviewer 再审。`mediaRowStyle` 现在只写入 `.song-list`，header/rows 无局部 ratio override；同一 parent 同时拥有 ratio 与 `--music-grid-template`。tests 断言 parent 的 40/60→70/30 更新及 children 无错误 style。facts labels 已恢复为 `大小与码率 / Size & bitrate / サイズとビットレート`，actions margin 删除，所有尾列以 12px grid gap 排列，format 向 facts、facts 居中、actions 靠左。focused HistoryDetail/locale 26 tests、full VP fmt/check/test/build（17 files / 71 tests）与 diff-check 通过。为避免旧运行进程混淆，确认并关闭旧 workspace debug PID 后只重新启动 `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app`；1080×760 实测 line x≈485 到 x≈385、ARIA 60→41，920×600 显示完整 facts/actions 与等距尾列。Windows T6.3 和真实超长 metadata/pointer 极值仍开放。
+- [x] 2026-08-25：主代理源码分析与用户实测发现 T12.4 的“AX 60→49”不是视觉布局通过证据：`--music-grid-template` 定义在 `.song-list` 父级并在那里解析 `--title-track/--album-track`，而 ratio inline style 写在 header/row 子级，父级已经使用 fallback，子级不能反向改变已计算 template。新增 D36/T12.5，状态重开为 `In Progress`；旧 T12.4 runtime review 只保留为事件/筛选修复历史，视觉 drag/间距结论被 superseded。
+- [x] 2026-08-25：完成 T12.4 runtime remediation，计划回到 `In Review` 等待原范围独立复审。真实 root cause 是此前单元素 capture 回归没有几何也未断言 ratio，且 WKWebView 不能据此保证持续 move；现为 pointerDown focus + capture，并以 window `pointermove`/`pointerup`/`pointercancel` 接管拖动生命周期。focused HistoryDetail/locale tests（26 tests）和 full `rtk vp -C desktop fmt . --check`、check（40 files clean）、test（17 files / 71 tests）、build、`git diff --check` 都通过。Tauri debug bundle 仅在绝对工作区路径 `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app` 重建/启动；1080×760 和 920×600 实测将 handle 从 `60` 拖到 `49`，点击 QA Artist 后 artist filter value 为 QA Artist/结果 1 首，再点击 QA Album 后 album value 为 QA Album/结果仍 1 首，未混用 `/Applications`。header count+labels 单行、Actions 标题、format↔facts 紧邻、facts→actions 12px gap 与 collapsed player 8px 都在截图复验；Windows T6.3 与真实超长 metadata/pointer 极值仍开放。
+- [x] 2026-08-25：用户真实运行截图推翻了 M12 的静态/初次原生通过结论：额外 header 行造成冗余，header separator 在 WKWebView 中不能可靠拖动，真实有值 artist/album 未触发筛选，且 trailing columns 的对齐仍不符合视觉要求。新增 T12.4/D35，状态重开为 `In Progress`；先更新计划，尚未实现 runtime remediation。
+- [x] 2026-08-25：完成 M12/T12.1–T12.3，状态回到 `In Review` 等待独立 review-plan。`HistoryDetail` 以一个 `.song-list-header` 唯一承载 `role=separator`、ARIA、pointer capture/keyboard；全部歌曲行只保留 `aria-hidden` spacer，并与 header 共用 `--music-grid-template` 和 session ratio。format/facts/actions fixed tokens 收紧为 64px/78px/112px（中等宽度 60px/76px/112px），outcome long/unknown 有 ellipsis/title 边界；collapsed player toggle 使用独立 8px start margin，避免已收起的 0-width expanded track double gap。定向 `rtk vp -C desktop test src/features/history/HistoryDetail.test.tsx src/features/playback/PersistentPlayer.test.tsx src/i18n/locales.test.ts` 通过（3 files / 27 tests）；最终 `rtk vp -C desktop fmt . --check`、check（40 files clean）、test（17 files / 70 tests）、build 和 `rtk git diff --check` 通过。使用且只使用 `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app` 重建/启动原生 QA：1080×760 与 920×600 下确认 header 唯一竖线/handle、行内无竖线、header/rows 对齐、三语言标题、compact trailing tracks 及 collapsed 8px 留白；未使用 `/Applications`。Vite warnings 仍为既有 dynamic-import/chunk-size 建议，Windows T6.3 与真实长 metadata/pointer 极值 native 跟进保持开放。
+- [x] 2026-08-25：根据新增截图反馈，在完成 M9–M11 plan accuracy cleanup 后增加 M12/T12.1–T12.3 与 D34。用户明确覆盖此前 D32 的每行 handle 选择：唯一可访问 separator 将移到对齐的 column header，歌曲行只保留无视觉/无 tab-stop spacer；同时收紧 trailing fixed tokens 并为 collapsed player disc/expand button 加不双算的约 8px 留白。尚未修改生产代码或勾选 T12 任务；本轮状态重开为 `In Progress`。
+- [x] 2026-08-25：完成 T11.3 集成门禁并把计划转为 `In Review`，等待 M10/M11 独立 review-plan。`rtk vp -C desktop fmt . --check`、`rtk vp -C desktop check --no-fmt`（40 files clean）、`rtk vp -C desktop test`（17 files / 69 tests）、`rtk vp -C desktop build` 与 `rtk git diff --check` 通过；Vite 保留既有 ineffective dynamic import 与超过 500 kB chunk 的非失败建议。`rtk vp -C desktop exec tauri build --debug --bundles app` 首次在沙箱内因已配置 sccache 的 `Operation not permitted` 失败，保持 wrapper 后获准提权重跑，生成并启动绝对工作区 bundle `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app`；debug bundle 的 sealed-resources 校验提示只记录为 debug 签名限制，不伪作 release 签名证据。原生 QA：1080×760 与 920×600 下验证 sticky `Home/返回主页/ホーム` 与顶栏留白、英/中/日完整 search/artist/album placeholder、30 首列表的 `01` 起点/第二页连续 `26`–`30`、稳定 format/facts/actions 列距、unknown metadata 非交互、expanded player 无封面覆盖层、collapsed disc/overlay 同圆心及居中 ArrowLine 收展 icon；播放音量保持 0.6，分页和返回顶部按钮均可达。实际长 metadata 与 separator pointer 极值截图未在此 fixture 补做，保留为非阻断手工跟进；Windows DPI/runtime/跨显示器 T6.3 仍是平台缺口。
+- [x] 2026-08-25：M10 独立审查提出的实现 finding 已修复并等待原范围复审：右侧 format/facts/actions 采用所有行共享的稳定 token tracks，long/short facts regression 确认 title/album ratio 同步；artist/album 文字按钮显式 `justify-self:start`、ellipsis/title，未知 metadata 改为非交互文本。separator 的 pointer capture 现在在 up/cancel 时 release，并处理 lost-capture；820px `matchMedia` hook 回归断言不渲染 separator/tab stop。`rtk vp -C desktop fmt src/features/history/HistoryDetail.tsx src/features/history/HistoryDetail.test.tsx`、`rtk vp -C desktop test src/features/history/HistoryDetail.test.tsx`（1 file / 21 tests）、`rtk vp -C desktop check --no-fmt`（40 files clean）和 `rtk git diff --check` 均通过。M10 原生长/短元数据、ratio 极值及 resize QA 仍明确合并到 T11.3，不能视为已完成的 native evidence。
+- [x] 2026-08-25：完成 T11.1–T11.2 的代码与 focused regression。播放器 disc/overlay 共用 42px token；expanded 态 overlay 为 disabled、`tabIndex=-1`、`aria-hidden`、`visibility:hidden`、`pointer-events:none`，collapsed hover/focus 才显示。收展入口已由 caret 替换为 `ArrowLineLeft/Right`，专用 icon-button 几何固定 42px 居中。`rtk vp -C desktop test src/features/playback/PersistentPlayer.test.tsx` 通过（1 file / 2 tests），`rtk vp -C desktop check --no-fmt` 与 `rtk git diff --check` 通过；T11.3 的全量 gates/native QA 尚待执行。
+- [x] 2026-08-25：M10 的代码任务（T10.1–T10.3）已完成。展示序号由 `visibleItemNumber(page, pageSize, index)` 派生，任何筛选或排序后的第一页均为 `01`、默认 25 条分页的第二页为 `26`；`item.ordinal` 仍只留给服务端原始排序。标题/专辑用同一会话级 60:40 CSS `fr` tracks，并新增 35–75 clamp 的 pointer-capture、Arrow/Home/End `role=separator`；右侧 format/facts/actions 为所有行共享的稳定 fixed CSS token tracks，metadata 文本按钮改为 intrinsic hit area。focused tests/check/diff 结果与 M9 相同（2 files / 21 tests）；真实长/短元数据、ratio 极值与 resize native QA 留 T11.3。
+- [x] 2026-08-25：M9 的代码任务（T9.1–T9.3）已完成：topbar/sticky offset 改为共享 `--topbar-block-size + --detail-sticky-gap`，详情入口使用 `app.backHome`（返回主页 / Home / ホーム），compact 搜索/歌手/专辑的折叠宽度按最长三语言 placeholder 扩至 178/184px，focus/value 仍使用同一可动画 clamp。2026-08-25 首次审查发现空值时仍预留 clear 尾 padding 会压缩日语输入区，已改为仅 `data-has-clear=true` 才保留 34px，并增加三语言 placeholder/clear-slot contract。`rtk vp -C desktop test src/features/history/HistoryDetail.test.tsx src/i18n/locales.test.ts` 通过（2 files / 21 tests），`rtk vp -C desktop check --no-fmt` 与 `rtk git diff --check` 通过；M9 的三语言 native/920×600 截图尚未完成，仍是 T11.3 集成门禁，M9 不能据此单独宣告验收完成。
+- [x] 2026-08-25：用户更正 D31：展示序号不是每页重置，而是每个筛选/排序结果从 `01` 开始并跨页连续，按 `(page - 1) * pageSize + visibleIndex + 1` 派生；例如每页 10 条时第二页从 `11` 开始。该序号不持久化，后端 ordinal/query 不变。
+- [x] 2026-08-25：收到 v0.3.1 的四张 UI 截图反馈；按 `plan-doc` 和 `frontend-design` 规则读取仓库指导、`docs/PLANS.md`、完整 active ExecPlan、当前 `HistoryDetail`/`PersistentPlayer`/CSS/i18n/tests，并在同一计划新增 M9–M11/T9.1–T11.3。计划从 `In Review` 重开为 `Ready`；本阶段只编辑计划文档，未修改生产代码、未运行构建、未创建 commit/tag/push。
 - [x] 2026-08-24：用户授权将本轮 reviewed 修复发布为 `0.3.1`：创建本地 annotated `v0.3.1` tag、仅推送 `main` 提交到 `origin`/`github`（明确不推送新 tag），并仅在本机编译、ad-hoc 签名和安装 macOS app。版本权威文件已统一准备为 `0.3.1`；Windows T6.3 不因此关闭。
 - [x] 2026-08-24：独立 review-plan re-review 返回 Pass with Notes、无剩余代码 findings；两条新增 Minor Review Notes 均由 reviewer 验证并勾选 resolved。独立命令：rerun 定向 Rust 7 tests、PersistentPlayer/PlaybackProvider 7 tests、`git diff --check` 全部通过。计划继续 `In Review`，只因既有 Windows T6.3 外部 QA 缺口。
 - [x] 2026-08-24：review remediation：新增 same-ID rerun scan-failure/cancellation event-stream tests。scan-failure 在 reset 后同 ID terminal Failed、旧 facts 清空、历史计数稳定、active slot release 且无误导事件；cancel hook 在 mark-running 后触发，捕获到的所有 camel-case `runId` 为原 ID，Completed `cancelled=true`。修正 `ConversionEventDto` fields 的 serde camel case。播放器真实 artwork 保持 spin animation，暂停只切换 `animation-play-state: paused`，不重置角度。`rtk cargo test --locked -p unlockm-desktop --lib rerun_ -- --test-threads=1`（7 tests）与 player test（2）通过。
@@ -416,6 +549,14 @@ Last updated: 2026-08-24
 - 第一轮 M8 实现只有 collapsed overlay opacity transition，expanded content 仍条件卸载，不能形成完整的流畅收展；实现和测试需覆盖容器 layout/content 的进入退出，而不仅是图标替换。
 - CSS `inert` 只移除交互，不会移除 grid intrinsic size；mounted 收展内容还必须显式压缩 block axis，否则零宽 grid 会因内部布局换行而保留异常高度。
 - `.metadata-modal div` 这类 descendant rule 会覆盖 body/candidate grid 的同等或更低 specificity；dialog layout 只能由命名区域选择器控制，body/actions 增加运行时 layout contract 以防止横向 flex 回归。
+- 2026-08-25 截图中的 sticky 贴边来自一个精确 token 脱节：topbar height 与 back button `top` 都是 `68px`。用更大 margin 只能改善初始位置，必须给 sticky offset 加独立 gap 并与 header height 共享来源。
+- 当前序号跳号不是 SQLite 丢行或排序错误，而是 UI 显示了持久化 `item.ordinal`；界面序号必须用 page offset + 当前返回数组 index 计算，同时保留 ordinal 作为 server-side 原始顺序键。
+- 标题/专辑两列之外的 `.file-facts` 轨道仍带 `0.45fr`，因此它会参与瓜分剩余空间；要实现用户指定的等距右侧列，只有标题/专辑区域可以使用 flexible units。
+- 歌手/专辑 button 作为 grid item 默认 stretch，解释了可点击识别区覆盖文字右侧空白；事件冒泡排除只能防止按钮触发行播放，不能缩小按钮自身 hit area。
+- 播放器收展入口已是 Phosphor Caret SVG，不是字面文本；问题来自裸按钮几何和 caret 外形仍像 `<>`。封面/覆盖按钮另有 42px/40px 尺寸冲突，expanded overlay 也只有 opacity 隐藏，三者需作为同一视觉状态契约修正。
+- M12 的唯一 header handle 只有在 header 与 rows 复用完整 `--music-grid-template` 时才能在 ratio 调整后持续对齐；若各自重复 grid template，后续窄断点/token 变化会重新引入漂移。collapsed state 的 expanded grid track 已为 0，间隔必须由 toggle 的单一 margin 提供，不能恢复父 grid gap。
+- T12.4 证明 element-level pointer capture 的调用本身不能作为拖动成功证据：测试必须提供 title/album 的真实 geometry，并断言 move 后 ratio 变化；WKWebView runtime 采用 window drag listeners 后才观察到 `60 → 49`。format 与 facts 即使 token 缩小，若继续分别右/左反向对齐仍会显得过远；改为 format 靠 facts 侧、facts 靠 format 侧，并让 actions 另取稳定 margin 才得到预期视觉分组。
+- CSS custom property 的依赖方向同样是布局 correctness 边界：父元素的 `--music-grid-template` 在父级 compute 时不能读取仅定义于后代的 ratio variables；必须把 ratio 和 template 放到同一元素，或在每个 grid element 完整定义 template。AX `aria-valuenow` 改变只能证明 React state/ARIA 改变，不能替代实际 grid geometry 证据。
 
 ## Decision Log
 
@@ -447,16 +588,32 @@ Last updated: 2026-08-24
 - **2026-08-24 — D26:** same-ID rerun 不改变历史 ID-keyset 排序或 cursor 契约。时间戳表示最新执行事实，但任务保留原列表相对位置；若未来产品要求“最近重跑置顶”，应另行设计 `(updated_at_ms, id)` 复合游标，而不是在本修订中暗改分页。
 - **2026-08-24 — D27:** 发起 same-ID rerun 前 UI 释放该 run 的活动播放器 source，不尝试把旧 item ID 恢复到新明细；播放器的收展必须具有真实 layout/content 动画，并为 expanded 状态移除不可见的重复播放按钮焦点。
 - **2026-08-24 — D28:** 本轮补丁版本为 `0.3.1`。`v0.3.1` 只创建在本地，远程仅接收 reviewed `main` commit；不得执行 `git push --tags`、`git push <remote> v0.3.1` 或触发 tag release workflow。macOS 产物仅本地构建、签名和安装。
+- **2026-08-25 — D29:** v0.3.1 截图反馈继续更新本 active plan，不新建重复 UI plan。由于新增 M9–M11 尚未实现，整体状态从 `In Review` 重开为 `Ready`；旧 M7/M8 review evidence 保留但不自动覆盖新任务。
+- **2026-08-25 — D30:** 详情主页入口的可见文案为 `返回主页 / Home / ホーム`；sticky offset 由共享 topbar height 加独立 spacing token 组成，不能再用两个相等的 `68px` 硬编码。
+- **2026-08-25 — D31（按用户更正）:** 列表序号表示当前筛选/排序结果中的分页位置，计算为 `(page - 1) * pageSize + visibleIndex + 1`；完整结果从 1 开始并跨页连续，例如每页 10 条时第二页从 11 开始。展示序号不持久化，持久化 ordinal 和后端 query 不变。
+- **2026-08-25 — D32:** 标题/专辑是唯一可拖动的 flexible region，比例只在当前详情会话中保持并 clamp；右侧 format/facts/actions 为所有行共享的稳定 fixed CSS token tracks，且以统一 gap 等距排列。separator 必须同时支持 pointer capture、键盘和 ARIA，窄断点隐藏。
+- **2026-08-25 — D33:** 歌手/专辑筛选 hit area 只覆盖可见文本和必要 focus padding；列内空白属于 row playback。collapsed cover/overlay 共享单一尺寸 token，expanded overlay 使用 opacity+visibility+pointer/focus 强隐藏，收展按钮改用居中的 `ArrowLineLeft/ArrowLineRight` 类方向 icon。
+- **2026-08-25 — D34（覆盖 D32 的 handle placement）:** 标题/专辑继续是唯一 flexible region，右侧继续使用 shared fixed token tracks；但不再在每一歌曲行渲染 separator。唯一可访问、可拖动的 handle 位于与 rows 共同 grid tracks 的 column header，行内仅保留非视觉 spacer。折叠播放器使用 toggle margin（或等价的不双算 geometry）在 disc 与 expand button 之间保留约 8px 间隔。
+- **2026-08-25 — D35（真实运行反馈覆盖 M12 初次验收）:** header 不再作为结果计数下方的额外独立行；计数/companion 与全部列标题必须组成单一共同 grid 行。单元素 pointer capture 不足以视为原生拖动通过，拖动生命周期须在 WKWebView 中可靠接收 move/up/cancel 并以实际 ratio 变化证明。artist/album 以真实有值 metadata 逐项验证筛选 query 与 row-playback 隔离。format 与 facts 靠近，facts 与 actions 用独立 gap 分开；此前 collapsed 8px 方案保持。
+- **2026-08-25 — D36（覆盖 D35 的 visual-layout 细节）:** ratio CSS variables 与 `--music-grid-template` 共同归 `.song-list` 所有，避免父级 template 在 ratio 尚不存在时永久 fallback。facts 标题为 `大小与码率 / Size & bitrate / サイズとビットレート`；format—facts 与 facts—actions 使用同一 uniform grid gap，不用 actions 的额外 margin。format 向 facts 对齐、facts 在 fixed track 内居中、actions 靠左，使 facts 两侧的视觉余量一致。
 
 ## Completion Evidence
 
-- 2026-08-24：本轮 M7/M8 独立 review 最终为 Pass with Notes、无未闭环代码 finding；same-ID failure/cancel/event ID 与 cover frozen-angle 两条 Minor 已由原 reviewer 复验关闭。仅 Windows T6.3 仍开放，因此计划保持 `In Review` 而非 `Done`。
+- 2026-08-25：T12.5 最终闭环由三层独立证据组成：实现代理的 absolute-bundle pointer drag（line x≈485→385、AX 60→41），原 M12 reviewer 对 CSS custom-property 同作用域修复的 re-review `Pass`（28 focused tests/check/diff），以及主代理的第二次 absolute-bundle drag（line x≈320→448、AX 41→75）与全量 VP 71 tests/build。三方均验证 `.song-list` 统一拥有 ratio/template，header/rows 随之重排；旧 T12.4 “AX 变化即视觉通过”的结论已 superseded。Windows T6.3 与真实超长 metadata 极值截图仍是明确外部/非阻断缺口，因此计划保持 `In Review`。
+- 2026-08-25：T12.5 final visual evidence：source/test gates 为 focused HistoryDetail/locale 26 tests、VP full 17 files / 71 tests、fmt/check/build/diff all pass；Vite 仍只有既有 dynamic-import/chunk-size warnings。重建后通过 `pgrep` 确认旧 workspace debug PID 并关闭，再由 Computer Use 只启动 absolute workspace bundle `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app`，避免复用重建前 memory image。1080×760 screenshot 中 default separator x≈485，拖动后实际位于 x≈385（AX 60→41），title/album columns visibly resize；920×600 screenshot 显示 `大小与码率`、操作列，format—facts 和 facts—actions 使用一致间隔。未使用 `/Applications`；Windows T6.3 和真实超长 metadata/pointer 极值仍开放。
+- 2026-08-25：T12.4 的事件/筛选 native evidence 仍有效，但其视觉 drag 和 trailing-gap 结论已由 T12.5 supersede：AX value 变化并未证明 CSS template 实际依赖 ratio，facts/actions 的 margin 也不符合最新等距要求。T12.5 必须以 parent-owned template 与 native separator x-coordinate 前后变化、两侧间距截图重新提供 evidence。
+- 2026-08-25：T12.4 runtime evidence 取代被标记 superseded 的 M12 初次通过结论。自动化为 focused HistoryDetail/locale 26 tests 和完整 VP 17 files / 71 tests，fmt/check/build/diff 全部通过；Vite 仅保留既有 dynamic-import/chunk-size 非失败建议。Computer Use 只使用 `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app`：在 1080×760 实拖唯一细线 handle，AX `aria-valuenow` 由 60 变为 49；用真实 QA Track 顺次点击 QA Artist/QA Album，artist、album filter 输入均填入对应值且结果为 1 首；920×600 截图确认单行 count/columns/actions、紧凑 trailing tracks、事实到操作留白和 collapsed 8px。未启动 `/Applications`，Windows T6.3 与真实超长 metadata/pointer 极值仍是明确跟进缺口。
+- 2026-08-25：M12 的先前 source/automated/initial macOS evidence 已被用户真实运行反馈部分推翻，不能再作为 T12.4 的通过证据。它仅保留为初始实现的历史记录；T12.4 必须用真正改变 ratio 的 native drag、真实 artist/album filter 及重做的单行 header/trailing spacing QA 替代。
+- 2026-08-25：M12 完成 source、自动化和 macOS native evidence。定向 HistoryDetail/PersistentPlayer/locale tests 为 27 passed，完整 VP gates 为 17 files / 70 tests；`rtk vp -C desktop exec tauri build --debug --bundles app` 生成 absolute workspace bundle。Computer Use 只针对 `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app` 完成 1080×760 和 920×600 验收：一个表头 handle、无行内 separator/tab stop、表头与行的共享列对齐、完整中/英/日列标题、收紧的右侧 tracks 与折叠播放器约 8px 间隔；未启动或读取 `/Applications/UnlockM.app`。Windows T6.3 和真实超长 metadata/pointer ratio 极值仍是明确后续缺口。
+- 2026-08-25：主代理独立复验本轮最终工作树：`rtk vp -C desktop fmt . --check`（58 files）、`rtk vp -C desktop check --no-fmt`（40 files clean）、`rtk vp -C desktop test`（17 files / 69 tests）、`rtk vp -C desktop build` 与 `rtk git diff --check` 均通过；build 仅保留既有 ineffective dynamic import 和大于 500 kB chunk 建议。Computer Use 只启动绝对工作区 bundle `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app`，未使用 `/Applications`：独立截图确认日文三个 placeholder 完整、Home 与顶栏约 10px 间隔、第二页编号连续 `26`–`30`、expanded 无封面 overlay、collapsed disc/control 对齐且音量为 `0.6`。Windows T6.3 和真实超长 metadata/pointer 极值 native 跟进仍开放。
+- 2026-08-25：M9–M11 的 macOS native QA 使用的唯一应用是当前工作区 absolute debug bundle `/Users/peilin/Codebase/um-rewrite/unlockm/target/debug/bundle/macos/UnlockM.app`，未混用 `/Applications/UnlockM.app`。实际 30 首 fixture 在 1080×760 和 920×600 下完成中/英/日 compact placeholder、sticky 入口、连续序号、分页、M10 default grid 与 M11 expanded/collapsed player 的截图检查；自动化 VP gates 为 69 tests。未在这个 fixture 中重建真实超长 metadata/pointer ratio 极值截图，debug bundle 也不是 release 签名认证产物；Windows T6.3 原生 DPI/runtime/跨显示器矩阵仍未完成。因此计划只能 `In Review`，不能标记 `Done`。
+- 2026-08-24：M7/M8 独立 review 最终为 Pass with Notes、无未闭环代码 finding；same-ID failure/cancel/event ID 与 cover frozen-angle 两条 Minor 已由原 reviewer 复验关闭。当时仅 Windows T6.3 仍开放，因此计划保持 `In Review`；2026-08-25 新增 M9–M11 后该结论不再代表全部当前 scope。
 - 2026-08-24：M7–M8 implementation 与两轮 native-QA remediation 已完成；主代理完整 Rust/VP gates、macOS debug app bundle build 和 absolute-bundle Computer Use 矩阵均通过。用户给出的 8 项修订在 macOS 1080×760 与 920×600 场景完成可见验证；未创建 commit/tag/push。
 - 2026-08-24：same-ID rerun 在真实 30 首任务上返回同一记录，首页始终显示 `1 records`；输出仍按 no-overwrite skipped，详情保持 30 首。真实 metadata 上传把 QA MP3 从 1.8 KB 更新到 63.6 KB 并立即展示圆形封面；随后切到无封面曲目时播放器改为当前占位而非保留旧图。1 秒音频经过自然时长仍保持播放，验证 native loop。
 - 2026-08-24：Windows 100/125/150/200% DPI、跨显示器移动和本轮新增布局/播放器/metadata runtime QA 仍并入既有 T6.3 外部缺口；此缺口不否定 macOS 本轮验收，但计划在独立 review 后仍不会标记 `Done`。
-- 2026-08-24：第二位独立 code review 结论为 Pass with Notes；无未闭环代码 findings，Review Notes 全部 resolved。未创建 commit；T6.3 Windows native QA 是保持 `In Review` 的唯一原因。
+- 2026-08-24：第二位独立 code review 对当时的 M7/M8 结论为 Pass with Notes；无未闭环代码 findings，旧 Review Notes 全部 resolved。未创建 commit；当时 T6.3 Windows native QA 是保持 `In Review` 的唯一原因，该 review 不覆盖后来新增的 M9–M11。
 - 2026-08-23：latest remediation 的 macOS no-bundle Tauri debug build exit 0，产物 `desktop/src-tauri/target/debug/unlockm-desktop`；Vite dynamic-import/chunk-size 为既有非失败建议。
-- 2026-08-23：主代理最终复验通过 desktop Rust fmt/check/clippy `-D warnings`/all-target tests（51 lib tests + license/security integration suites）及 `git diff --check`；计划状态为 `In Review`。Windows 100/125/150/200%、跨 DPI display 与 runtime QA 仍为 T6.3 唯一平台验证缺口，Review Notes 未由 implementer 勾选。
+- 2026-08-23：主代理最终复验通过 desktop Rust fmt/check/clippy `-D warnings`/all-target tests（51 lib tests + license/security integration suites）及 `git diff --check`；当时计划状态为 `In Review`。Windows 100/125/150/200%、跨 DPI display 与 runtime QA 是该版本的 T6.3 平台验证缺口，Review Notes 未由 implementer 勾选。
 - 2026-08-23：未创建 commit（按请求保留未提交工作树）。前端 format/check/test/build 和 diff 检查通过；`vp test` 共 47 项。
 - 2026-08-23：主代理复验已通过 root `cargo check`、root clippy `-D warnings`、full `cargo test --all-targets --all-features`（115 unit + 全部 integration/benches）、desktop check、desktop clippy `-D warnings`、`cargo test -p unlockm-desktop --all-targets`（44 lib + license/security），以及 macOS `vp -C desktop exec tauri build --debug --no-bundle`（exit 0，产物 `target/debug/unlockm-desktop`）。Vite dynamic-import/chunk-size 仅为非失败建议。
 - 2026-08-23：review remediation 后，主代理再次通过 root check/clippy/full test（116 unit + integration/benches）、desktop check/clippy/test（47 lib + license/security）、VP fmt/check/test（16 files/55 tests）/build、Tauri no-bundle（exit 0）及 cargo fmt/diff；Vite dynamic-import/chunk-size 仅为非失败建议。Review Notes 仍等待独立 reviewer 关闭。
@@ -464,6 +621,8 @@ Last updated: 2026-08-24
 
 ## Review Notes
 
+- [x] Major — Resolved on M9 re-review: 空值 compact artist/album 输入现在仅在 `data-has-clear=true` 时预留 `padding-inline-end: 34px`，三语言 placeholder/clear-slot contract 已覆盖。后续 T11.3 已完成 M9 的三语言 native screenshot 与 920×600 验收；本条的“尚未完成”历史状态由 Completion Evidence 2026-08-25 最终复验取代。
+- [x] Review — Superseded: M9–M11 已实施；既有 M7/M8 Pass with Notes 不得视为对本轮新改动的通过。M9/M10/M11 分别保留其独立审查记录与 T11.3 集成证据。
 - [x] Major — Resolved on re-review: `copied` is now present in Rust/TypeScript filters and the detail selector, with copied-filter UI coverage.
 - [x] Major — Resolved on re-review: metadata candidates verify text/cover/container/audio before publish and route FLAC through the dedicated writer; MP3/FLAC payload regressions cover set/clear/cover behavior.
 - [x] Major — Resolved on re-review: pending recovery transactionally reconciles text, artwork, representative artwork, bytes, format, bitrate, and probe version before clearing the marker; missing outputs remain pending.
@@ -477,3 +636,9 @@ Last updated: 2026-08-24
 - [x] Review — Second independent code re-review passed. Windows runtime/DPI and cross-monitor QA remains the explicit external T6.3 validation gap; it is not inferred from macOS evidence.
 - [x] Minor — Resolved on re-review: deterministic same-ID scan-failure and cancellation tests now retain the original terminal ID, replace old facts, release the active slot, and assert captured camel-case event `runId` values (including `completed.cancelled=true`).
 - [x] Minor — Resolved on re-review: cover animation is installed permanently and switches only `animation-play-state` between running and paused, preserving the current transform when playback pauses; focused player tests cover both states.
+- [x] Review — 2026-08-25 M10 remediation re-review: **Pass**. All prior M10 findings are resolved: every row has the same fixed tail tracks and shared flexible title/album ratio; long/unknown metadata preserves intrinsic text hit targets and ellipsis; separator pointer capture is released on up/cancel and cleared on lost capture; the 820px media-query path omits the separator and tab stop. Independently ran `rtk vp -C desktop test src/features/history/HistoryDetail.test.tsx` (1 file / 21 tests), `rtk vp -C desktop check --no-fmt` (40 files clean), and `rtk git diff --check` (pass). This was a chronological review note: M9 T11.3 and M11 review subsequently completed. Real long-metadata/pointer-extreme native checks remain the documented non-blocking follow-up.
+- [x] Review — 2026-08-25 M11 code review: **Pass**. Expanded-state collapsed overlay is disabled, removed from the tab order and accessibility tree, and CSS-hidden/non-hit-testable; collapsed state uses the same `--player-disc-size` circular geometry for artwork and overlay. The dedicated 42px `ArrowLineLeft`/`ArrowLineRight` control inherits centered icon-button geometry while preserving state-specific aria-label/title. Existing provider coverage continues to assert native loop and safe volume; player coverage asserts running-to-paused rotation and the expanded/collapsed DOM contract. Independently ran `rtk vp -C desktop test src/features/playback/PersistentPlayer.test.tsx` (1 file / 2 tests), `rtk vp -C desktop check --no-fmt` (40 files clean), and `rtk git diff --check` (pass). The macOS T11.3 evidence is recorded by the implementer; this code review did not independently reproduce native UI QA. Windows T6.3 remains open.
+- [x] Review — 2026-08-25 M12 independent review: **Pass, superseded by runtime evidence**. The static implementation correctly had one wide-layout `role="separator"`, shared tracks and a collapsed 8px margin, but user-native feedback found an extra header row, non-working actual drag, failed real artist/album filtering and unsatisfactory trailing alignment. This code review remains chronological evidence only; T12.4 must receive a new independent review after runtime remediation.
+- [x] Review — 2026-08-25 M12 runtime re-review: **Pass, superseded by T12.5 visual-layout evidence**. T12.4 correctly fixed events and filtering, but review did not detect that the parent-owned `--music-grid-template` had already resolved fallback ratio values before descendants supplied inline variables; its AX ratio and trailing-margin conclusions therefore cannot approve actual visual drag/spacing. T12.5 requires a fresh independent review after parent-owned template and native coordinate evidence.
+- [x] Review — 2026-08-25 M12 T12.5 re-review: **Pass**. The ratio variables and the `--music-grid-template` that consumes them now share `.song-list`; header and rows inherit the same resolved tracks and carry no local ratio overrides. Focused regressions assert parent `40fr/60fr` then `70fr/30fr`, empty child styles, geometry-based window drag lifecycle and pointer release. All three facts labels are restored as `大小与码率 / Size & bitrate / サイズとビットレート`. The shared grid gap is uniformly 12px, with format right-aligned toward a centered facts track and actions left-aligned without an additional margin, so header and rows use the same trailing geometry. Count/header/Actions, populated artist/album isolation, unknown noninteractive values, the narrow breakpoint and collapsed player’s single 8px margin remain intact. Independently ran `rtk vp -C desktop test src/features/history/HistoryDetail.test.tsx src/i18n/locales.test.ts src/features/playback/PersistentPlayer.test.tsx` (3 files / 28 tests), `rtk vp -C desktop check --no-fmt` (40 files clean), and `rtk git diff --check` (pass). T12.5’s fresh absolute-workspace native coordinate evidence correctly supersedes T12.4 visual claims; Windows T6.3 and real long-metadata/pointer-extreme native follow-ups remain open.
+- [x] Review — 2026-08-25 final M9–M12 holistic review: **Pass**. The complete uncommitted source, tests, locales, CSS, untracked `layout.ts`, and current plan agree with the user-visible contract: page-relative numbering is `(page - 1) * pageSize + index + 1`; the single header separator updates the parent-owned ratio/template that every row inherits; count and localized headers share one row; artist/album controls remain intrinsic and isolated from row playback; fixed format/facts/actions tracks use one 12px grid gap; and the player has a true expanded-overlay exclusion plus a single collapsed 8px disc/toggle gap and centered direction icons. The review found no unresolved code or plan finding. Independently ran `rtk vp -C desktop test` (17 files / 71 tests), `rtk vp -C desktop check --no-fmt` (40 files clean), and `rtk git diff --check` (pass). Existing Windows T6.3 and real long-metadata/pointer-extreme native checks remain explicitly non-blocking external validation gaps, so overall plan status correctly remains `In Review`.

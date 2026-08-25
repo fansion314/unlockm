@@ -111,13 +111,25 @@ test("cover rotation, layout order, and collapsed focus contract follow playback
   await user.click(screen.getByRole("button", { name: "Collapse player" }));
   const player = document.querySelector(".persistent-player")!;
   expect(player.getAttribute("data-collapsed")).toBe("true");
+  expect(player.classList.contains("is-collapsed")).toBe(true);
   expect(document.querySelector(".player-expanded")?.getAttribute("aria-hidden")).toBe("true");
   expect(
     document.querySelector(".player-expanded")?.classList.contains("is-collapsed-content"),
   ).toBe(true);
   expect((document.querySelector(".collapsed-play") as HTMLButtonElement).disabled).toBe(false);
+  expect(document.querySelector(".collapsed-play")?.getAttribute("aria-hidden")).toBe("false");
+  expect(
+    document.querySelector(".player-collapse-toggle")?.getAttribute("data-collapse-direction"),
+  ).toBe("expand-right");
+  expect(player.lastElementChild?.classList.contains("player-collapse-toggle")).toBe(true);
+  expect(document.querySelector(".player-collapse-toggle svg")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Expand player" }));
   expect((document.querySelector(".collapsed-play") as HTMLButtonElement).disabled).toBe(true);
+  expect(document.querySelector(".collapsed-play")?.getAttribute("aria-hidden")).toBe("true");
+  expect((document.querySelector(".collapsed-play") as HTMLButtonElement).tabIndex).toBe(-1);
+  expect(
+    document.querySelector(".player-collapse-toggle")?.getAttribute("data-collapse-direction"),
+  ).toBe("collapse-left");
   expect(
     document.querySelector(".player-expanded")?.classList.contains("is-collapsed-content"),
   ).toBe(false);

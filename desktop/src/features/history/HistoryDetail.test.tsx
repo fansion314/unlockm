@@ -1,9 +1,10 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import i18n from "../../i18n";
 import type { HistoryItem } from "../../lib/contracts";
 import { Artwork, HistoryDetail, VisibleArtwork } from "./HistoryDetail";
+import { clampTitleAlbumRatio, visibleItemNumber } from "./layout";
 import { PlaybackProvider } from "../playback/PlaybackProvider";
 
 const { api, convertFileSrc } = vi.hoisted(() => ({
@@ -179,11 +180,9 @@ test("detail renders compact output facts without raw diagnostics", async () => 
 test("detail back navigation remains an identifiable sticky pill", async () => {
   renderDetail();
   await screen.findByText("Track 1");
-  expect(
-    screen
-      .getByRole("button", { name: "Back to conversions" })
-      .classList.contains("detail-back-pill"),
-  ).toBe(true);
+  expect(screen.getByRole("button", { name: "Home" }).classList.contains("detail-back-pill")).toBe(
+    true,
+  );
 });
 
 test("detail renames inline, cancels with Escape, and keeps editing after a failure", async () => {
@@ -269,6 +268,28 @@ test("each filter clears independently without resetting the selected sort", asy
   );
 });
 
+test("compact filters reserve clear space only after a value is present in every locale", async () => {
+  const user = userEvent.setup();
+  renderDetail();
+  await screen.findByText("Track 1");
+  const search = screen.getByRole("searchbox", { name: "Search songs" });
+  const artist = screen.getByPlaceholderText("All artists");
+  expect(search.closest(".search-control")?.getAttribute("data-has-clear")).toBe("false");
+  expect(artist.parentElement?.getAttribute("data-has-clear")).toBe("false");
+  await user.type(search, "late");
+  expect(search.closest(".search-control")?.getAttribute("data-has-clear")).toBe("true");
+
+  for (const [language, searchPlaceholder, artistPlaceholder, albumPlaceholder] of [
+    ["zh-CN", "搜索歌曲", "全部歌手", "全部专辑"],
+    ["ja-JP", "曲を検索", "すべてのアーティスト", "すべてのアルバム"],
+  ]) {
+    await i18n.changeLanguage(language);
+    expect(screen.getByPlaceholderText(searchPlaceholder)).toBeTruthy();
+    expect(screen.getByPlaceholderText(artistPlaceholder)).toBeTruthy();
+    expect(screen.getByPlaceholderText(albumPlaceholder)).toBeTruthy();
+  }
+});
+
 test("copied outcome is available as a server-side result filter", async () => {
   const user = userEvent.setup();
   renderDetail();
@@ -312,6 +333,168 @@ test("media-library row keeps artist filtering and row playback separate from ac
   );
   await user.click(screen.getByRole("button", { name: "Reveal Track 1 in its folder" }));
   expect(api.revealRunItem).toHaveBeenCalledWith(1);
+});
+
+test("visible row numbers start at one for every result set and continue across pages", async () => {
+  const user = userEvent.setup();
+  api.queryRunItems.mockImplementation(async (_runId, query) =>
+    page([item(query.page === 1 ? 57 : 88)], {
+      page: query.page,
+      pageCount: 3,
+      filteredTotal: 75,
+      musicTotal: 75,
+    }),
+  );
+  renderDetail();
+  await screen.findByText("Track 57");
+  expect(document.querySelector(".track-number")?.textContent).toBe("01");
+
+  await user.selectOptions(screen.getByLabelText("Sort"), "title:asc");
+  await waitFor(() => expect(screen.getByText("Track 57")).toBeTruthy());
+  expect(document.querySelector(".track-number")?.textContent).toBe("01");
+
+  await user.click(screen.getByRole("button", { name: "2" }));
+  await waitFor(() => expect(screen.getByText("Track 88")).toBeTruthy());
+  expect(document.querySelector(".track-number")?.textContent).toBe("26");
+  expect(visibleItemNumber(2, 10, 0)).toBe(11);
+});
+
+test("title and album separator clamps pointer-independent keyboard adjustments", async () => {
+  const user = userEvent.setup();
+  renderDetail();
+  await screen.findByText("Track 1");
+  const separator = screen.getByRole("separator", { name: "Adjust title and album columns" });
+  expect(separator.getAttribute("aria-valuenow")).toBe("60");
+  await user.click(separator);
+  await user.keyboard("{ArrowRight}");
+  expect(separator.getAttribute("aria-valuenow")).toBe("65");
+  await user.keyboard("{End}");
+  expect(separator.getAttribute("aria-valuenow")).toBe("75");
+  await user.keyboard("{Home}");
+  expect(separator.getAttribute("aria-valuenow")).toBe("35");
+  const row = document.querySelector<HTMLElement>(".music-item")!;
+  const header = document.querySelector<HTMLElement>(".song-list-header")!;
+  const songList = document.querySelector<HTMLElement>(".song-list")!;
+  expect(separator.closest(".song-list-header")).toBe(header);
+  expect(row.querySelector("[role='separator'], .title-album-separator")).toBeNull();
+  expect(songList.style.getPropertyValue("--title-track")).toBe("35fr");
+  expect(songList.style.getPropertyValue("--album-track")).toBe("65fr");
+  expect(row.style.getPropertyValue("--title-track")).toBe("");
+  expect(header.style.getPropertyValue("--album-track")).toBe("");
+  expect(clampTitleAlbumRatio(-1)).toBe(35);
+  expect(clampTitleAlbumRatio(101)).toBe(75);
+});
+
+test("title and album separator captures and releases pointer drags including cancellation", async () => {
+  renderDetail();
+  await screen.findByText("Track 1");
+  const separator = screen.getByRole("separator", { name: "Adjust title and album columns" });
+  const header = document.querySelector<HTMLElement>(".song-list-header")!;
+  const songList = document.querySelector<HTMLElement>(".song-list")!;
+  const titleTrack = header.querySelector<HTMLElement>(".song-title-track")!;
+  const albumTrack = header.querySelector<HTMLElement>(".song-album-track")!;
+  Object.assign(titleTrack, { getBoundingClientRect: () => ({ left: 100 }) });
+  Object.assign(albumTrack, { getBoundingClientRect: () => ({ right: 500 }) });
+  const setPointerCapture = vi.fn();
+  const releasePointerCapture = vi.fn();
+  const hasPointerCapture = vi.fn(() => true);
+  Object.assign(separator, { setPointerCapture, releasePointerCapture, hasPointerCapture });
+
+  fireEvent.pointerDown(separator, { clientX: 260, pointerId: 12 });
+  expect(setPointerCapture).toHaveBeenCalledWith(12);
+  await waitFor(() => expect(separator.getAttribute("aria-valuenow")).toBe("40"));
+  expect(songList.style.getPropertyValue("--title-track")).toBe("40fr");
+  expect(songList.style.getPropertyValue("--album-track")).toBe("60fr");
+  fireEvent.pointerMove(window, { clientX: 380, pointerId: 12 });
+  await waitFor(() => expect(separator.getAttribute("aria-valuenow")).toBe("70"));
+  expect(songList.style.getPropertyValue("--title-track")).toBe("70fr");
+  expect(songList.style.getPropertyValue("--album-track")).toBe("30fr");
+  fireEvent.pointerUp(window, { pointerId: 12 });
+  expect(releasePointerCapture).toHaveBeenCalledWith(12);
+
+  fireEvent.pointerDown(separator, { clientX: 260, pointerId: 13 });
+  fireEvent.pointerCancel(window, { pointerId: 13 });
+  expect(releasePointerCapture).toHaveBeenLastCalledWith(13);
+});
+
+test("narrow song layout removes the title and album separator from the tab order", async () => {
+  const mediaQuery = {
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => mediaQuery),
+  );
+  renderDetail();
+  await screen.findByText("Track 1");
+  expect(screen.queryByRole("separator", { name: "Adjust title and album columns" })).toBeNull();
+  expect(document.querySelector(".title-album-separator[tabindex]")).toBeNull();
+});
+
+test("all rows share stable tail tracks while long artist and album text stay intrinsic", async () => {
+  const long = item(2, "An exceptionally long title that must never move the fixed file facts");
+  long.artist = "An exceptionally long artist name that is clipped within the title column";
+  long.album = "An exceptionally long album name that is clipped within the album column";
+  long.outputFormat = "flac";
+  long.outputBytes = 1_234_567_890;
+  api.queryRunItems.mockResolvedValue(page([item(1), long]));
+  renderDetail();
+  await screen.findByText(long.title!);
+  const rows = Array.from(document.querySelectorAll<HTMLElement>(".music-item"));
+  const header = document.querySelector<HTMLElement>(".song-list-header")!;
+  const songList = document.querySelector<HTMLElement>(".song-list")!;
+  expect(rows).toHaveLength(2);
+  expect(songList.style.getPropertyValue("--title-track")).toBe("60fr");
+  expect(songList.style.getPropertyValue("--album-track")).toBe("40fr");
+  expect(rows.every((row) => row.style.getPropertyValue("--title-track") === "")).toBe(true);
+  expect(header.style.getPropertyValue("--album-track")).toBe("");
+  expect(document.querySelectorAll("[role='separator']")).toHaveLength(1);
+  expect(document.querySelectorAll(".music-item .title-album-spacer[tabindex]")).toHaveLength(0);
+  const artist = screen.getByRole("button", { name: long.artist });
+  const album = screen.getByRole("button", { name: long.album });
+  expect(artist.getAttribute("title")).toBe(long.artist);
+  expect(album.getAttribute("title")).toBe(long.album);
+});
+
+test("column header exposes localized compact media labels while rows keep the spacer inert", async () => {
+  renderDetail();
+  await screen.findByText("Track 1");
+  const header = document.querySelector<HTMLElement>(".song-list-header")!;
+  expect(header.textContent).toContain("Song");
+  expect(header.textContent).toContain("Album");
+  expect(header.textContent).toContain("Format");
+  expect(header.textContent).toContain("Size & bitrate");
+  expect(header.textContent).toContain("Actions");
+  expect(header.textContent).toContain("1 songs");
+  const spacer = document.querySelector(".music-item .title-album-spacer");
+  expect(spacer?.getAttribute("aria-hidden")).toBe("true");
+  expect(spacer?.getAttribute("role")).toBeNull();
+});
+
+test("artist and album buttons filter independently without starting row playback", async () => {
+  const user = userEvent.setup();
+  renderDetail();
+  await screen.findByText("Track 1");
+
+  await user.click(screen.getByRole("button", { name: "Artist A" }));
+  await waitFor(() =>
+    expect(api.queryRunItems).toHaveBeenLastCalledWith(
+      9,
+      expect.objectContaining({ artist: "Artist A", page: 1 }),
+    ),
+  );
+  expect(convertFileSrc).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: "Album A" }));
+  await waitFor(() =>
+    expect(api.queryRunItems).toHaveBeenLastCalledWith(
+      9,
+      expect.objectContaining({ album: "Album A", page: 1 }),
+    ),
+  );
+  expect(convertFileSrc).not.toHaveBeenCalled();
 });
 
 test("normal player cleanup releases the source without forcing an error-prone reload", async () => {

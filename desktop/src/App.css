@@ -14,7 +14,7 @@
 .topbar-inner {
   align-items: center;
   display: flex;
-  height: 68px;
+  height: var(--topbar-block-size);
   justify-content: space-between;
   margin: 0 auto;
   max-width: 1320px;
@@ -184,7 +184,7 @@
 .app-shell {
   margin: 0 auto;
   max-width: 1320px;
-  min-height: calc(100dvh - 68px);
+  min-height: calc(100dvh - var(--topbar-block-size));
   padding: clamp(20px, 3vw, 36px) clamp(20px, 4vw, 48px) 52px;
 }
 

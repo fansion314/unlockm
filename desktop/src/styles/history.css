@@ -17,7 +17,7 @@
   margin: 8px 0 14px;
   padding: 8px 12px;
   position: sticky;
-  top: 68px;
+  top: calc(var(--topbar-block-size) + var(--detail-sticky-gap));
   z-index: 20;
 }
 
@@ -228,22 +228,23 @@
 }
 
 .detail-toolbar .compact-filter {
-  inline-size: 112px;
+  --compact-filter-expanded-size: clamp(224px, 25vw, 330px);
+  inline-size: 184px;
   transition: inline-size 160ms ease;
 }
 
 .detail-toolbar .compact-filter:focus-within,
 .detail-toolbar .compact-filter.is-expanded {
-  inline-size: clamp(176px, 20vw, 270px);
+  inline-size: var(--compact-filter-expanded-size);
 }
 
 .detail-toolbar .search-control {
-  inline-size: 144px;
+  inline-size: 178px;
 }
 
 .detail-toolbar .search-control:focus-within,
 .detail-toolbar .search-control.is-expanded {
-  inline-size: clamp(210px, 25vw, 330px);
+  inline-size: var(--compact-filter-expanded-size);
 }
 
 .detail-toolbar .compact-select {
@@ -256,9 +257,9 @@
   position: relative;
 }
 
-.detail-toolbar .filter-field input,
-.detail-toolbar .filter-field select,
-.detail-toolbar .search-control input {
+.detail-toolbar .filter-field[data-has-clear="true"] input,
+.detail-toolbar .filter-field[data-has-clear="true"] select,
+.detail-toolbar .search-control.has-clear input {
   padding-inline-end: 34px;
 }
 
@@ -293,7 +294,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .detail-toolbar .compact-filter {
+  .detail-toolbar .compact-filter,
+  .detail-toolbar .search-control {
     transition: none;
   }
 }
@@ -427,18 +429,82 @@
 .song-list {
   border-top: 1px solid var(--border-strong);
   min-height: 240px;
+  --music-row-gap: 12px;
+  --music-index-column: 38px;
+  --music-cover-column: 46px;
+  --music-separator-column: 12px;
+  --music-format-column: 64px;
+  --music-facts-column: 104px;
+  --music-actions-column: 112px;
+  --music-title-min: 120px;
+  --music-album-min: 104px;
+  --music-grid-template: var(--music-index-column) var(--music-cover-column)
+    minmax(var(--music-title-min), var(--title-track, 1.5fr)) var(--music-separator-column)
+    minmax(var(--music-album-min), var(--album-track, 1fr)) var(--music-format-column)
+    var(--music-facts-column) var(--music-actions-column);
+}
+
+.song-layout-grid {
+  display: grid;
+  grid-template-columns: var(--music-grid-template);
+}
+
+.song-list-header {
+  align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  gap: var(--music-row-gap);
+  min-height: 34px;
+  padding: 5px 4px 4px;
+}
+
+.song-list-header > span {
+  min-width: 0;
+}
+
+.song-list-count {
+  align-self: center;
+  color: var(--text-muted);
+  grid-column: 1 / span 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-list-header .song-title-track,
+.song-list-header .song-album-track,
+.song-list-header .format-cell {
+  color: var(--text-muted);
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-list-header .file-facts {
+  color: var(--text-muted);
+  display: block;
+  font: inherit;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-actions-heading {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .music-item {
   align-items: center;
   border-bottom: 1px solid var(--border-subtle);
-  display: grid;
-  gap: 14px;
+  gap: var(--music-row-gap);
   cursor: pointer;
-  grid-template-columns: 38px 46px minmax(160px, 1.25fr) minmax(120px, 0.8fr) 68px minmax(
-      82px,
-      0.45fr
-    ) auto;
   min-height: 72px;
   padding: 10px 4px;
 }
@@ -495,6 +561,43 @@
   min-width: 0;
 }
 
+.title-album-separator {
+  align-self: stretch;
+  border-radius: var(--radius-round);
+  cursor: col-resize;
+  inline-size: 24px;
+  justify-self: center;
+  margin-inline: -6px;
+  min-block-size: 36px;
+  outline: 0;
+  position: relative;
+  touch-action: none;
+}
+
+.title-album-separator::after {
+  background: var(--border-control);
+  border-radius: var(--radius-round);
+  content: "";
+  inset-block: 6px;
+  inset-inline: 11px;
+  position: absolute;
+  transition:
+    background var(--motion-fast) var(--ease-standard),
+    inset var(--motion-fast) var(--ease-standard);
+}
+
+.title-album-separator:hover::after,
+.title-album-separator:focus-visible::after {
+  background: var(--color-accent);
+  inset-block: 4px;
+  inset-inline: 10px;
+}
+
+.title-album-spacer {
+  align-self: stretch;
+  pointer-events: none;
+}
+
 .music-copy strong,
 .music-copy span,
 .music-copy small {
@@ -508,21 +611,33 @@
 }
 
 .metadata-link,
-.album-cell {
+.album-cell,
+.metadata-value {
   background: transparent;
   border: 0;
   color: var(--text-secondary);
   cursor: pointer;
   font: inherit;
+  inline-size: fit-content;
+  justify-self: start;
+  max-inline-size: 100%;
   min-width: 0;
   padding: 0;
   text-align: left;
 }
 
 .music-copy .metadata-link,
-.album-cell {
+.album-cell,
+.music-copy .metadata-value {
   color: var(--text-secondary);
   font-size: 0.84rem;
+}
+
+.music-copy .metadata-link,
+.music-copy .metadata-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metadata-link:hover,
@@ -537,9 +652,15 @@
   white-space: nowrap;
 }
 
+.metadata-value {
+  cursor: default;
+}
+
 .format-cell {
   display: grid;
   gap: 3px;
+  justify-items: end;
+  text-align: right;
 }
 .format-cell strong {
   color: var(--text-secondary);
@@ -548,13 +669,17 @@
 }
 .format-cell small {
   font-size: 0.72rem;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-facts {
   display: grid;
   gap: 4px;
-  justify-items: end;
-  text-align: right;
+  justify-items: center;
+  text-align: center;
 }
 
 .file-facts strong {
@@ -624,6 +749,11 @@
   gap: 2px;
 }
 
+.song-actions .icon-button {
+  block-size: 36px;
+  inline-size: 36px;
+}
+
 .detail-skeletons {
   display: grid;
 }
@@ -670,6 +800,15 @@
 }
 
 @media (max-width: 1080px) {
+  .song-list {
+    --music-index-column: 38px;
+    --music-cover-column: 44px;
+    --music-format-column: 60px;
+    --music-facts-column: 96px;
+    --music-actions-column: 112px;
+    --music-title-min: 112px;
+    --music-album-min: 96px;
+  }
   .detail-header {
     grid-template-columns: minmax(0, 1.3fr) minmax(410px, 1.1fr) auto;
   }
@@ -681,13 +820,6 @@
   .detail-toolbar label:nth-of-type(4),
   .detail-toolbar label:nth-of-type(5) {
     grid-row: 2;
-  }
-
-  .music-item {
-    grid-template-columns: 38px 44px minmax(150px, 1fr) minmax(108px, 0.7fr) 58px minmax(
-        76px,
-        0.4fr
-      ) auto;
   }
 }
 
@@ -719,11 +851,13 @@
     grid-row: auto;
   }
 
-  .music-item {
-    grid-template-columns: 34px 42px minmax(0, 1fr) auto;
+  .song-list {
+    --music-grid-template: 34px 42px minmax(0, 1fr) auto;
   }
 
   .album-cell,
+  .title-album-separator,
+  .title-album-spacer,
   .format-cell,
   .file-facts {
     display: none;
@@ -735,5 +869,12 @@
 
   .song-actions {
     grid-column: 4;
+  }
+
+  .song-list-header .song-album-track,
+  .song-list-header .format-cell,
+  .song-list-header .file-facts,
+  .song-list-header > :last-child {
+    display: none;
   }
 }
