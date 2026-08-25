@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import i18n from "../../i18n";
 import type { HistoryItem } from "../../lib/contracts";
 import { Artwork, HistoryDetail, VisibleArtwork } from "./HistoryDetail";
-import { clampTitleAlbumRatio, visibleItemNumber } from "./layout";
+import { clampTitleAlbumRatio, paginationItems, visibleItemNumber } from "./layout";
 import { PlaybackProvider } from "../playback/PlaybackProvider";
 
 const { api, convertFileSrc } = vi.hoisted(() => ({
@@ -359,6 +359,50 @@ test("visible row numbers start at one for every result set and continue across 
   expect(visibleItemNumber(2, 10, 0)).toBe(11);
 });
 
+test("pagination keeps first, last, and nearby pages with accessible gaps", () => {
+  expect(paginationItems(10, 2_000)).toEqual([
+    1,
+    2,
+    "ellipsis",
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    "ellipsis",
+    1_999,
+    2_000,
+  ]);
+  expect(paginationItems(2, 6)).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(paginationItems(1, 1)).toEqual([]);
+});
+
+test("pagination renders edge pages, nearby pages, and inert ellipses", async () => {
+  api.queryRunItems.mockImplementation(async (_runId, query) =>
+    page([item(query.page)], {
+      page: query.page === 1 ? 10 : query.page,
+      pageCount: 2_000,
+      filteredTotal: 50_000,
+      musicTotal: 50_000,
+    }),
+  );
+  renderDetail();
+  const pagination = await screen.findByRole("navigation", { name: "Song pages" });
+  await waitFor(() =>
+    expect(
+      within(pagination).getByRole("button", { name: "10" }).getAttribute("aria-current"),
+    ).toBe("page"),
+  );
+  expect(within(pagination).getByRole("button", { name: "1" })).toBeTruthy();
+  expect(within(pagination).getByRole("button", { name: "2" })).toBeTruthy();
+  expect(within(pagination).getByRole("button", { name: "1999" })).toBeTruthy();
+  expect(within(pagination).getByRole("button", { name: "2000" })).toBeTruthy();
+  expect(within(pagination).queryByRole("button", { name: "3" })).toBeNull();
+  expect(pagination.querySelectorAll(".pagination-ellipsis")).toHaveLength(2);
+});
+
 test("title and album separator clamps pointer-independent keyboard adjustments", async () => {
   const user = userEvent.setup();
   renderDetail();
@@ -464,10 +508,19 @@ test("column header exposes localized compact media labels while rows keep the s
   const header = document.querySelector<HTMLElement>(".song-list-header")!;
   expect(header.textContent).toContain("Song");
   expect(header.textContent).toContain("Album");
+  expect(header.textContent).toContain("Duration");
   expect(header.textContent).toContain("Format");
   expect(header.textContent).toContain("Size & bitrate");
   expect(header.textContent).toContain("Actions");
-  expect(header.textContent).toContain("1 songs");
+  expect(header.textContent).toContain("1 song total");
+  const summary = header.querySelector(".song-list-count");
+  expect(summary?.textContent).toBe("1 song total");
+  expect(summary?.textContent).not.toContain("companion");
+  await i18n.changeLanguage("zh-CN");
+  await waitFor(() => expect(summary?.textContent).toBe("共 1 首"));
+  const durationCells = document.querySelectorAll(".duration-cell");
+  expect(durationCells).toHaveLength(2);
+  expect(durationCells[1]?.textContent).toBe("1:05");
   const spacer = document.querySelector(".music-item .title-album-spacer");
   expect(spacer?.getAttribute("aria-hidden")).toBe("true");
   expect(spacer?.getAttribute("role")).toBeNull();

@@ -29,6 +29,7 @@ import {
   clampTitleAlbumRatio,
   MAX_TITLE_ALBUM_RATIO,
   MIN_TITLE_ALBUM_RATIO,
+  paginationItems,
   visibleItemNumber,
 } from "./layout";
 
@@ -147,7 +148,6 @@ export function HistoryDetail({
   const [pageCount, setPageCount] = useState(0);
   const [filteredTotal, setFilteredTotal] = useState(0);
   const [musicTotal, setMusicTotal] = useState(run.musicCount);
-  const [companionCount, setCompanionCount] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [artist, setArtist] = useState("");
@@ -237,7 +237,6 @@ export function HistoryDetail({
         setPageCount(result.pageCount);
         setFilteredTotal(result.filteredTotal);
         setMusicTotal(result.musicTotal);
-        setCompanionCount(result.companionCount);
         setRepairPending(result.repairPending ?? false);
       })
       .catch(() => {
@@ -255,10 +254,7 @@ export function HistoryDetail({
   }, [repairPending]);
 
   const pages = useMemo(() => {
-    if (pageCount <= 1) return [];
-    const start = Math.max(1, Math.min(page - 2, pageCount - 4));
-    const end = Math.min(pageCount, Math.max(page + 2, 5));
-    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+    return paginationItems(page, pageCount);
   }, [page, pageCount]);
 
   const runDuration = run.finishedAtMs === null ? null : run.finishedAtMs - run.createdAtMs;
@@ -624,7 +620,6 @@ export function HistoryDetail({
           <div className="song-list-header song-layout-grid">
             <span className="song-list-count" aria-live="polite">
               {t("app.filteredSongs", { count: filteredTotal })}
-              {companionCount > 0 ? ` · ${t("app.companions", { count: companionCount })}` : null}
             </span>
             <span className="song-title-track">{t("app.columnSong")}</span>
             {wideSongLayout ? (
@@ -667,6 +662,7 @@ export function HistoryDetail({
               <span className="title-album-spacer" aria-hidden="true" />
             )}
             <span className="song-album-track">{t("app.columnAlbum")}</span>
+            <span className="duration-cell">{t("app.columnDuration")}</span>
             <span className="format-cell">{t("app.columnFormat")}</span>
             <span className="file-facts">{t("app.columnFacts")}</span>
             <span className="song-actions-heading">{t("app.columnActions")}</span>
@@ -765,6 +761,9 @@ export function HistoryDetail({
                       {t("app.unknownAlbum")}
                     </span>
                   )}
+                  <span className="duration-cell">
+                    {formatDuration(item.durationMs, i18n.language)}
+                  </span>
                   <div className="format-cell">
                     <strong>{item.outputFormat?.toUpperCase() || t("app.unknownFormat")}</strong>
                     {!(["converted", "skipped"] as string[]).includes(item.outcome) ? (
@@ -828,17 +827,23 @@ export function HistoryDetail({
           >
             <CaretLeft aria-hidden="true" size={17} />
           </button>
-          {pages.map((value) => (
-            <button
-              aria-current={value === page ? "page" : undefined}
-              className={value === page ? "is-current" : ""}
-              key={value}
-              type="button"
-              onClick={() => setPage(value)}
-            >
-              {value}
-            </button>
-          ))}
+          {pages.map((value, index) =>
+            value === "ellipsis" ? (
+              <span aria-hidden="true" className="pagination-ellipsis" key={`ellipsis-${index}`}>
+                …
+              </span>
+            ) : (
+              <button
+                aria-current={value === page ? "page" : undefined}
+                className={value === page ? "is-current" : ""}
+                key={value}
+                type="button"
+                onClick={() => setPage(value)}
+              >
+                {value}
+              </button>
+            ),
+          )}
           <button
             aria-label={t("app.nextPage")}
             disabled={page >= pageCount}
