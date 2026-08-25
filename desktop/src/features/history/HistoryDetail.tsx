@@ -58,20 +58,17 @@ function useWideSongLayout(): boolean {
   return wide;
 }
 
-export function Artwork({
-  artworkId,
-  title,
-  visible = true,
-}: {
+type ArtworkProps = {
   artworkId: number | null;
   title: string | null;
   visible?: boolean;
-}) {
-  const [url, setUrl] = useState<string | null>(null);
+};
+
+function ArtworkLoader({ artworkId, title, visible = true }: ArtworkProps) {
+  const [loaded, setLoaded] = useState<{ artworkId: number; url: string } | null>(null);
   useEffect(() => {
     let active = true;
     let objectUrl: string | null = null;
-    setUrl(null);
     if (artworkId === null || !visible)
       return () => {
         active = false;
@@ -79,21 +76,29 @@ export function Artwork({
     void Promise.all([desktopApi.getArtworkMime(artworkId), desktopApi.getArtwork(artworkId)])
       .then(([metadata, bytes]) => {
         objectUrl = URL.createObjectURL(new Blob([bytes], { type: metadata.mimeType }));
-        if (active) setUrl(objectUrl);
+        if (active) setLoaded({ artworkId, url: objectUrl });
         else URL.revokeObjectURL(objectUrl);
       })
-      .catch(() => {
-        if (active) setUrl(null);
-      });
+      .catch(() => undefined);
     return () => {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [artworkId, visible]);
+  const url = loaded?.artworkId === artworkId && visible ? loaded.url : null;
   return url ? (
     <img alt="" className="cover" src={url} />
   ) : (
     <span className="cover cover-placeholder">{title?.slice(0, 1) || "♪"}</span>
+  );
+}
+
+export function Artwork(props: ArtworkProps) {
+  return (
+    <ArtworkLoader
+      key={`${props.artworkId ?? "empty"}-${props.visible === false ? "hidden" : "visible"}`}
+      {...props}
+    />
   );
 }
 
@@ -107,10 +112,7 @@ export function VisibleArtwork({
   const target = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(() => typeof IntersectionObserver === "undefined");
   useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") {
-      setVisible(true);
-      return;
-    }
+    if (typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -157,8 +159,8 @@ export function HistoryDetail({
   const [direction, setDirection] = useState<SortDirection>("asc");
   const [artists, setArtists] = useState<string[]>([]);
   const [albums, setAlbums] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const [settledRequestKey, setSettledRequestKey] = useState<string | null>(null);
+  const [loadErrorKey, setLoadErrorKey] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [repairPending, setRepairPending] = useState(false);
   const [editing, setEditing] = useState<HistoryItem | null>(null);
@@ -223,15 +225,20 @@ export function HistoryDetail({
     }),
     [album, artist, direction, outcome, page, search, sort],
   );
+  const requestKey = useMemo(
+    () => JSON.stringify([run.id, reloadToken, query]),
+    [query, reloadToken, run.id],
+  );
+  const loading = settledRequestKey !== requestKey;
+  const loadError = loadErrorKey === requestKey;
 
   useEffect(() => {
     const sequence = ++requestSequence.current;
-    setLoading(true);
-    setLoadError(false);
     void desktopApi
       .queryRunItems(run.id, query)
       .then((result) => {
         if (requestSequence.current !== sequence) return;
+        setLoadErrorKey(null);
         setItems(result.items);
         setPage(result.page);
         setPageCount(result.pageCount);
@@ -240,12 +247,12 @@ export function HistoryDetail({
         setRepairPending(result.repairPending ?? false);
       })
       .catch(() => {
-        if (requestSequence.current === sequence) setLoadError(true);
+        if (requestSequence.current === sequence) setLoadErrorKey(requestKey);
       })
       .finally(() => {
-        if (requestSequence.current === sequence) setLoading(false);
+        if (requestSequence.current === sequence) setSettledRequestKey(requestKey);
       });
-  }, [query, reloadToken, run.id]);
+  }, [query, requestKey, run.id]);
 
   useEffect(() => {
     if (!repairPending) return;

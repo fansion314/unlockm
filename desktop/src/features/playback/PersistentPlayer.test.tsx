@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import "../../i18n";
 import type { HistoryItem } from "../../lib/contracts";
+import { applyTheme } from "../../lib/theme";
 
 const api = vi.hoisted(() => ({ getArtwork: vi.fn(), getArtworkMime: vi.fn() }));
 const playback = vi.hoisted(() => ({
@@ -95,6 +96,43 @@ test("artwork changes immediately clear old URLs and late requests cannot repain
   expect(document.querySelector("img.player-cover")).toBeNull();
 });
 
+test("rapid A to B to A artwork switches never reuse a revoked URL", async () => {
+  let resolveReturnedBytes: ((bytes: ArrayBuffer) => void) | undefined;
+  api.getArtwork.mockResolvedValueOnce(new ArrayBuffer(4));
+  api.getArtwork.mockResolvedValueOnce(new ArrayBuffer(4));
+  api.getArtwork.mockReturnValueOnce(
+    new Promise<ArrayBuffer>((resolve) => {
+      resolveReturnedBytes = resolve;
+    }),
+  );
+  vi.spyOn(URL, "createObjectURL")
+    .mockReturnValueOnce("blob:a")
+    .mockReturnValueOnce("blob:b")
+    .mockReturnValueOnce("blob:a-returned");
+  const revoke = vi.spyOn(URL, "revokeObjectURL");
+  const view = render(<PersistentPlayer />);
+  await waitFor(() =>
+    expect(document.querySelector("img.player-cover")?.getAttribute("src")).toBe("blob:a"),
+  );
+
+  playback.track = { ...baseTrack, id: 2, artworkId: 2, title: "B" };
+  view.rerender(<PersistentPlayer />);
+  await waitFor(() =>
+    expect(document.querySelector("img.player-cover")?.getAttribute("src")).toBe("blob:b"),
+  );
+
+  playback.track = { ...baseTrack, artworkId: 1, title: "A returned" };
+  view.rerender(<PersistentPlayer />);
+  expect(document.querySelector("img.player-cover")).toBeNull();
+  expect(document.querySelector(".player-cover-placeholder")?.textContent).toBe("A");
+  resolveReturnedBytes?.(new ArrayBuffer(4));
+  await waitFor(() =>
+    expect(document.querySelector("img.player-cover")?.getAttribute("src")).toBe("blob:a-returned"),
+  );
+  expect(revoke).toHaveBeenCalledWith("blob:a");
+  expect(revoke).toHaveBeenCalledWith("blob:b");
+});
+
 test("cover rotation, layout order, and collapsed focus contract follow playback state", async () => {
   vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:cover");
   playback.playing = true;
@@ -144,4 +182,21 @@ test("cover rotation, layout order, and collapsed focus contract follow playback
       "player-cover",
     ),
   ).toBe(true);
+});
+
+test("switching a complete theme preserves the active player and collapsed state", async () => {
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:cover");
+  const user = userEvent.setup();
+  render(<PersistentPlayer />);
+  const player = document.querySelector(".persistent-player")!;
+  await user.click(screen.getByRole("button", { name: "Collapse player" }));
+  expect(player.getAttribute("data-collapsed")).toBe("true");
+
+  applyTheme("dracula");
+
+  expect(document.documentElement.dataset.theme).toBe("dracula");
+  expect(document.querySelector(".persistent-player")).toBe(player);
+  expect(player.getAttribute("data-collapsed")).toBe("true");
+  expect(screen.getByText("Now playing")).toBeTruthy();
+  expect(playback.toggle).not.toHaveBeenCalled();
 });

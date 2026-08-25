@@ -3,8 +3,7 @@
   "supportedLocales": ["zh-CN", "en-US", "ja-JP"],
   "preferences": {
     "locale": "en-US",
-    "theme": "light",
-    "palette": "blue",
+    "themeId": "aurora-light",
     "playerVolume": 0.6,
     "defaultSettings": {
       "updateMetadata": false,

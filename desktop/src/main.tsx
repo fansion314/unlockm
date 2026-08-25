@@ -5,10 +5,10 @@ import "@fontsource-variable/manrope";
 import "./i18n";
 import "./index.css";
 import App from "./App.tsx";
-import { applyTheme, cachedPalette, cachedTheme } from "./lib/theme";
+import { applyTheme, cachedThemeId } from "./lib/theme";
 import { listenDisplayScale } from "./lib/display-scale";
 
-applyTheme(cachedTheme(), cachedPalette());
+applyTheme(cachedThemeId());
 void listenDisplayScale();
 
 createRoot(document.getElementById("root")!).render(

@@ -1,36 +1,46 @@
-import type { Preferences } from "./contracts";
+import {
+  defaultThemeId,
+  isThemeId,
+  legacyThemeId,
+  type ThemeId,
+  themePreset,
+} from "./theme-presets";
 
-const THEME_KEY = "unlockm-theme";
-const PALETTE_KEY = "unlockm-palette";
+const THEME_ID_KEY = "unlockm-theme-id";
+const LEGACY_THEME_KEY = "unlockm-theme";
+const LEGACY_PALETTE_KEY = "unlockm-palette";
 
-export function cachedTheme(): Preferences["theme"] {
+export function cachedThemeId(): ThemeId {
   try {
-    return window.localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
+    const current = window.localStorage.getItem(THEME_ID_KEY);
+    if (isThemeId(current)) return current;
+    const legacyTheme = window.localStorage.getItem(LEGACY_THEME_KEY);
+    const legacyPalette = window.localStorage.getItem(LEGACY_PALETTE_KEY);
+    if (legacyTheme !== null || legacyPalette !== null) {
+      return legacyThemeId(legacyTheme, legacyPalette);
+    }
   } catch {
-    return "light";
+    // Rust preferences remain authoritative when browser storage is unavailable.
   }
+  return defaultThemeId;
 }
 
-export function applyTheme(
-  theme: Preferences["theme"],
-  palette: NonNullable<Preferences["palette"]> = cachedPalette(),
-): void {
-  document.documentElement.dataset.theme = theme;
-  document.documentElement.dataset.palette = palette;
-  document.documentElement.style.colorScheme = theme;
+export function applyTheme(themeId: ThemeId): void {
+  const preset = themePreset(themeId);
+  const root = document.documentElement;
+  root.classList.add("is-theme-switching");
+  root.dataset.theme = preset.id;
+  root.style.colorScheme = preset.scheme;
+  // WKWebView can otherwise retain an old transitioned color/gradient when
+  // its source custom property changes. Commit the new theme with transitions
+  // disabled, then restore ordinary hover/state motion without a second value change.
+  void root.offsetWidth;
+  root.classList.remove("is-theme-switching");
   try {
-    window.localStorage.setItem(THEME_KEY, theme);
-    window.localStorage.setItem(PALETTE_KEY, palette);
+    window.localStorage.setItem(THEME_ID_KEY, preset.id);
+    window.localStorage.removeItem(LEGACY_THEME_KEY);
+    window.localStorage.removeItem(LEGACY_PALETTE_KEY);
   } catch {
-    // The Rust preference remains authoritative when localStorage is unavailable.
-  }
-}
-
-export function cachedPalette(): NonNullable<Preferences["palette"]> {
-  try {
-    const value = window.localStorage.getItem(PALETTE_KEY);
-    return value === "emerald" || value === "violet" || value === "amber" ? value : "blue";
-  } catch {
-    return "blue";
+    // Rust preferences remain authoritative when browser storage is unavailable.
   }
 }

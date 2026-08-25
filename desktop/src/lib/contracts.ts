@@ -1,3 +1,5 @@
+import type { ThemeId } from "./theme-presets";
+
 export type RunSettings = {
   updateMetadata: boolean;
   copyPassthrough: boolean;
@@ -6,8 +8,7 @@ export type RunSettings = {
 
 export type Preferences = {
   locale: "en-US" | "zh-CN" | "ja-JP";
-  theme: "light" | "dark";
-  palette?: "blue" | "emerald" | "violet" | "amber";
+  themeId: ThemeId;
   playerVolume?: number;
   defaultSettings: RunSettings;
 };

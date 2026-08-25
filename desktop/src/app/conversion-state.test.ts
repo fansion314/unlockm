@@ -107,7 +107,7 @@ test("late bootstrap preserves a locally owned conversion request", () => {
       supportedLocales: ["zh-CN", "en-US", "ja-JP"],
       preferences: {
         locale: "en-US",
-        theme: "light",
+        themeId: "aurora-light",
         defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
       },
       history: { runs: [], nextCursor: null },
@@ -126,7 +126,7 @@ test("reconciles a reload-recovered active run once bootstrap shows it terminal"
       supportedLocales: ["zh-CN", "en-US", "ja-JP"],
       preferences: {
         locale: "en-US",
-        theme: "light",
+        themeId: "aurora-light",
         defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
       },
       history: { runs: [], nextCursor: null },
@@ -140,7 +140,7 @@ test("reconciles a reload-recovered active run once bootstrap shows it terminal"
       supportedLocales: ["zh-CN", "en-US", "ja-JP"],
       preferences: {
         locale: "en-US",
-        theme: "light",
+        themeId: "aurora-light",
         defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
       },
       history: { runs: [], nextCursor: null },

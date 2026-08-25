@@ -124,7 +124,49 @@
     "noCoverCandidates": "No local covers match this search.",
     "coverTooLarge": "The cover image must be 10 MiB or smaller.",
     "backToTop": "Back to top",
-    "choosePalette": "Choose color palette",
+    "chooseTheme": "Choose appearance theme",
+    "themeScheme": {
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "themes": {
+      "aurora-light": {
+        "name": "UnlockM Aurora Light",
+        "description": "Airy indigo, teal, and coral"
+      },
+      "aurora-dark": {
+        "name": "UnlockM Aurora Dark",
+        "description": "Electric color on deep indigo"
+      },
+      "tokyo-night": {
+        "name": "Tokyo Night",
+        "description": "Midnight blue, violet, and cyan"
+      },
+      "catppuccin-mocha": {
+        "name": "Catppuccin Mocha",
+        "description": "Soft mauve, blue, and peach"
+      },
+      "dracula": {
+        "name": "Dracula",
+        "description": "Purple, cyan, and vivid pink"
+      },
+      "nord": {
+        "name": "Nord",
+        "description": "Arctic blue with Aurora accents"
+      },
+      "gruvbox-light": {
+        "name": "Gruvbox Light",
+        "description": "Warm paper with aqua and gold"
+      },
+      "gruvbox-dark": {
+        "name": "Gruvbox Dark",
+        "description": "Retro charcoal, aqua, and amber"
+      },
+      "rose-pine-dawn": {
+        "name": "Rosé Pine Dawn",
+        "description": "Rose, foam, and warm gold"
+      }
+    },
     "volume": "Volume",
     "mute": "Mute",
     "unmute": "Restore volume",
@@ -132,10 +174,6 @@
     "expandPlayer": "Expand player",
     "editSong": "Edit {{title}}",
     "adjustTitleAlbumColumns": "Adjust title and album columns",
-    "paletteBlue": "Blue palette",
-    "paletteEmerald": "Emerald palette",
-    "paletteViolet": "Violet palette",
-    "paletteAmber": "Amber palette",
     "onlineMetadata": "Online metadata",
     "onlineSearchPanelHint": "Compare labeled fields, then apply a match to the draft on the left.",
     "onlineProvider": "Provider",

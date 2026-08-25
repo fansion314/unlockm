@@ -1,4 +1,5 @@
 @import "./styles/tokens.css";
+@import "./styles/themes.css";
 @import "./styles/history.css";
 
 :root {
@@ -17,11 +18,17 @@
 }
 
 body {
-  background: var(--surface-app);
+  background-color: var(--surface-app);
+  background-image: var(--gradient-app);
+  background-repeat: no-repeat;
+  background-size: cover;
   color: var(--text-primary);
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  transition:
+    background-color var(--motion-standard) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 button {
@@ -44,4 +51,41 @@ summary:focus-visible {
 
 ::selection {
   background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+}
+
+:root.is-theme-switching,
+:root.is-theme-switching * {
+  transition: none !important;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .topbar,
+  .language-menu,
+  .theme-menu,
+  .persistent-player,
+  .error-banner,
+  .back-button,
+  .metadata-modal {
+    backdrop-filter: none;
+    background: var(--surface-card);
+  }
+}
+
+@media (forced-colors: active) {
+  button,
+  input,
+  select,
+  .detail-header,
+  .song-list,
+  .persistent-player,
+  .metadata-modal {
+    border-color: ButtonText;
+  }
+
+  [aria-checked="true"],
+  [aria-pressed="true"],
+  .music-item.is-active {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }

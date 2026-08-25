@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import "../../i18n";
 import "../../styles/history.css";
+import { applyTheme } from "../../lib/theme";
 import { MetadataEditor, OnlineCover } from "./MetadataEditor";
 
 const historyCssSource = readFileSync("src/styles/history.css", "utf8");
@@ -296,6 +297,22 @@ test("local cover grid contains intrinsic images and reserves two title lines", 
   );
   expect(historyCssSource).toMatch(
     /@media \(max-width: 860px\)[\s\S]*?\.metadata-modal-body \{[^}]*display: block;[^}]*overflow: auto;/,
+  );
+});
+
+test("switching themes preserves the open editor and unsaved draft", async () => {
+  onlineConnected();
+  api.listArtworkCandidates.mockResolvedValue([]);
+  render(<MetadataEditor item={item} onClose={vi.fn()} onSaved={vi.fn()} />);
+  const title = screen.getByRole("textbox", { name: "Title" });
+  fireEvent.change(title, { target: { value: "Unsaved title" } });
+
+  applyTheme("nord");
+
+  expect(document.documentElement.dataset.theme).toBe("nord");
+  expect(screen.getByRole("dialog", { name: "Edit music metadata" })).toBeTruthy();
+  expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe(
+    "Unsaved title",
   );
 });
 

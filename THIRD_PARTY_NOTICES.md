@@ -91,6 +91,38 @@ The sole application-icon source is the user-supplied
 the Tauri PNG, ICNS, and ICO assets are derivatives of that artwork, not a
 replacement logo or third-party asset.
 
+### Bundled color theme references
+
+UnlockM's built-in classic themes adapt color values from the official palette
+sources below. The application does not copy upstream theme code, editor
+integrations, icons, images, or other assets, and it has no build or runtime
+dependency on these repositories. UnlockM maps the referenced colors into its
+own semantic surface, content, state, gradient, and accessibility tokens.
+
+- Tokyo Night references `folke/tokyonight.nvim` commit
+  `cdc07ac78467a233fd62c493de29a17e0cf2b2b6`, especially
+  `lua/tokyonight/colors/{storm,night}.lua`. Copyright Folke Lemaitre and
+  contributors; licensed Apache-2.0.
+- Catppuccin Mocha references `catppuccin/palette` 1.8.0 commit
+  `07d02aa110ef9eb7e7427afca5c73ba9cf7f8ebd`. Copyright 2021 Catppuccin;
+  licensed MIT.
+- Dracula references `dracula/dracula-theme` commit
+  `2985f660b04e6961b0887ffac2f8d3f35f431698` and its published OSS palette.
+  Copyright 2023 Dracula Theme; licensed MIT.
+- Nord references `nordtheme/nord` commit
+  `1cef71605416a222e57225b544540ce0fcec18d4` and `src/nord.css`.
+  Copyright 2016-present Sven Greb; licensed MIT.
+- Gruvbox Light and Gruvbox Dark reference `morhetz/gruvbox` commit
+  `5d15b2765f59754d7ac263c88a0f6e3e58124951` and
+  `colors/gruvbox.vim`. Copyright Pavel Pertsev; the upstream README declares
+  the MIT/X11 license.
+- Rosé Pine Dawn references `rose-pine/rose-pine-palette` commit
+  `92af52b465ab6e47437aca223c9b8d3009a2023b`. Copyright mvllow and Rosé Pine
+  contributors; licensed MIT.
+
+`UnlockM Aurora Light` and `UnlockM Aurora Dark` are original UnlockM palettes
+and do not derive from a third-party theme.
+
 The remaining dependencies are recorded in `Cargo.lock` and
 `desktop/pnpm-lock.yaml`; release packaging must run a license audit before
 distribution.

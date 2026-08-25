@@ -124,7 +124,49 @@
     "noCoverCandidates": "没有匹配的本地封面。",
     "coverTooLarge": "封面图片不得超过 10 MiB。",
     "backToTop": "返回顶部",
-    "choosePalette": "选择配色",
+    "chooseTheme": "选择外观主题",
+    "themeScheme": {
+      "light": "浅色",
+      "dark": "深色"
+    },
+    "themes": {
+      "aurora-light": {
+        "name": "UnlockM 极光浅色",
+        "description": "轻盈靛蓝、青绿与珊瑚色"
+      },
+      "aurora-dark": {
+        "name": "UnlockM 极光深色",
+        "description": "深靛底色与明亮多彩高光"
+      },
+      "tokyo-night": {
+        "name": "Tokyo Night",
+        "description": "午夜蓝、紫罗兰与青色"
+      },
+      "catppuccin-mocha": {
+        "name": "Catppuccin Mocha",
+        "description": "柔和淡紫、蓝色与蜜桃色"
+      },
+      "dracula": {
+        "name": "Dracula",
+        "description": "紫色、青色与鲜明粉色"
+      },
+      "nord": {
+        "name": "Nord",
+        "description": "北境蓝与极光色点缀"
+      },
+      "gruvbox-light": {
+        "name": "Gruvbox Light",
+        "description": "暖纸底色、湖蓝与金色"
+      },
+      "gruvbox-dark": {
+        "name": "Gruvbox Dark",
+        "description": "复古炭黑、湖蓝与琥珀色"
+      },
+      "rose-pine-dawn": {
+        "name": "Rosé Pine Dawn",
+        "description": "玫瑰色、泡沫青与暖金色"
+      }
+    },
     "volume": "音量",
     "mute": "静音",
     "unmute": "恢复音量",
@@ -132,10 +174,6 @@
     "expandPlayer": "展开播放器",
     "editSong": "编辑 {{title}}",
     "adjustTitleAlbumColumns": "调整歌曲名和专辑列宽",
-    "paletteBlue": "蓝色配色",
-    "paletteEmerald": "翡翠绿配色",
-    "paletteViolet": "紫罗兰配色",
-    "paletteAmber": "暖橙配色",
     "onlineMetadata": "联网元数据",
     "onlineSearchPanelHint": "按字段比较候选，选择后只会填入左侧草稿。",
     "onlineProvider": "服务提供方",

@@ -158,6 +158,36 @@ test("detail artwork clears the old cover when its artwork id becomes null", asy
   expect(revoke).toHaveBeenCalledWith("blob:detail-cover");
 });
 
+test("detail artwork remounts before returning to a previously revoked id", async () => {
+  let resolveReturnedBytes: ((bytes: ArrayBuffer) => void) | undefined;
+  api.getArtworkMime.mockResolvedValue({ id: 1, mimeType: "image/png" });
+  api.getArtwork.mockResolvedValueOnce(new ArrayBuffer(4));
+  api.getArtwork.mockResolvedValueOnce(new ArrayBuffer(4));
+  api.getArtwork.mockReturnValueOnce(
+    new Promise<ArrayBuffer>((resolve) => {
+      resolveReturnedBytes = resolve;
+    }),
+  );
+  vi.spyOn(URL, "createObjectURL")
+    .mockReturnValueOnce("blob:detail-a")
+    .mockReturnValueOnce("blob:detail-b")
+    .mockReturnValueOnce("blob:detail-a-returned");
+  const view = render(<Artwork artworkId={1} title="A" />);
+  await waitFor(() =>
+    expect(document.querySelector("img.cover")?.getAttribute("src")).toBe("blob:detail-a"),
+  );
+  view.rerender(<Artwork artworkId={2} title="B" />);
+  await waitFor(() =>
+    expect(document.querySelector("img.cover")?.getAttribute("src")).toBe("blob:detail-b"),
+  );
+  view.rerender(<Artwork artworkId={1} title="A returned" />);
+  expect(document.querySelector("img.cover")).toBeNull();
+  resolveReturnedBytes?.(new ArrayBuffer(4));
+  await waitFor(() =>
+    expect(document.querySelector("img.cover")?.getAttribute("src")).toBe("blob:detail-a-returned"),
+  );
+});
+
 test("detail renders compact output facts without raw diagnostics", async () => {
   const failed = {
     ...item(1, "Broken track"),

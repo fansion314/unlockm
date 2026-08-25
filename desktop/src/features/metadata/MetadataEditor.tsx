@@ -199,6 +199,18 @@ export function MetadataEditor({
       .catch(() => undefined);
   }, []);
   useEffect(() => {
+    const retryAtMs = onlineStatus?.retryAtMs;
+    if (!retryAtMs) return;
+    const timer = window.setTimeout(
+      () =>
+        setOnlineStatus((current) =>
+          current?.retryAtMs === retryAtMs ? { ...current, retryAtMs: null } : current,
+        ),
+      Math.max(0, retryAtMs - Date.now()),
+    );
+    return () => window.clearTimeout(timer);
+  }, [onlineStatus?.retryAtMs]);
+  useEffect(() => {
     // This is a local capability read, not a provider request. It lets Rust
     // keep the no-auth primary ordering authoritative while opening the editor
     // remains free of MusicBrainz, TheAudioDB, or Spotify network traffic.
@@ -267,6 +279,8 @@ export function MetadataEditor({
         if (status) setOnlineStatus(status);
       });
   };
+  const isRateLimited = (provider: OnlineMetadataProvider) =>
+    onlineStatus?.provider === provider && Boolean(onlineStatus.retryAtMs);
   const applyText = (candidate: OnlineMetadataCandidate) => {
     setTitle(candidate.title);
     setArtist(candidate.artists.join(", "));
@@ -641,14 +655,7 @@ export function MetadataEditor({
                     <button
                       className="metadata-button-primary"
                       type="button"
-                      disabled={
-                        onlineBusy ||
-                        Boolean(
-                          onlineStatus?.provider === "musicBrainz" &&
-                          onlineStatus.retryAtMs &&
-                          onlineStatus.retryAtMs > Date.now(),
-                        )
-                      }
+                      disabled={onlineBusy || isRateLimited("musicBrainz")}
                       onClick={() => void searchOnline()}
                     >
                       <MagnifyingGlass aria-hidden="true" size={17} />
@@ -691,14 +698,7 @@ export function MetadataEditor({
                     <button
                       className="metadata-button-primary"
                       type="button"
-                      disabled={
-                        onlineBusy ||
-                        Boolean(
-                          onlineStatus?.provider === "spotify" &&
-                          onlineStatus.retryAtMs &&
-                          onlineStatus.retryAtMs > Date.now(),
-                        )
-                      }
+                      disabled={onlineBusy || isRateLimited("spotify")}
                       onClick={() => void searchOnline()}
                     >
                       <MagnifyingGlass aria-hidden="true" size={17} />
@@ -732,9 +732,7 @@ export function MetadataEditor({
                   : t("app.onlineConnect")}
               </button>
             )}
-            {onlineStatus?.provider === onlineProvider &&
-            onlineStatus.retryAtMs &&
-            onlineStatus.retryAtMs > Date.now() ? (
+            {isRateLimited(onlineProvider) ? (
               <p className="metadata-online-state" role="status">
                 {t(
                   onlineProvider === "musicBrainz"

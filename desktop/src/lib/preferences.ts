@@ -1,16 +1,15 @@
 import type { Preferences, RunSettings } from "./contracts";
+import type { ThemeId } from "./theme-presets";
 
 export function preferenceSnapshot(
   locale: Preferences["locale"],
-  theme: Preferences["theme"],
+  themeId: ThemeId,
   defaultSettings: RunSettings,
-  palette: NonNullable<Preferences["palette"]> = "blue",
   playerVolume = 0.6,
 ): Preferences {
   return {
     locale,
-    theme,
-    palette,
+    themeId,
     playerVolume: Math.max(0, Math.min(1, Number.isFinite(playerVolume) ? playerVolume : 0.6)),
     defaultSettings: { ...defaultSettings, overwrite: false },
   };
@@ -19,10 +18,9 @@ export function preferenceSnapshot(
 export async function persistPreferences(
   setPreferences: (preferences: Preferences) => Promise<Preferences>,
   locale: Preferences["locale"],
-  theme: Preferences["theme"],
+  themeId: ThemeId,
   defaultSettings: RunSettings,
-  palette: NonNullable<Preferences["palette"]> = "blue",
   playerVolume = 0.6,
 ): Promise<Preferences> {
-  return setPreferences(preferenceSnapshot(locale, theme, defaultSettings, palette, playerVolume));
+  return setPreferences(preferenceSnapshot(locale, themeId, defaultSettings, playerVolume));
 }

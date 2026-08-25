@@ -1,8 +1,9 @@
 .persistent-player {
   --player-disc-size: 42px;
   align-items: center;
-  background: var(--surface-card);
-  border: 1px solid var(--border-control);
+  backdrop-filter: blur(20px);
+  background: var(--surface-header);
+  border: 1px solid var(--border-accent);
   border-radius: var(--radius-card);
   bottom: max(16px, env(safe-area-inset-bottom));
   box-shadow: var(--shadow-float);
@@ -87,14 +88,18 @@
   animation: player-cover-spin 12s linear infinite;
   animation-play-state: paused;
   border-radius: 50%;
+  box-shadow:
+    0 0 0 2px var(--surface-card),
+    0 0 0 4px color-mix(in srgb, var(--color-accent-secondary) 52%, transparent),
+    0 8px 20px color-mix(in srgb, var(--ambient-primary) 64%, transparent);
   height: var(--player-disc-size);
   object-fit: cover;
   width: var(--player-disc-size);
 }
 .player-cover-placeholder {
   align-items: center;
-  background: var(--surface-selected);
-  color: var(--color-accent);
+  background: var(--gradient-action);
+  color: var(--text-on-accent);
   display: inline-flex;
   font-weight: 800;
   justify-content: center;
@@ -151,9 +156,17 @@
   display: grid;
   padding: 4px;
   place-items: center;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.player-mute:hover {
+  color: var(--color-accent-secondary);
+  transform: translateY(-1px);
 }
 .persistent-player input[type="range"] {
-  accent-color: var(--color-accent);
+  accent-color: var(--color-accent-secondary);
   min-width: 64px;
   width: 100%;
 }

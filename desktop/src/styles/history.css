@@ -9,7 +9,7 @@
   background: color-mix(in srgb, var(--surface-card) 94%, transparent);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-round);
-  box-shadow: 0 5px 18px rgb(0 0 0 / 10%);
+  box-shadow: var(--shadow-float);
   color: var(--text-secondary);
   cursor: pointer;
   display: inline-flex;
@@ -35,9 +35,10 @@
 
 .detail-header {
   align-items: center;
-  background: var(--surface-card);
-  border: 1px solid var(--border-subtle);
+  background: var(--gradient-hero);
+  border: 1px solid var(--border-accent);
   border-radius: var(--radius-large);
+  box-shadow: 0 18px 46px color-mix(in srgb, var(--ambient-primary) 44%, transparent);
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 1.3fr) minmax(420px, 1.1fr) auto;
@@ -114,8 +115,12 @@
 }
 
 .detail-facts div {
+  background: color-mix(in srgb, var(--surface-card) 68%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  border-radius: var(--radius-control);
   display: grid;
   gap: 5px;
+  padding: 9px 10px;
 }
 
 .detail-facts dt {
@@ -162,7 +167,7 @@
 
 .detail-toolbar input,
 .detail-toolbar select {
-  background: var(--surface-card);
+  background: var(--surface-control);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
   color: var(--text-primary);
@@ -180,7 +185,7 @@
 
 .search-control {
   align-items: center;
-  background: var(--surface-card);
+  background: var(--surface-control);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
   display: flex !important;
@@ -317,7 +322,8 @@
 
 .metadata-modal-backdrop {
   align-items: center;
-  background: rgb(0 0 0 / 45%);
+  backdrop-filter: blur(10px);
+  background: var(--overlay-backdrop);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -327,7 +333,7 @@
 }
 .metadata-modal {
   background: var(--surface-card);
-  border: 1px solid var(--border-control);
+  border: 1px solid var(--border-accent);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-menu);
   display: grid;
@@ -385,7 +391,7 @@
 }
 .metadata-modal input,
 .metadata-modal select {
-  background: var(--surface-raised);
+  background: var(--surface-control);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
   color: var(--text-primary);
@@ -411,7 +417,7 @@
   min-height: 34px;
   padding: 7px 10px;
   transition:
-    background var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
     border-color var(--motion-fast) var(--ease-standard),
     transform var(--motion-fast) var(--ease-standard);
   white-space: nowrap;
@@ -549,7 +555,7 @@
 }
 .metadata-candidate-grid button {
   align-content: start;
-  background: var(--surface-raised);
+  background: var(--surface-control);
   color: var(--text-secondary);
   display: grid;
   gap: 4px;
@@ -563,6 +569,7 @@
 .metadata-candidate-grid button[aria-pressed="true"] {
   background: var(--surface-selected);
   border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
 }
 .metadata-candidate-grid img,
 .metadata-candidate-grid span {
@@ -595,9 +602,47 @@
   padding: 12px 20px;
 }
 
+.metadata-actions button,
+.metadata-online-actions button,
+.metadata-online-result button,
+.metadata-online-result a {
+  align-items: center;
+  background: var(--surface-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 650;
+  justify-content: center;
+  min-height: 36px;
+  padding: 7px 11px;
+  text-decoration: none;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.metadata-actions button:hover:not(:disabled),
+.metadata-online-actions button:hover:not(:disabled),
+.metadata-online-result button:hover:not(:disabled),
+.metadata-online-result a:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-accent);
+  transform: translateY(-1px);
+}
+
+.metadata-actions button:last-child {
+  background: var(--gradient-action);
+  border-color: var(--border-accent);
+  color: var(--text-on-accent);
+  box-shadow: var(--shadow-colored);
+}
+
 .metadata-online {
   align-content: start;
-  background: color-mix(in srgb, var(--surface-raised) 58%, var(--surface-card));
+  background: var(--surface-card-tinted);
   display: grid;
   gap: 13px;
 }
@@ -704,6 +749,7 @@
 }
 .metadata-online-result-actions {
   align-items: center;
+  padding: 10px;
 }
 .metadata-online-result-actions .metadata-button-quiet {
   margin-inline-start: auto;
@@ -811,8 +857,10 @@
 }
 
 .song-list {
-  border-top: 1px solid var(--border-strong);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
   min-height: 240px;
+  overflow: hidden;
   --music-row-gap: 12px;
   --music-index-column: 38px;
   --music-cover-column: 46px;
@@ -836,13 +884,14 @@
 
 .song-list-header {
   align-items: center;
+  background: var(--surface-card-tinted);
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-muted);
   font-size: 0.72rem;
   font-weight: 700;
   gap: var(--music-row-gap);
   min-height: 34px;
-  padding: 5px 4px 4px;
+  padding: 5px 10px 4px;
 }
 
 .song-list-header > span {
@@ -891,12 +940,19 @@
   gap: var(--music-row-gap);
   cursor: pointer;
   min-height: 72px;
-  padding: 10px 4px;
+  padding: 10px;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .music-item:hover,
 .music-item.is-active {
-  background: color-mix(in srgb, var(--surface-hover) 62%, transparent);
+  background: color-mix(in srgb, var(--surface-hover) 82%, transparent);
+}
+
+.music-item.is-active {
+  box-shadow: inset 3px 0 0 var(--color-accent-secondary);
 }
 
 .track-index {
@@ -967,7 +1023,7 @@
   inset-inline: 11px;
   position: absolute;
   transition:
-    background var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
     inset var(--motion-fast) var(--ease-standard);
 }
 
@@ -1104,10 +1160,10 @@
 
 .play-button {
   align-items: center;
-  background: var(--surface-selected);
-  border: 1px solid transparent;
+  background: var(--gradient-action);
+  border: 1px solid var(--border-accent);
   border-radius: var(--radius-round);
-  color: var(--color-accent);
+  color: var(--text-on-accent);
   cursor: pointer;
   display: flex;
   height: 34px;
@@ -1189,7 +1245,9 @@
 }
 
 .pagination button.is-current {
-  background: var(--color-accent);
+  background: var(--gradient-action);
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-colored);
   color: var(--text-on-accent);
 }
 

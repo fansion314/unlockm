@@ -35,7 +35,7 @@ pub enum HistoryError {
     Json(#[from] serde_json::Error),
     #[error("artwork exceeds the 10 MiB history limit")]
     ArtworkTooLarge,
-    #[error("display name must contain 1–120 characters")]
+    #[error("display name must contain 1-120 characters")]
     InvalidDisplayName,
 }
 
@@ -385,35 +385,96 @@ pub struct ArtworkCandidate {
     pub title: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
     pub locale: String,
-    #[serde(default)]
-    pub theme: Theme,
-    #[serde(default)]
-    pub palette: Palette,
+    pub theme_id: ThemeId,
     #[serde(default = "default_player_volume")]
     pub player_volume: f64,
     pub default_settings: RunSettings,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Theme {
+#[serde(rename_all = "kebab-case")]
+pub enum ThemeId {
     #[default]
-    Light,
-    Dark,
+    AuroraLight,
+    AuroraDark,
+    TokyoNight,
+    CatppuccinMocha,
+    Dracula,
+    Nord,
+    GruvboxLight,
+    GruvboxDark,
+    RosePineDawn,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Palette {
-    #[default]
-    Blue,
-    Emerald,
-    Violet,
-    Amber,
+impl ThemeId {
+    fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "aurora-light" => Self::AuroraLight,
+            "aurora-dark" => Self::AuroraDark,
+            "tokyo-night" => Self::TokyoNight,
+            "catppuccin-mocha" => Self::CatppuccinMocha,
+            "dracula" => Self::Dracula,
+            "nord" => Self::Nord,
+            "gruvbox-light" => Self::GruvboxLight,
+            "gruvbox-dark" => Self::GruvboxDark,
+            "rose-pine-dawn" => Self::RosePineDawn,
+            _ => return None,
+        })
+    }
+
+    fn from_legacy(theme: Option<&str>, palette: Option<&str>) -> Self {
+        if theme != Some("dark") {
+            return match palette {
+                Some("violet") => Self::RosePineDawn,
+                Some("amber") => Self::GruvboxLight,
+                _ => Self::AuroraLight,
+            };
+        }
+        match palette {
+            Some("emerald") => Self::Nord,
+            Some("violet") => Self::CatppuccinMocha,
+            Some("amber") => Self::GruvboxDark,
+            _ => Self::AuroraDark,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreferencesWire {
+    locale: String,
+    #[serde(default)]
+    theme_id: Option<String>,
+    #[serde(default)]
+    theme: Option<String>,
+    #[serde(default)]
+    palette: Option<String>,
+    #[serde(default = "default_player_volume")]
+    player_volume: f64,
+    default_settings: RunSettings,
+}
+
+impl<'de> Deserialize<'de> for Preferences {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = PreferencesWire::deserialize(deserializer)?;
+        let theme_id = match wire.theme_id {
+            Some(value) => ThemeId::parse(&value).unwrap_or_default(),
+            None => ThemeId::from_legacy(wire.theme.as_deref(), wire.palette.as_deref()),
+        };
+        Ok(Self {
+            locale: wire.locale,
+            theme_id,
+            player_volume: wire.player_volume,
+            default_settings: wire.default_settings,
+        })
+    }
 }
 
 fn default_player_volume() -> f64 {
@@ -424,8 +485,7 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             locale: "en-US".into(),
-            theme: Theme::Light,
-            palette: Palette::Blue,
+            theme_id: ThemeId::AuroraLight,
             player_volume: default_player_volume(),
             default_settings: RunSettings {
                 update_metadata: false,
@@ -1667,8 +1727,7 @@ mod tests {
         let store = HistoryStore::open(&database).unwrap();
         let preferences = Preferences {
             locale: "zh-CN".into(),
-            theme: Theme::Dark,
-            palette: Palette::Blue,
+            theme_id: ThemeId::TokyoNight,
             player_volume: 0.6,
             default_settings: settings(),
         };
@@ -1680,7 +1739,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_preferences_without_theme_default_to_light() {
+    fn legacy_preferences_without_theme_default_to_aurora_light() {
         let (_directory, store) = store();
         store
             .execute_test_sql(
@@ -1693,9 +1752,51 @@ mod tests {
 
         let preferences = store.preferences().unwrap();
         assert_eq!(preferences.locale, "zh-CN");
-        assert_eq!(preferences.theme, Theme::Light);
-        assert_eq!(preferences.palette, Palette::Blue);
+        assert_eq!(preferences.theme_id, ThemeId::AuroraLight);
         assert_eq!(preferences.player_volume, 0.6);
+    }
+
+    #[test]
+    fn legacy_theme_palette_combinations_map_to_complete_presets() {
+        for (theme, palette, expected) in [
+            ("light", "blue", ThemeId::AuroraLight),
+            ("light", "emerald", ThemeId::AuroraLight),
+            ("light", "violet", ThemeId::RosePineDawn),
+            ("light", "amber", ThemeId::GruvboxLight),
+            ("dark", "blue", ThemeId::AuroraDark),
+            ("dark", "emerald", ThemeId::Nord),
+            ("dark", "violet", ThemeId::CatppuccinMocha),
+            ("dark", "amber", ThemeId::GruvboxDark),
+        ] {
+            let preferences: Preferences = serde_json::from_value(serde_json::json!({
+                "locale": "en-US",
+                "theme": theme,
+                "palette": palette,
+                "playerVolume": 0.6,
+                "defaultSettings": settings(),
+            }))
+            .unwrap();
+            assert_eq!(preferences.theme_id, expected, "{theme} + {palette}");
+        }
+    }
+
+    #[test]
+    fn canonical_theme_id_serializes_without_legacy_fields_and_unknown_falls_back() {
+        let value = serde_json::to_value(Preferences::default()).unwrap();
+        assert_eq!(value["themeId"], "aurora-light");
+        assert!(value.get("theme").is_none());
+        assert!(value.get("palette").is_none());
+
+        let preferences: Preferences = serde_json::from_value(serde_json::json!({
+            "locale": "en-US",
+            "themeId": "not-a-theme",
+            "theme": "dark",
+            "palette": "amber",
+            "playerVolume": 0.6,
+            "defaultSettings": settings(),
+        }))
+        .unwrap();
+        assert_eq!(preferences.theme_id, ThemeId::AuroraLight);
     }
 
     #[test]

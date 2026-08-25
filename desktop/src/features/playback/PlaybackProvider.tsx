@@ -60,7 +60,11 @@ export function PlaybackProvider({
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [currentVolume, setCurrentVolume] = useState(() => clampVolume(volume));
+  const [volumeState, setVolumeState] = useState(() => ({
+    source: volume,
+    value: clampVolume(volume),
+  }));
+  const currentVolume = volumeState.source === volume ? volumeState.value : clampVolume(volume);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     onVolumeChangeRef.current = onVolumeChange;
@@ -69,7 +73,6 @@ export function PlaybackProvider({
     const next = clampVolume(volume);
     if (next > 0) lastAudibleVolume.current = next;
     if (audio.current) audio.current.volume = next;
-    setCurrentVolume(next);
   }, [volume]);
   useEffect(
     () => () => {
@@ -89,10 +92,10 @@ export function PlaybackProvider({
       const clamped = clampVolume(next);
       if (audio.current) audio.current.volume = clamped;
       if (clamped > 0) lastAudibleVolume.current = clamped;
-      setCurrentVolume(clamped);
+      setVolumeState({ source: volume, value: clamped });
       persistVolume(clamped);
     },
-    [persistVolume],
+    [persistVolume, volume],
   );
   const toggleMute = useCallback(() => {
     setVolume(currentVolume > 0 ? 0 : lastAudibleVolume.current || 0.6);

@@ -6,7 +6,7 @@ import {
   SpeakerHigh,
   SpeakerSlash,
 } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatDuration } from "../../lib/format";
 import { usePlayback } from "./PlaybackProvider";
@@ -22,39 +22,27 @@ function PlayerArtwork({
   title: string;
   playing: boolean;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const currentUrl = useRef<string | null>(null);
-  const replaceUrl = (next: string | null) => {
-    if (currentUrl.current) URL.revokeObjectURL(currentUrl.current);
-    currentUrl.current = next;
-    setUrl(next);
-  };
+  const [loaded, setLoaded] = useState<{ artworkId: number; url: string } | null>(null);
   useEffect(() => {
     let active = true;
-    replaceUrl(null);
+    let objectUrl: string | null = null;
     if (artworkId === null)
       return () => {
         active = false;
       };
     void Promise.all([desktopApi.getArtworkMime(artworkId), desktopApi.getArtwork(artworkId)])
       .then(([metadata, bytes]) => {
-        const objectUrl = URL.createObjectURL(new Blob([bytes], { type: metadata.mimeType }));
-        if (active) replaceUrl(objectUrl);
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: metadata.mimeType }));
+        if (active) setLoaded({ artworkId, url: objectUrl });
         else URL.revokeObjectURL(objectUrl);
       })
-      .catch(() => {
-        if (active) replaceUrl(null);
-      });
+      .catch(() => undefined);
     return () => {
       active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [artworkId]);
-  useEffect(
-    () => () => {
-      if (currentUrl.current) URL.revokeObjectURL(currentUrl.current);
-    },
-    [],
-  );
+  const url = loaded?.artworkId === artworkId ? loaded.url : null;
   return url ? (
     <img
       className={`player-cover ${playing ? "is-playing" : ""}`}
@@ -83,6 +71,7 @@ export function PersistentPlayer() {
     >
       <div className="collapsed-artwork">
         <PlayerArtwork
+          key={playback.track.artworkId ?? `empty-${playback.track.id}`}
           artworkId={playback.track.artworkId}
           title={title}
           playing={playback.playing}
@@ -110,7 +99,7 @@ export function PersistentPlayer() {
         <div className="persistent-copy">
           <strong>{title}</strong>
           <span>
-            {[playback.track.artist, playback.track.album].filter(Boolean).join(" · ") || "—"}
+            {[playback.track.artist, playback.track.album].filter(Boolean).join(" · ") || "-"}
           </span>
         </div>
         <div className="player-progress">

@@ -72,7 +72,7 @@ function bootstrap(overrides = {}) {
     supportedLocales: ["zh-CN", "en-US", "ja-JP"] as ["zh-CN", "en-US", "ja-JP"],
     preferences: {
       locale: "en-US" as const,
-      theme: "light" as const,
+      themeId: "aurora-light" as const,
       defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
     },
     history: { runs: [], nextCursor: null },
@@ -85,7 +85,7 @@ afterEach(async () => {
   cleanup();
   vi.restoreAllMocks();
   await i18n.changeLanguage("en-US");
-  document.documentElement.dataset.theme = "light";
+  document.documentElement.dataset.theme = "aurora-light";
   window.localStorage.clear();
   for (const method of Object.values(api)) method.mockReset();
 });
@@ -114,6 +114,28 @@ test("home/detail navigation resets scroll position", async () => {
   render(<App />);
   await user.click(await screen.findByRole("button", { name: /Open details/ }));
   expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }));
+});
+
+test("theme switching preserves the current detail route and scroll state", async () => {
+  const user = userEvent.setup();
+  const scrollTo = vi.fn();
+  vi.stubGlobal("scrollTo", scrollTo);
+  api.bootstrap.mockResolvedValue(bootstrap({ history: { runs: [partialRun], nextCursor: null } }));
+  api.queryRunItems.mockResolvedValue(emptyItemPage());
+  api.listRunItemFacets.mockResolvedValue({ values: [], nextCursor: null });
+  api.setPreferences.mockImplementation(async (value) => value);
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: /Open details/ }));
+  await screen.findByRole("button", { name: "Home" });
+  scrollTo.mockClear();
+
+  await user.click(screen.getByRole("button", { name: "Choose appearance theme" }));
+  await user.click(screen.getByRole("menuitemradio", { name: /Dracula/ }));
+
+  expect(document.documentElement.dataset.theme).toBe("dracula");
+  expect(screen.getByRole("button", { name: "Home" })).toBeTruthy();
+  expect(screen.getByText("Completed with issues")).toBeTruthy();
+  expect(scrollTo).not.toHaveBeenCalled();
 });
 
 test("home omits rename while detail owns rename and rerun stays on the row", async () => {
@@ -154,25 +176,27 @@ test("bootstrap history reserves stable rows while local history is loading", as
   );
   render(<App />);
   expect(document.querySelectorAll(".run-skeleton")).toHaveLength(3);
+  await waitFor(() => expect(resolveBootstrap).toBeTypeOf("function"));
   resolveBootstrap?.(bootstrap());
   expect(await screen.findByText("Your finished conversions will live here.")).toBeTruthy();
   await waitFor(() => expect(document.querySelectorAll(".run-skeleton")).toHaveLength(0));
 });
 
-test("fresh light theme, dark toggle, and language menu persist one preference snapshot", async () => {
+test("fresh Aurora theme, full preset selection, and language persist one preference snapshot", async () => {
   const user = userEvent.setup();
   api.bootstrap.mockResolvedValue(bootstrap());
   api.setPreferences.mockImplementation(async (value) => value);
   render(<App />);
   await screen.findByText("Your finished conversions will live here.");
-  expect(document.documentElement.dataset.theme).toBe("light");
+  expect(document.documentElement.dataset.theme).toBe("aurora-light");
 
-  await user.click(screen.getByRole("button", { name: "Use dark theme" }));
-  expect(document.documentElement.dataset.theme).toBe("dark");
+  await user.click(screen.getByRole("button", { name: "Choose appearance theme" }));
+  await user.click(screen.getByRole("menuitemradio", { name: /Tokyo Night/ }));
+  expect(document.documentElement.dataset.theme).toBe("tokyo-night");
+  expect(document.documentElement.style.colorScheme).toBe("dark");
   expect(api.setPreferences).toHaveBeenLastCalledWith({
     locale: "en-US",
-    theme: "dark",
-    palette: "blue",
+    themeId: "tokyo-night",
     playerVolume: 0.6,
     defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
   });
@@ -182,8 +206,7 @@ test("fresh light theme, dark toggle, and language menu persist one preference s
   await waitFor(() => expect(screen.getByText("音乐解锁")).toBeTruthy());
   expect(api.setPreferences).toHaveBeenLastCalledWith({
     locale: "zh-CN",
-    theme: "dark",
-    palette: "blue",
+    themeId: "tokyo-night",
     playerVolume: 0.6,
     defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
   });
@@ -193,8 +216,7 @@ test("fresh light theme, dark toggle, and language menu persist one preference s
   await waitFor(() => expect(screen.getByText("音楽ロック解除")).toBeTruthy());
   expect(api.setPreferences).toHaveBeenLastCalledWith({
     locale: "ja-JP",
-    theme: "dark",
-    palette: "blue",
+    themeId: "tokyo-night",
     playerVolume: 0.6,
     defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
   });
@@ -220,56 +242,101 @@ test("language menu uses roving arrow focus and restores the trigger on Escape",
   expect(screen.queryByRole("menu")).toBeNull();
 });
 
-test("palette menu is collapsed by default, persists selection, and supports keyboard dismissal", async () => {
+test("theme menu exposes nine previews, persists selection, and supports two-dimensional keys", async () => {
   const user = userEvent.setup();
   api.bootstrap.mockResolvedValue(bootstrap());
   api.setPreferences.mockImplementation(async (value) => value);
   render(<App />);
   await screen.findByText("Your finished conversions will live here.");
-  const trigger = screen.getByRole("button", { name: "Choose color palette" });
-  expect(screen.queryByRole("menu", { name: "Choose color palette" })).toBeNull();
+  const trigger = screen.getByRole("button", { name: "Choose appearance theme" });
+  expect(screen.queryByRole("menu", { name: "Choose appearance theme" })).toBeNull();
   await user.click(trigger);
-  expect(screen.getAllByRole("menuitemradio")).toHaveLength(4);
-  const paletteOptions = screen.getAllByRole("menuitemradio");
-  const checkSlots = paletteOptions.map((option) => option.querySelector(".palette-check-slot"));
-  expect(checkSlots).toHaveLength(4);
+  expect(screen.getAllByRole("menuitemradio")).toHaveLength(9);
+  const themeOptions = screen.getAllByRole("menuitemradio");
+  const checkSlots = themeOptions.map((option) => option.querySelector(".theme-check-slot"));
+  expect(checkSlots).toHaveLength(9);
   expect(checkSlots.every(Boolean)).toBe(true);
   expect(checkSlots.map((slot) => slot?.getAttribute("data-selected"))).toEqual([
     "true",
     "false",
     "false",
     "false",
+    "false",
+    "false",
+    "false",
+    "false",
+    "false",
   ]);
   await waitFor(() =>
     expect(document.activeElement).toBe(
-      screen.getByRole("menuitemradio", { name: "Blue palette" }),
+      screen.getByRole("menuitemradio", { name: /Aurora Light/ }),
     ),
   );
-  await user.keyboard("{ArrowDown}");
+  await user.keyboard("{ArrowUp}");
   expect(document.activeElement).toBe(
-    screen.getByRole("menuitemradio", { name: "Emerald palette" }),
+    screen.getByRole("menuitemradio", { name: /Rosé Pine Dawn/ }),
+  );
+  await user.keyboard("{ArrowDown}");
+  expect(document.activeElement).toBe(screen.getByRole("menuitemradio", { name: /Aurora Light/ }));
+  await user.keyboard("{ArrowDown}");
+  expect(document.activeElement).toBe(screen.getByRole("menuitemradio", { name: /Tokyo Night/ }));
+  await user.keyboard("{ArrowRight}");
+  expect(document.activeElement).toBe(
+    screen.getByRole("menuitemradio", { name: /Catppuccin Mocha/ }),
   );
   await user.keyboard("{End}");
-  expect(document.activeElement).toBe(screen.getByRole("menuitemradio", { name: "Amber palette" }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("menuitemradio", { name: /Rosé Pine Dawn/ }),
+  );
   await user.keyboard("{Home}");
-  expect(document.activeElement).toBe(screen.getByRole("menuitemradio", { name: "Blue palette" }));
+  expect(document.activeElement).toBe(screen.getByRole("menuitemradio", { name: /Aurora Light/ }));
+  await user.keyboard("{ArrowRight}{ArrowUp}");
+  expect(document.activeElement).toBe(screen.getByRole("menuitemradio", { name: /Gruvbox Dark/ }));
+  await user.keyboard("{ArrowDown}");
+  expect(document.activeElement).toBe(screen.getByRole("menuitemradio", { name: /Aurora Dark/ }));
   await user.keyboard("{Escape}");
   await waitFor(() => expect(document.activeElement).toBe(trigger));
-  expect(screen.queryByRole("menu", { name: "Choose color palette" })).toBeNull();
+  expect(screen.queryByRole("menu", { name: "Choose appearance theme" })).toBeNull();
 
   await user.click(trigger);
   fireEvent.pointerDown(document.body);
-  expect(screen.queryByRole("menu", { name: "Choose color palette" })).toBeNull();
+  expect(screen.queryByRole("menu", { name: "Choose appearance theme" })).toBeNull();
   await user.click(trigger);
-  await user.click(screen.getByRole("menuitemradio", { name: "Emerald palette" }));
-  expect(document.documentElement.dataset.palette).toBe("emerald");
+  await user.click(screen.getByRole("menuitemradio", { name: /Catppuccin Mocha/ }));
+  expect(document.documentElement.dataset.theme).toBe("catppuccin-mocha");
   expect(api.setPreferences).toHaveBeenLastCalledWith({
     locale: "en-US",
-    theme: "light",
-    palette: "emerald",
+    themeId: "catppuccin-mocha",
     playerVolume: 0.6,
     defaultSettings: { updateMetadata: false, copyPassthrough: true, overwrite: false },
   });
+});
+
+test("theme persistence failure keeps the optimistic session theme and reports the error", async () => {
+  const user = userEvent.setup();
+  api.bootstrap.mockResolvedValue(bootstrap());
+  api.setPreferences.mockRejectedValue({
+    code: "history_error",
+    detail: "preference write failed",
+  });
+  render(<App />);
+  await screen.findByText("Your finished conversions will live here.");
+
+  await user.click(screen.getByRole("button", { name: "Choose appearance theme" }));
+  await user.click(screen.getByRole("menuitemradio", { name: /Nord/ }));
+
+  expect(document.documentElement.dataset.theme).toBe("nord");
+  expect(screen.queryByRole("menu", { name: "Choose appearance theme" })).toBeNull();
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Local history is temporarily unavailable.",
+  );
+  expect(screen.getByText("preference write failed")).toBeTruthy();
+
+  cleanup();
+  api.bootstrap.mockResolvedValue(bootstrap());
+  render(<App />);
+  await screen.findByText("Your finished conversions will live here.");
+  expect(document.documentElement.dataset.theme).toBe("aurora-light");
 });
 
 test("dedicated row controls keep detail, reveal, and deletion isolated", async () => {

@@ -1,5 +1,11 @@
 import { ArrowClockwise, FolderOpen, Trash, X } from "@phosphor-icons/react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import {
+  AnimatePresence,
+  motion,
+  useMotionValueEvent,
+  useReducedMotion,
+  useScroll,
+} from "motion/react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { appReducer, initialAppModel } from "./app/conversion-state";
@@ -16,7 +22,8 @@ import { errorMessageKey, normalizeDesktopError } from "./lib/errors";
 import { formatTimestamp } from "./lib/format";
 import { desktopApi } from "./lib/ipc";
 import { persistPreferences } from "./lib/preferences";
-import { applyTheme, cachedPalette, cachedTheme } from "./lib/theme";
+import { applyTheme, cachedThemeId } from "./lib/theme";
+import type { ThemeId } from "./lib/theme-presets";
 import "./App.css";
 import { localeFromLanguage } from "./i18n";
 
@@ -40,8 +47,7 @@ function App() {
   const [selected, setSelected] = useState<ValidatedInput | null>(null);
   const [outputPath, setOutputPath] = useState<string | null>(null);
   const [settings, setSettings] = useState<RunSettings>(defaultSettings);
-  const [theme, setTheme] = useState<Preferences["theme"]>(cachedTheme);
-  const [palette, setPalette] = useState<NonNullable<Preferences["palette"]>>(cachedPalette);
+  const [themeId, setThemeId] = useState<ThemeId>(cachedThemeId);
   const [playerVolume, setPlayerVolume] = useState(0.6);
   const [locale, setLocale] = useState<Preferences["locale"]>(() => currentLocale(i18n.language));
   const [detailRunId, setDetailRunId] = useState<number | null>(null);
@@ -53,6 +59,7 @@ function App() {
   const preferencesBootstrapped = useRef(false);
   const playbackController = useRef<PlaybackController | null>(null);
   const reducedMotion = useReducedMotion();
+  const { scrollY } = useScroll();
 
   const reportError = useCallback(
     (error: unknown) => {
@@ -73,11 +80,10 @@ function App() {
       if (!preferencesBootstrapped.current) {
         preferencesBootstrapped.current = true;
         setSettings({ ...bootstrap.preferences.defaultSettings, overwrite: false });
-        setTheme(bootstrap.preferences.theme);
-        setPalette(bootstrap.preferences.palette ?? "blue");
+        setThemeId(bootstrap.preferences.themeId);
         setPlayerVolume(bootstrap.preferences.playerVolume ?? 0.6);
         setLocale(bootstrap.preferences.locale);
-        applyTheme(bootstrap.preferences.theme, bootstrap.preferences.palette ?? "blue");
+        applyTheme(bootstrap.preferences.themeId);
         await i18n.changeLanguage(bootstrap.preferences.locale);
       }
     } catch (error) {
@@ -92,14 +98,12 @@ function App() {
     }
   }, [i18n]);
 
-  useEffect(() => void boot(), [boot]);
-
   useEffect(() => {
-    const update = () => setShowTop(window.scrollY > 360);
-    update();
-    window.addEventListener("scroll", update, { passive: true });
-    return () => window.removeEventListener("scroll", update);
-  }, []);
+    const timer = window.setTimeout(() => void boot(), 0);
+    return () => window.clearTimeout(timer);
+  }, [boot]);
+
+  useMotionValueEvent(scrollY, "change", (latest) => setShowTop(latest > 360));
 
   useEffect(() => {
     if (model.active?.requestId !== null || model.active?.runId === null) return;
@@ -110,17 +114,15 @@ function App() {
   const persist = useCallback(
     async (
       locale: Preferences["locale"],
-      nextTheme: Preferences["theme"],
+      nextThemeId: ThemeId,
       nextSettings: RunSettings,
-      nextPalette: NonNullable<Preferences["palette"]>,
       nextPlayerVolume: number,
     ) => {
       await persistPreferences(
         (preferences) => desktopApi.setPreferences(preferences),
         locale,
-        nextTheme,
+        nextThemeId,
         nextSettings,
-        nextPalette,
         nextPlayerVolume,
       );
     },
@@ -145,36 +147,28 @@ function App() {
       setLocale(nextLocale);
       try {
         await i18n.changeLanguage(nextLocale);
-        await persist(nextLocale, theme, settings, palette, playerVolume);
+        await persist(nextLocale, themeId, settings, playerVolume);
       } catch (error) {
         reportError(error);
       }
     },
-    [i18n, palette, persist, playerVolume, reportError, settings, theme],
+    [i18n, persist, playerVolume, reportError, settings, themeId],
   );
 
-  const changeTheme = useCallback(
-    (nextTheme: Preferences["theme"]) => {
-      setTheme(nextTheme);
-      applyTheme(nextTheme, palette);
-      void persist(locale, nextTheme, settings, palette, playerVolume).catch(reportError);
+  const changeThemeId = useCallback(
+    (nextThemeId: ThemeId) => {
+      setThemeId(nextThemeId);
+      applyTheme(nextThemeId);
+      void persist(locale, nextThemeId, settings, playerVolume).catch(reportError);
     },
-    [locale, palette, persist, playerVolume, reportError, settings],
-  );
-  const changePalette = useCallback(
-    (nextPalette: NonNullable<Preferences["palette"]>) => {
-      setPalette(nextPalette);
-      applyTheme(theme, nextPalette);
-      void persist(locale, theme, settings, nextPalette, playerVolume).catch(reportError);
-    },
-    [locale, persist, playerVolume, reportError, settings, theme],
+    [locale, persist, playerVolume, reportError, settings],
   );
   const changePlayerVolume = useCallback(
     (nextVolume: number) => {
       setPlayerVolume(nextVolume);
-      void persist(locale, theme, settings, palette, nextVolume).catch(reportError);
+      void persist(locale, themeId, settings, nextVolume).catch(reportError);
     },
-    [locale, palette, persist, reportError, settings, theme],
+    [locale, persist, reportError, settings, themeId],
   );
 
   const convert = useCallback(() => {
@@ -182,7 +176,7 @@ function App() {
     const requestId = ++nextRequestId.current;
     startInFlight.current = true;
     dispatch({ type: "conversionStarted", requestId });
-    void persist(locale, theme, settings, palette, playerVolume).catch(reportError);
+    void persist(locale, themeId, settings, playerVolume).catch(reportError);
     void desktopApi
       .startConversion(conversionRequest(selected, outputPath, settings), (event) =>
         dispatch({ type: "conversionEvent", event }),
@@ -208,14 +202,13 @@ function App() {
     locale,
     model.active,
     outputPath,
-    palette,
     persist,
     playerVolume,
     reportError,
     selected,
     settings,
     t,
-    theme,
+    themeId,
   ]);
 
   const cancel = useCallback(() => {
@@ -312,11 +305,9 @@ function App() {
     >
       <AppHeader
         locale={locale}
-        theme={theme}
-        palette={palette}
+        themeId={themeId}
         onLocale={changeLocale}
-        onTheme={changeTheme}
-        onPalette={changePalette}
+        onThemeId={changeThemeId}
       />
       <main className="app-shell">
         {model.boot === "loading" ? <p className="boot-status">{t("app.loading")}</p> : null}

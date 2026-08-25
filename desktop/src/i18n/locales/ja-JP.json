@@ -124,7 +124,49 @@
     "noCoverCandidates": "検索に一致するローカルカバーはありません。",
     "coverTooLarge": "カバー画像は 10 MiB 以下にしてください。",
     "backToTop": "先頭に戻る",
-    "choosePalette": "配色を選択",
+    "chooseTheme": "外観テーマを選択",
+    "themeScheme": {
+      "light": "ライト",
+      "dark": "ダーク"
+    },
+    "themes": {
+      "aurora-light": {
+        "name": "UnlockM オーロラライト",
+        "description": "軽やかな藍、青緑、コーラル"
+      },
+      "aurora-dark": {
+        "name": "UnlockM オーロラダーク",
+        "description": "深い藍に鮮やかな多色アクセント"
+      },
+      "tokyo-night": {
+        "name": "Tokyo Night",
+        "description": "ミッドナイトブルー、紫、シアン"
+      },
+      "catppuccin-mocha": {
+        "name": "Catppuccin Mocha",
+        "description": "柔らかなモーヴ、青、ピーチ"
+      },
+      "dracula": {
+        "name": "Dracula",
+        "description": "紫、シアン、鮮やかなピンク"
+      },
+      "nord": {
+        "name": "Nord",
+        "description": "北極の青とオーロラの差し色"
+      },
+      "gruvbox-light": {
+        "name": "Gruvbox Light",
+        "description": "暖かな紙色、アクア、ゴールド"
+      },
+      "gruvbox-dark": {
+        "name": "Gruvbox Dark",
+        "description": "レトロな炭色、アクア、琥珀"
+      },
+      "rose-pine-dawn": {
+        "name": "Rosé Pine Dawn",
+        "description": "ローズ、フォーム、暖かなゴールド"
+      }
+    },
     "volume": "音量",
     "mute": "ミュート",
     "unmute": "音量を戻す",
@@ -132,10 +174,6 @@
     "expandPlayer": "プレーヤーを展開",
     "editSong": "{{title}} を編集",
     "adjustTitleAlbumColumns": "曲名とアルバム列の幅を調整",
-    "paletteBlue": "青の配色",
-    "paletteEmerald": "エメラルドの配色",
-    "paletteViolet": "紫の配色",
-    "paletteAmber": "橙の配色",
     "onlineMetadata": "オンラインメタデータ",
     "onlineSearchPanelHint": "項目ごとに候補を比較し、左側の下書きへ適用します。",
     "onlineProvider": "プロバイダー",

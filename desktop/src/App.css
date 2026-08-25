@@ -6,6 +6,7 @@
   backdrop-filter: blur(18px);
   background: var(--surface-header);
   border-bottom: 1px solid var(--border-subtle);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--ambient-primary) 45%, transparent);
   position: sticky;
   top: 0;
   z-index: 30;
@@ -34,6 +35,7 @@
 
 .brand img {
   border-radius: 9px;
+  box-shadow: 0 7px 18px color-mix(in srgb, var(--ambient-primary) 74%, transparent);
   height: 38px;
   width: 38px;
 }
@@ -61,50 +63,13 @@
   gap: 8px;
 }
 
-.palette-control {
+.theme-control {
   position: relative;
-}
-.palette-swatch {
-  border: 2px solid var(--surface-card);
-  border-radius: 50%;
-  display: inline-block;
-  height: 14px;
-  width: 14px;
-}
-.palette-swatch.blue {
-  background: #365fc7;
-}
-.palette-swatch.emerald {
-  background: #16785d;
-}
-.palette-swatch.violet {
-  background: #7352c7;
-}
-.palette-swatch.amber {
-  background: #a85e12;
-}
-.palette-menu {
-  min-width: 190px;
-}
-.palette-option {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) 16px;
-  text-align: left;
-}
-
-.palette-check-slot {
-  display: grid;
-  place-items: center;
-  visibility: hidden;
-}
-
-.palette-check-slot[data-selected="true"] {
-  visibility: visible;
 }
 
 .icon-button {
   align-items: center;
-  background: var(--surface-card);
+  background: var(--surface-control);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
   color: var(--text-primary);
@@ -114,15 +79,18 @@
   justify-content: center;
   padding: 0;
   transition:
-    background var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
     border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
     transform var(--motion-fast) var(--ease-standard);
   width: 42px;
 }
 
 .icon-button:hover:not(:disabled) {
   background: var(--surface-hover);
-  border-color: var(--border-strong);
+  border-color: var(--border-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-accent) 28%, transparent);
+  transform: translateY(-1px);
 }
 
 .icon-button:active:not(:disabled) {
@@ -181,11 +149,117 @@
   background: var(--surface-hover);
 }
 
+.theme-menu {
+  background: var(--surface-card);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-menu);
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-block-size: min(620px, calc(100dvh - var(--topbar-block-size) - 28px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(620px, calc(100vw - 32px));
+}
+
+.theme-option {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 42px minmax(0, 1fr) auto 18px;
+  min-height: 76px;
+  padding: 10px;
+  text-align: left;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.theme-option:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-control);
+  transform: translateY(-1px);
+}
+
+.theme-option[aria-checked="true"] {
+  background: var(--surface-card-tinted);
+  border-color: var(--border-accent);
+}
+
+.theme-preview {
+  border: 1px solid var(--border-control);
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 2px var(--surface-card);
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-rows: 1.2fr 0.8fr;
+  height: 42px;
+  overflow: hidden;
+  padding: 3px;
+  width: 42px;
+}
+
+.theme-preview span {
+  border-radius: 3px;
+}
+
+.theme-option-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.theme-option-copy strong,
+.theme-option-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-option-copy strong {
+  font-size: 0.88rem;
+}
+
+.theme-option-copy small {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.theme-scheme {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.theme-check-slot {
+  display: grid;
+  opacity: 0;
+  place-items: center;
+}
+
+.theme-check-slot[data-selected="true"] {
+  color: var(--color-accent);
+  opacity: 1;
+}
+
 .app-shell {
   margin: 0 auto;
   max-width: 1320px;
   min-height: calc(100dvh - var(--topbar-block-size));
   padding: clamp(20px, 3vw, 36px) clamp(20px, 4vw, 48px) 52px;
+  position: relative;
 }
 
 .home-view {
@@ -210,9 +284,12 @@
 
 .drop-field {
   align-items: center;
-  background: var(--surface-card);
-  border: 1px dashed var(--border-strong);
+  background: var(--gradient-hero);
+  border: 1px dashed var(--border-accent);
   border-radius: var(--radius-large);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-on-strong-surface) 14%, transparent),
+    0 18px 46px color-mix(in srgb, var(--ambient-primary) 48%, transparent);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -220,18 +297,20 @@
   padding: clamp(20px, 3vw, 34px);
   text-align: center;
   transition:
-    background var(--motion-standard) var(--ease-standard),
+    background-color var(--motion-standard) var(--ease-standard),
     border-color var(--motion-standard) var(--ease-standard),
+    box-shadow var(--motion-standard) var(--ease-standard),
     transform var(--motion-standard) var(--ease-standard);
 }
 
 .scroll-top {
-  background: var(--color-accent);
+  background: var(--gradient-action);
   border: 0;
   border-radius: 50%;
   bottom: max(22px, env(safe-area-inset-bottom));
   color: var(--text-on-accent);
   cursor: pointer;
+  box-shadow: var(--shadow-colored);
   font-size: 1.25rem;
   height: 46px;
   position: fixed;
@@ -240,9 +319,12 @@
   z-index: 41;
 }
 .drop-field.is-dragging {
-  background: var(--surface-selected);
+  background: var(--gradient-hero);
   border-color: var(--border-accent);
-  transform: scale(1.008);
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--border-accent) 54%, transparent),
+    var(--shadow-colored);
+  transform: translateY(-2px) scale(1.008);
 }
 
 .drop-field.has-selection {
@@ -251,9 +333,10 @@
 
 .drop-glyph {
   align-items: center;
-  background: var(--surface-selected);
+  background: var(--gradient-action);
   border-radius: var(--radius-card);
-  color: var(--color-accent);
+  box-shadow: var(--shadow-colored);
+  color: var(--text-on-accent);
   display: flex;
   height: 62px;
   justify-content: center;
@@ -296,7 +379,7 @@
 .load-more,
 .empty-history button {
   align-items: center;
-  background: var(--surface-raised);
+  background: var(--surface-control);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
   color: var(--text-primary);
@@ -307,6 +390,10 @@
   gap: 7px;
   justify-content: center;
   padding: 10px 14px;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
 }
 
 .choice-row button:hover:not(:disabled),
@@ -314,6 +401,8 @@
 .load-more:hover:not(:disabled),
 .empty-history button:hover:not(:disabled) {
   background: var(--surface-hover);
+  border-color: var(--border-accent);
+  transform: translateY(-1px);
 }
 
 .composer-actions {
@@ -325,7 +414,7 @@
 
 .output-button {
   align-items: center;
-  background: var(--surface-card);
+  background: var(--surface-card-tinted);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-card);
   color: var(--text-primary);
@@ -336,19 +425,23 @@
   padding: 18px;
   text-align: left;
   transition:
-    background var(--motion-fast) var(--ease-standard),
-    border-color var(--motion-fast) var(--ease-standard);
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
   width: 100%;
 }
 
 .output-button > svg {
-  color: var(--color-accent);
+  color: var(--color-accent-secondary);
   flex: 0 0 auto;
 }
 
 .output-button:hover:not(:disabled) {
   background: var(--surface-raised);
   border-color: var(--border-accent);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--ambient-secondary) 44%, transparent);
+  transform: translateY(-1px);
 }
 
 .output-copy {
@@ -380,9 +473,12 @@
 }
 
 .settings-panel {
-  border-block: 1px solid var(--border-subtle);
+  background: var(--surface-card-tinted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
   display: grid;
-  padding: 4px 0;
+  overflow: hidden;
+  padding: 4px;
 }
 
 .setting-row {
@@ -403,7 +499,7 @@
 
 .setting-icon {
   align-items: center;
-  color: var(--text-secondary);
+  color: var(--color-accent-tertiary);
   display: flex;
   justify-content: center;
 }
@@ -416,11 +512,12 @@
 
 .convert-button {
   align-items: center;
-  background: var(--color-accent);
-  border: 1px solid var(--color-accent);
+  background: var(--gradient-action);
+  border: 1px solid color-mix(in srgb, var(--border-accent) 74%, transparent);
   border-radius: var(--radius-card);
   color: var(--text-on-accent);
   cursor: pointer;
+  box-shadow: var(--shadow-colored);
   display: flex;
   font-size: 0.9rem;
   font-weight: 750;
@@ -429,21 +526,26 @@
   min-height: 58px;
   padding: 0 20px;
   transition:
-    background var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    filter var(--motion-fast) var(--ease-standard),
     transform var(--motion-fast) var(--ease-standard);
   width: 100%;
 }
 
 .convert-button:hover:not(:disabled) {
-  background: var(--color-accent-hover);
+  filter: brightness(1.06) saturate(1.04);
+  transform: translateY(-2px);
 }
 
 .convert-button:active:not(:disabled) {
-  transform: scale(0.985);
+  box-shadow: 0 9px 22px color-mix(in srgb, var(--ambient-primary) 52%, transparent);
+  transform: translateY(0) scale(0.985);
 }
 
 button:disabled {
   cursor: not-allowed;
+  box-shadow: none;
   opacity: 0.46;
 }
 
@@ -457,6 +559,22 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   padding: 0 2px 14px;
+  position: relative;
+}
+
+.history-heading::after {
+  background: linear-gradient(
+    90deg,
+    var(--color-accent),
+    var(--color-accent-secondary),
+    transparent 72%
+  );
+  bottom: -1px;
+  content: "";
+  height: 2px;
+  left: 0;
+  position: absolute;
+  width: min(280px, 48%);
 }
 
 .history-heading > div {
@@ -479,7 +597,8 @@ button:disabled {
 
 .live-run {
   align-items: center;
-  background: var(--surface-selected);
+  background: var(--surface-card-tinted);
+  border: 1px solid var(--border-accent);
   border-radius: var(--radius-card);
   display: grid;
   font-size: 0.75rem;
@@ -511,12 +630,18 @@ button:disabled {
   display: flex;
   gap: 8px;
   min-height: 76px;
-  padding: 9px 0;
-  transition: background var(--motion-fast) var(--ease-standard);
+  border-radius: var(--radius-control);
+  padding: 9px 4px;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
 }
 
 .run-row:hover {
-  background: color-mix(in srgb, var(--surface-hover) 60%, transparent);
+  background: color-mix(in srgb, var(--surface-hover) 78%, transparent);
+  box-shadow: inset 3px 0 0 var(--color-accent-secondary);
+  transform: translateX(2px);
 }
 
 .run-detail-button {
@@ -539,7 +664,7 @@ button:disabled {
 }
 
 .cover {
-  background: var(--surface-soft);
+  background: var(--surface-card-tinted);
   border-radius: 10px;
   flex: 0 0 auto;
   height: 44px;
@@ -653,7 +778,8 @@ button:disabled {
 
 .error-banner {
   align-items: start;
-  background: var(--surface-card);
+  backdrop-filter: blur(18px);
+  background: var(--surface-header);
   border: 1px solid var(--border-control);
   border-left: 3px solid var(--color-danger);
   border-radius: var(--radius-card);
@@ -757,6 +883,17 @@ button:disabled {
 
   .run-count {
     justify-items: end;
+  }
+}
+
+@media (max-width: 520px) {
+  .theme-menu {
+    grid-template-columns: minmax(0, 1fr);
+    width: min(310px, calc(100vw - 24px));
+  }
+
+  .theme-option {
+    grid-template-columns: 42px minmax(0, 1fr) auto 18px;
   }
 }
 

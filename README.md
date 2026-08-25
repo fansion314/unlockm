@@ -33,8 +33,9 @@ The first desktop release deliberately stays focused:
 - adjust metadata refresh and directory companion-file copy before converting;
 - follow one active conversion, cancel it safely, and reopen its persisted
   history/detail view after restarting the app;
-- switch between a light-default and dark theme, and use English or Simplified
-  Chinese from the fixed application header;
+- choose among nine complete light and dark themes, including Tokyo Night,
+  Catppuccin Mocha, Dracula, Nord, Gruvbox, and Rosé Pine Dawn, and use English,
+  Simplified Chinese, or Japanese from the fixed application header;
 - search, filter, sort, and page through captured songs with album art,
   artist/album metadata, and actual converted file type/size;
 - play one converted song at a time with pause and seeking, reveal a run or
@@ -43,6 +44,12 @@ The first desktop release deliberately stays focused:
 The native About panel credits Additive Cookie for the tokens, states that the
 app was made for Moxianbao and vincentlee73, and records
 `Copyright © Hamlet Fansion (Peilin Fan)`.
+
+New profiles use UnlockM Aurora Light. Each built-in theme defines its own
+backgrounds, surfaces, text, state colors, gradients, and native form color
+scheme rather than changing one accent color. Existing light/dark plus
+blue/emerald/violet/amber preferences are mapped automatically to the closest
+complete theme the first time the upgraded app reads them.
 
 Desktop watch mode, playlists/queues, waveform rendering, cloud sync, accounts,
 telemetry, and manual key entry are not part of v1. Conversion is in-process:

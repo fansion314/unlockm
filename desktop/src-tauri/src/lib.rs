@@ -246,7 +246,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::history::{CreateRun, InputKind, RunSettings, Theme};
+    use crate::history::{CreateRun, InputKind, RunSettings, ThemeId};
 
     #[test]
     fn about_metadata_contains_requested_credits_and_copyright() {
@@ -295,7 +295,7 @@ mod tests {
             .unwrap();
         let mut preferences = legacy.preferences().unwrap();
         preferences.locale = "zh-CN".into();
-        preferences.theme = Theme::Dark;
+        preferences.theme_id = ThemeId::AuroraDark;
         legacy.set_preferences(&preferences).unwrap();
         drop(legacy);
 
