@@ -473,6 +473,36 @@ test("online cover failure is visible above the result list and preserves the dr
   expect(api.updateRunItemMetadata).not.toHaveBeenCalled();
 });
 
+test("missing online artwork is distinct from a network failure", async () => {
+  api.listArtworkCandidates.mockResolvedValue([]);
+  api.searchOnlineMetadata.mockResolvedValue([
+    {
+      provider: "musicBrainz",
+      requiresAuthorization: false,
+      artworkSource: "Cover Art Archive / TheAudioDB",
+      attribution: "MusicBrainz",
+      itemId: "11111111-1111-1111-1111-111111111111",
+      title: "Missing cover result",
+      artists: ["Artist"],
+      album: "Album",
+      durationMs: 1000,
+      coverHandle: "missing-cover",
+    },
+  ]);
+  api.getOnlineMetadataCoverPreview.mockRejectedValue({
+    code: "online_artwork_not_found",
+    detail: "private",
+  });
+  render(<MetadataEditor item={item} onClose={vi.fn()} onSaved={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Search MusicBrainz" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Use cover" }));
+  const alerts = await screen.findAllByRole("alert");
+  expect(alerts.some((alert) => alert.textContent?.includes("No cover is available"))).toBe(true);
+  expect(
+    alerts.some((alert) => alert.textContent?.includes("could not be fetched or validated")),
+  ).toBe(false);
+});
+
 test("a stale cover response cannot alter the next provider draft or busy state", async () => {
   onlineConnected();
   api.listArtworkCandidates.mockResolvedValue([]);

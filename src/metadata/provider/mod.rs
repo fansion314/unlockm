@@ -1,3 +1,5 @@
+pub mod coverartarchive;
+pub mod free_artwork;
 pub mod musicbrainz;
 pub mod qq;
 pub mod spotify;
@@ -34,13 +36,16 @@ pub struct OnlineMetadataProviderCapability {
     pub artwork_source: Option<&'static str>,
     pub attribution: &'static str,
 }
+pub const FREE_ARTWORK_SOURCE: &str = "Cover Art Archive / TheAudioDB";
+pub const FREE_ATTRIBUTION: &str =
+    "MusicBrainz; artwork on demand from Cover Art Archive or TheAudioDB";
 pub const ONLINE_METADATA_PROVIDER_CAPABILITIES: [OnlineMetadataProviderCapability; 2] = [
     OnlineMetadataProviderCapability {
         provider: OnlineMetadataProviderKind::MusicBrainz,
         primary_order: 0,
         requires_authorization: false,
-        artwork_source: Some("TheAudioDB"),
-        attribution: "MusicBrainz; artwork on demand from TheAudioDB",
+        artwork_source: Some(FREE_ARTWORK_SOURCE),
+        attribution: FREE_ATTRIBUTION,
     },
     OnlineMetadataProviderCapability {
         provider: OnlineMetadataProviderKind::Spotify,
@@ -88,6 +93,7 @@ pub enum OnlineMetadataError {
     RateLimited { retry_after_secs: u64 },
     RequestTimeout,
     Unavailable,
+    ArtworkNotFound,
     MalformedResponse,
 }
 impl OnlineMetadataError {
@@ -103,6 +109,7 @@ impl OnlineMetadataError {
             Self::RateLimited { .. } => "rate_limited",
             Self::RequestTimeout => "request_timeout",
             Self::Unavailable => "provider_unavailable",
+            Self::ArtworkNotFound => "online_artwork_not_found",
             Self::MalformedResponse => "provider_malformed_response",
         }
     }
@@ -126,8 +133,9 @@ mod tests {
             .unwrap();
         assert_eq!(musicbrainz.primary_order, 0);
         assert!(!musicbrainz.requires_authorization);
-        assert_eq!(musicbrainz.artwork_source, Some("TheAudioDB"));
+        assert_eq!(musicbrainz.artwork_source, Some(FREE_ARTWORK_SOURCE));
         assert!(musicbrainz.attribution.contains("MusicBrainz"));
+        assert!(musicbrainz.attribution.contains("Cover Art Archive"));
         assert!(musicbrainz.attribution.contains("TheAudioDB"));
     }
 }

@@ -8,7 +8,7 @@ Last updated: 2026-08-26
 
 ## Objective
 
-在 UnlockM 桌面端现有的单曲元数据编辑弹窗中加入用户主动触发的联网搜索。默认/主要路径将使用不登录的 MusicBrainz 文本 metadata 搜索与 TheAudioDB 专辑封面；Spotify 保留为 secondary、可选 provider，并明确提示其 Premium 账户要求。所有候选仍只填入草稿，最终只能由既有“保存”路径原子写入文件。
+在 UnlockM 桌面端现有的单曲元数据编辑弹窗中加入用户主动触发的联网搜索。默认/主要路径将使用不登录的 MusicBrainz 文本 metadata 搜索、MusicBrainz Cover Art Archive 专辑封面与 TheAudioDB fallback；Spotify 保留为 secondary、可选 provider，并明确提示其 Premium 账户要求。所有候选仍只填入草稿，最终只能由既有“保存”路径原子写入文件。
 
 技术上保留可扩展的 provider 边界、受限 Rust-only 网络客户端与 provider-neutral IPC DTO。Spotify 的 PKCE/安全凭证实现保留给可选登录路径；免费 primary provider 不需要账户、OAuth 或 credential persistence。任何 token、原始 provider payload 或图片 URL 均不得进入 SQLite、webview 或日志。
 
@@ -16,7 +16,7 @@ Last updated: 2026-08-26
 
 - 在 `desktop/src/features/metadata/MetadataEditor.tsx` 增加独立的“联网搜索”区域，覆盖未配置、未登录、登录中、已连接、需重新授权、搜索中、无结果、限流和失败状态。
 - 只在用户点击登录、搜索或重试时联网；打开应用、打开编辑弹窗、编辑字段和保存本地标签本身不自动联网。
-- 默认 provider 将为 MusicBrainz 文本 metadata 与 TheAudioDB 专辑封面；Spotify 是清楚标注 Premium requirement 的 optional secondary provider。
+- 默认 provider 将为 MusicBrainz 文本 metadata、Cover Art Archive 主封面与 TheAudioDB fallback；Spotify 是清楚标注 Premium requirement 的 optional secondary provider。
 - 候选展示标题、歌手列表、专辑、时长、Spotify 来源标识、可验证的 Spotify 跳转入口和由 Rust 懒加载的专辑封面预览；不依赖已在 2026 Development Mode 响应中移除的 `popularity`、`available_markets` 等字段。
 - 用户可以分别填入文本、使用封面或填入全部。封面 bytes 只进入现有编辑草稿，不立即写文件、不释放播放器；用户可以继续修改或取消。
 - 使用 Spotify Authorization Code with PKCE，不配置或保存 client secret。回调由 Rust 在 `127.0.0.1` 动态端口上的一次性 loopback listener 接收，并严格校验 state、callback path、请求大小和超时。
@@ -27,6 +27,7 @@ Last updated: 2026-08-26
 - 更新中/英/日文案、隐私/配置说明、安全测试、第三方依赖声明、CI/release 配置和 `ARCHITECTURE.md`。
 - 将桌面元数据编辑器改为本地草稿/联网搜索左右工作区；结果以有字段标签的候选列表呈现，窄窗口回退为单栏，左右内容保持各自可滚动且底部 Save actions 固定可达。
 - 在线封面获取成功后必须在本地草稿区立即显示预览和来源/未保存状态；失败或无封面时在搜索控件附近显示可见、可恢复的提示，不能把反馈放在长结果列表末尾。
+- Cover Art Archive 只接受由 release-group MBID 构造的固定 HTTPS endpoint；其 Internet Archive 存储重定向最多 3 次且仅允许 `archive.org`/子域。TheAudioDB 正确处理真实 `album:null`、使用原始 artist/album 查询并把规范化仅用于结果比较；两者均使用 10s connect/20s total timeout、bounded body 和现有图片验证。
 
 ## Non-Goals
 
@@ -65,7 +66,7 @@ Last updated: 2026-08-26
 
 - MusicBrainz root is `https://musicbrainz.org/ws/2/`; non-commercial use is free, no API key is needed, a meaningful User-Agent is mandatory, and each client starts at most one request per second. Use `UnlockM/<pkg version> (https://git.fansionia.world/fansion/unlockm)` with an injectable scheduler. Source: [MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API).
 - Search recordings with a bounded plain-text `dismax=true` query (MusicBrainz escapes special syntax and searches default recording-index fields) and limit≤10; consume title, artist-credit, length, releases and release-group, flatten/dedupe recording+release-group.
-- TheAudioDB public key `123` is non-secret; album-mb uses release-group MBID first, searchalbum is only a unique normalized exact artist+album fallback. Exact hosts: API `www.theaudiodb.com`, image `r2.theaudiodb.com`; artwork is on-demand only.
+- Cover Art Archive release-group `front-500` is the primary artwork source. Exact API host is `coverartarchive.org`; storage redirects are HTTPS-only, at most 3, and limited to `archive.org` or subdomains. TheAudioDB public key `123` is non-secret and remains fallback: album-mb first, then raw artist+album search with unique normalized exact response comparison. Exact TADB hosts remain API `www.theaudiodb.com` and image `r2.theaudiodb.com`; artwork is on-demand only.
 - Free primary search has no auth status or credential persistence. Spotify remains optional secondary and its Premium live path does not block M6–M8.
 
 ### 1. Provider boundary and search semantics
@@ -133,6 +134,20 @@ Last updated: 2026-08-26
 ## Milestones
 
 > 2026-08-25 priority revision: M1–M4 record completed/reviewed Spotify-secondary foundation work. Before further implementation, define new primary-provider milestones for MusicBrainz text search and TheAudioDB artwork after official API constraints are verified. M5 native QA must test the free primary path first; Spotify QA becomes optional Premium-account coverage.
+
+### M11 — Reliable free artwork sources
+
+- Goal: 让 MusicBrainz 候选优先从 Cover Art Archive 获取封面，并修复 TheAudioDB 真实 null/timeout/query fallback，使“未收录”和网络失败不再互相伪装。
+- Dependencies: M6 free provider boundary, M9 connection evidence, M10 visible cover feedback.
+- Acceptance: TENT release-group 通过 CAA 得到 validated cover；CAA 404/timeout 安全 fallback TADB；TADB `album:null` 视为空、原始多词 query 可命中、10s/20s bounds 生效；fixed-host/manual redirect/body/image/generation invariants 不变。
+- Validation: local redirect/null/raw-query/timeout/oversize/malformed fixtures，security semantic guards，real CAA TENT and TADB Parachutes/RAM evidence，native cover draft Apply/Cancel。
+
+### M12 — v0.4.0 release
+
+- Goal: 将 M9-M11 与完整多色主题集成作为 v0.4.0 可复现发布状态提交并同步两个远端。
+- Dependencies: M11 implementation and final review pass.
+- Acceptance: root/desktop package versions 0.4.0、lock/config/docs 一致；full automation and debug bundle pass；related files committed；annotated `v0.4.0` tag points to reviewed commit；`main` and tag pushed to `origin` and `github` without force.
+- Validation: version audit、full plan validation matrix、commit/tag object checks、remote branch/tag verification。
 
 ### M9 — User-acceptance regression fixes
 
@@ -239,6 +254,14 @@ Last updated: 2026-08-26
   - 独立 review 检查安全、政策、计划状态和验证证据。
 
 ## Task Breakdown
+
+- [x] T11.1 新建 `src/metadata/provider/coverartarchive.rs`：release-group `front-500` lookup、10s/20s bounded clients、no automatic redirects for lookup、最多 3 次且仅 `archive.org`/子域的 HTTPS fetch redirects、body cap/`validate_cover` 和恶意 redirect fixtures。
+- [x] T11.2 修复 `theaudiodb.rs`：10s connect/20s total；真实 `album:null` 映射为空并继续 fallback；API 发送 trim 后原始 artist/album，normalize 只用于唯一 exact response comparison；补 raw-vs-normalized 与 null fixtures。
+- [x] T11.3 在 desktop free service/state 接入 CAA primary/TADB fallback 与 host-dispatched fetch，更新 provider capability/候选 attribution、三语 UI、README/architecture/security guards；保留 opaque handle/single-flight/generation/draft-only Save。
+- [x] T11.4 执行 provider/desktop/frontend/security 全量自动化及 macOS native TENT cover Apply/Cancel QA；独立 review 所有 fixed-host/redirect/fallback/error/plan evidence，解决全部 findings。
+- [x] T12.1 将 root/desktop/Tauri 版本与 lockfile 更新为 0.4.0，核对 release docs/config/notice，无新增依赖或 secret。
+- [x] T12.2 执行完整 release validation、debug no-bundle/app bundle 和最终 plan review，记录 warnings、commit candidate 与 remaining external gaps。
+- [ ] T12.3 conventional commit 全部相关变更，创建 annotated `v0.4.0`，推送 `main` 与 tag 到 `origin`、`github` 并读取远端 refs 验证。
 
 - [x] T10.1 重构 `MetadataEditor.tsx` DOM 和 `history.css`：桌面 46/54 双栏、独立滚动、固定 actions、左侧字段/封面草稿、右侧搜索；<860px 显式单栏回退并保持 focus trap。
 - [x] T10.2 将 MusicBrainz/Spotify candidate 统一渲染为字段化结果列表，加入标题/歌手/专辑/时长/元数据来源/封面来源标签、结果计数、loading/empty/error 头部状态和不折行 actions。
@@ -352,6 +375,12 @@ Last updated: 2026-08-26
 
 ## Progress
 
+- [x] 2026-08-26：M11 final review **Pass**。Review follow-up 修复 clean no-source 与 network/validation failure 混淆，新增 stable `ArtworkNotFound`/`online_artwork_not_found`，后端保证无 source 不 dispatch image、前端三语明确提示。Full release validation：root fmt/clippy、all targets/features 191，watch 2+2、no-network 1、provider mock 1；desktop clippy、all-targets 90、online 29、security 4、license 1；Vite+ 19 files/125、fmt/check/build；Tauri debug no-bundle/app bundle 全部通过。无 blocker/major/minor/nit。
+- [x] 2026-08-26：T12.2 release-ready。0.4.0 no-bundle 与 `.app` 构建成功；Info.plist `CFBundleShortVersionString`/`CFBundleVersion` 均 0.4.0，identifier `world.fansionia.unlockm`，arm64 executable 与 bundled `THIRD_PARTY_NOTICES.md` 存在。仅保留既存 ineffective dynamic import 与 >500 KiB chunk warnings。T8.1 完整 MP3/FLAC Save/restart 与 T5.2-T5.4 Spotify/Windows 外部门禁继续保留，不阻止本次用户明确要求的 v0.4.0 tag/push。
+- [x] 2026-08-26：M11 native primary path passed。当前 debug `.app` 搜索 `Jackie toconoma` 返回第一条 TENT（RGID `29e467dd-...`），Use cover 通过 CAA/Internet Archive 受限跳转取得真实 TENT 图片，左侧 preview/source/unsaved feedback 正确；Cancel 后重开显示“尚未选择新封面”，未写文件/history。Review follow-up 增加 `ArtworkNotFound`/`online_artwork_not_found`，确定性测试区分 clean no-source 与网络/验证失败。
+- [x] 2026-08-26：T12.1 complete。`Cargo.toml`、desktop Rust/package/Tauri config 与 workspace `Cargo.lock` 的 `unlockm`/`unlockm-desktop` 均为 0.4.0；历史依赖版本未机械改写。无新 crate/npm dependency、credential 或 release secret。
+- [x] 2026-08-26：T11.1-T11.3 implemented。新增 `CoverArtArchiveClient`（HEAD no-follow lookup、validated archive location、最多 3 个受限 HTTPS redirects、10s/20s、cap/validate）与 `FreeArtworkClient` composite。TADB 接受真实 `album:null`、raw trimmed query/normalized exact comparison、10s/20s。Desktop state 使用 CAA primary/TADB fallback 并按 trusted host fetch；capability/三语/docs/architecture/security 更新。Deterministic validation：CAA 6、TADB 13、composite 5、provider 44、desktop online 28、security 4、frontend metadata+locale 38、check/fmt passed。
+- [x] 2026-08-26：用户要求修复全部 cover findings 并发布 v0.4.0。诊断证据：当前 TADB 3s connect 在本机 5.23s TLS 前稳定 timeout；10s/20s 对 Parachutes 5.54s 返回 200。真实未收录为 `{"album":null}`，现 `Vec<Album>` 将其误判 malformed 并阻断 fallback；raw `Daft Punk/Random Access Memories` 命中而当前 normalized `daftpunk/randomaccessmemories` 返回 null。TENT 在 TADB MBID/raw search 均无记录，但 CAA release-group endpoint 返回 release `906ce501-...` 的 front 250/500/1200。打开 M11/M12，计划进入 In Progress；remotes `origin`/`github` 已确认，`v0.4.0` 不存在。
 - [x] 2026-08-26：M10 implementation complete and ready for review。用户追加的 local cover grid finding 已修复：真实 debug `.app` 左 pane 显示稳定三列，两行中/英/日 album name 均未被图片或下一行覆盖。宽屏浅色/深色 split workspace、fixed actions、empty/results、独立 pane scroll 通过原生视觉 QA；theme 已恢复、草稿 Cancel、app 退出。TheAudioDB timeout 在顶部/候选可见，且修正为独立封面服务失败文案。Targeted editor 34/34、full Vite+ 17 files/102 tests、fmt/check/build、provider 32、desktop online 28、security 4、diff check 均通过；一次 Node type reference check failure 已局部修复并复验通过。状态恢复 In Review。
 - [x] 2026-08-26：M10 native visual QA finding。宽屏 split/results UI 通过，真实 Jackie query 显示 10 个字段化候选；TheAudioDB 首次 cover fetch timeout 已在列表上方和候选内可见，但错误归因仍误写为 MusicBrainz，已改为独立 online-cover failure 文案。用户截图进一步发现 local candidate image intrinsic height 溢出 grid row、遮挡后续卡片和 album name，打开 T10.5；M10 继续 In Progress。
 - [x] 2026-08-26：T10.1-T10.3 implemented。`MetadataEditor` 改为 split-workspace DOM，左侧 metadata/cover draft、右侧 provider/search/labeled result list；CSS 使用现有 semantic tokens、1120px dialog、独立 pane scroll、860px/560px 单栏回退和 reduced-motion skeleton。候选使用 `dl` 显示 6 个字段与 mm:ss 时长，头部反馈不再落在长列表末端。online cover 成功生成左侧 preview object URL/来源/未保存状态，失败显示顶部与候选 alert，upload/local replacement 清理 preview。三语文案已补；targeted editor 33/33 passed，Vite+ check passed。
@@ -434,6 +463,8 @@ Last updated: 2026-08-26
 - MusicBrainz 编辑器 query 是 title、artist、album 的组合自由文本，不应整体限定为 `recording` title 字段。原生 live 结果证明 `recording:("relive toconoma")` + dismax 会返回通用 “Recording” 候选；同一 endpoint 的 free-text dismax 查询能跨 recording/artist 等默认字段获得相关结果。
 - 当前 MusicBrainz result 没有自动图片却仍使用预留 3.5rem 图片列；在 460px modal 中有效文本宽度过窄，点分隔 attribution 会逐词换行。封面成功 bytes 只存在 React draft，现有 `preview` 仅由 file input 更新，因此用户无法确认远程封面是否成功应用。
 - local artwork 图片的 intrinsic aspect-ratio 高度大于未约束的 outer grid auto row；`max-block-size` 只裁剪容器、不限制 card/image，导致图片跨行覆盖且单行 ellipsis title 被下一行遮挡。需要显式 grid row/card/image block size 与 overflow containment。
+- TheAudioDB production response uses `album:null` for no match, not `album:[]`; serde `default` on `Vec` does not accept null. TheAudioDB text search is sensitive to spaces, so deleting them before dispatch turns known multiword matches into false negatives. On the current TUN route, its TLS setup also exceeds the inherited 3s connect timeout.
+- Cover Art Archive already has TENT artwork for MusicBrainz release-group `29e467dd-f441-44ad-a7a2-8863c37c464e`, redirecting through exact `archive.org` storage to a dynamic `*.archive.org` host. CAA is structurally better aligned with retained MusicBrainz IDs than TheAudioDB and can remain fully Rust-only/on-demand.
 
 ## Decision Log
 
@@ -456,8 +487,17 @@ Last updated: 2026-08-26
 - **2026-08-25 — D17:** MusicBrainz 搜索改用 trim 后的 plain-text query 并保留 `dismax=true`，不再手工 Lucene escape 或把组合 title+artist+album 输入包装为 `recording:(...)`。MusicBrainz 官方说明 dismax 会自动转义特殊查询语法并使用 plain indexed search；这样可沿用默认跨字段语义，同时继续限制 200 scalars/limit10/fixed host/1rps。
 - **2026-08-26 — D18:** 编辑器采用 preserve-mode 原生 CSS Grid 双工作区，不引入新设计系统。桌面左 46% 本地草稿、右 54% 联网搜索并各自滚动；<860px 单栏。候选使用语义化 `dl` 字段列表，来源不再拼进无标签句子。在线封面点击即选入草稿，成功必须显示 object-URL 预览/来源，失败必须在长列表上方可见；不新增“下载后再选择”的第二阶段，以免产生与现有 Apply 语义冲突。
 - **2026-08-26 — D19:** 本地封面候选在左 pane 使用 `repeat(auto-fill, minmax(112px, 1fr))`，典型桌面宽度形成三列；button 固定 `104px + two-line label` rows 且 `overflow:hidden`，图片使用固定 block-size/`object-fit:cover`。不再依赖 replaced image intrinsic aspect ratio 参与 outer grid row sizing。
+- **2026-08-26 — D20:** 免费封面主源改为 MusicBrainz Cover Art Archive release-group `front-500`，TheAudioDB 降为 fallback。CAA lookup 禁止自动 redirect并验证首个 storage location；image fetch 仅允许 HTTPS `coverartarchive.org`、`archive.org` 和 `*.archive.org`，最多 3 次 redirect，继续执行 bytes cap 与 `validate_cover`。不允许调用方 URL 或通用 redirect policy。
+- **2026-08-26 — D21:** TheAudioDB `album:null` 是合法 empty response；API query 发送 bounded trimmed original artist/album，NFKC/lower/alphanumeric normalize 只用于响应后的唯一 exact comparison。Production timeout 与已验证网络基线统一为 10s connect/20s total。
+
+## Review Notes
+
+- [x] **2026-08-26 — M11/M12 release review Pass:** CAA lookup 只由 MBID 构造，首个 storage location 必须是 HTTPS `archive.org`/子域；fetch custom policy 同一 allowlist且最多 3 redirects，所有 bytes cap/validate。Composite tests prove CAA hit zero TADB dispatch、CAA 404→TADB null→raw multiword exact fallback、clean none 与 host-dispatched fetch。Native TENT CAA preview/Cancel passed。Version/lock/config/bundle audit is consistent at 0.4.0. No code or plan finding remains for M11/M12；tag/push task T12.3 is the only release action pending.
+- [x] **2026-08-26 — Pass with Notes after theme merge `6b8a248`:** 当前 HEAD `6b8a248` 位于 M9/M10 commit `5123c6c` 之后。主题提交保留 split workspace/cover draft/result semantics，并新增 rate-limit deadline 自动清除与 `applyTheme("nord")` 时 open editor/unsaved title 保持测试。独立复验：Vite+ fmt/check/build 通过，19 files/124 tests 通过；root provider 32、desktop online 28、desktop all-targets 89、security 4、license 1、desktop clippy 和 debug `.app` bundle build 通过。`theme-contract.test.ts` 覆盖全部 9 preset 的完整 semantic tokens、action/state/focus contrast；原生 Rosé Pine Dawn 与 Tokyo Night 抽样确认 dialog、双栏、错误 alert、本地封面三列/两行 label、固定 actions 和焦点对比度正常，QA 草稿 Cancel 后将主题恢复为原 Rosé Pine Dawn 并退出。实时 MusicBrainz 在 Tokyo Night 下连续两次返回真实 `provider_unavailable`，因此本轮未宣称新主题下 live populated result-card pass；现有 M10 live result evidence与确定性 result DOM/theme contract 仍有效。无代码 finding，既有 T8.1/T5.2–T5.4 外部缺口不变。
 
 ## Completion Evidence
+
+- M11/M12 release candidate (2026-08-26): CAA 6, TheAudioDB 13, composite free artwork 4, full provider 43; desktop online 29, all-targets 90, security 4, license 1; root all targets/features 191 plus serial watch/no-network/provider mock; Vite+ 19 files/125 plus fmt/check/build; debug no-bundle and `.app` 0.4.0 builds passed. Native `Jackie / toconoma / TENT` retrieved a real CAA front image through validated archive redirects, displayed it only in the draft, then Cancel/reopen proved no persistence. No dependency was added. Existing Vite warnings are unchanged. Implementation commit/tag/remote evidence is recorded by T12.3 after release actions.
 
 - M10 desktop workspace (2026-08-26): targeted `rtk vp -C desktop test --run MetadataEditor.test.tsx` passed (34); full Vite+ test passed (17 files/102); Vite+ fmt/check/build passed; root provider subset passed (32), desktop online metadata (28), security policy (4), and diff check passed. Native debug `.app` light/dark wide-layout QA showed 46/54 independent panes, fixed actions, labeled 10-result list, and corrected three-column local artwork cards with contained 104px images and two-line labels. A real TheAudioDB timeout rendered the visible cover-service failure above results and inside the candidate; deterministic tests prove successful bytes create/revoke the left draft preview and remain draft-only until Save. Narrow fallback is source-locked at 860px/560px; native resize was unavailable through Computer Use and is not claimed.
 

@@ -74,8 +74,8 @@ function CandidateArtwork({ candidate }: { candidate: ArtworkCandidate }) {
 }
 
 // Kept as an isolated preview primitive for explicit callers. The editor does
-// not mount it for MusicBrainz results: TheAudioDB lookup must begin only when
-// the user chooses Use cover or Fill all.
+// not mount it for MusicBrainz results: free artwork lookup must begin only
+// when the user chooses Use cover or Fill all.
 export function OnlineCover({ candidate }: { candidate: OnlineMetadataCandidate }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -213,7 +213,7 @@ export function MetadataEditor({
   useEffect(() => {
     // This is a local capability read, not a provider request. It lets Rust
     // keep the no-auth primary ordering authoritative while opening the editor
-    // remains free of MusicBrainz, TheAudioDB, or Spotify network traffic.
+    // remains free of MusicBrainz, CAA, TheAudioDB, or Spotify network traffic.
     void Promise.resolve(desktopApi.onlineMetadataProviderCapabilities())
       .then((capabilities: OnlineMetadataProviderCapability[] | undefined) => {
         const defaultProvider = capabilities
@@ -316,13 +316,16 @@ export function MetadataEditor({
         state: "success",
         source: candidate.artworkSource ?? candidate.attribution,
       });
-    } catch {
+    } catch (reason) {
       if (
         mounted.current &&
         generation === searchGeneration.current &&
         onlineProviderRef.current === candidate.provider
       ) {
-        const errorKey = "online_cover_failed";
+        const errorKey =
+          onlineErrorCode(reason) === "online_artwork_not_found"
+            ? "online_artwork_not_found"
+            : "online_cover_failed";
         setOnlineError(errorKey);
         setCoverFeedback({ candidateKey, state: "error", errorKey });
       }

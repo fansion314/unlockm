@@ -325,11 +325,13 @@ partially modified file.
 The default desktop search is MusicBrainz: it is free for non-commercial use,
 needs no account or API key, and runs only after the user explicitly searches.
 UnlockM identifies itself with a meaningful User-Agent and limits itself to one
-MusicBrainz request per second. TheAudioDB artwork uses its public `123` key
-only after **Use cover** or **Fill all**; it is never fetched automatically.
+MusicBrainz request per second. Artwork uses the MusicBrainz Cover Art Archive
+first and TheAudioDB's public `123` key as a fallback, only after **Use cover**
+or **Fill all**; it is never fetched automatically.
 Commercial/high-volume MusicBrainz use needs the separate MetaBrainz service
-or an appropriate agreement. Both providers use fixed Rust-only hosts, bounded
-no-redirect requests, and return no remote URL to the webview.
+or an appropriate agreement. All providers use bounded Rust-only hosts and
+return no remote URL to the webview. Redirects are disabled except for at most
+three validated Cover Art Archive storage hops to `archive.org` or its subdomains.
 
 The desktop metadata editor can optionally search Spotify after an explicit
 user action. Spotify is a secondary, Premium-required provider. Opening the app

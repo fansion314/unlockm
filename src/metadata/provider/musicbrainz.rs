@@ -1,4 +1,7 @@
-use super::{OnlineMetadataCandidate, OnlineMetadataProvider, OnlineMetadataProviderKind};
+use super::{
+    FREE_ARTWORK_SOURCE, FREE_ATTRIBUTION, OnlineMetadataCandidate, OnlineMetadataProvider,
+    OnlineMetadataProviderKind,
+};
 use reqwest::{StatusCode, blocking::Client, redirect::Policy};
 use serde::Deserialize;
 use std::{
@@ -354,8 +357,8 @@ pub fn map_response(response: SearchResponse) -> Vec<OnlineMetadataCandidate> {
             candidates.push(OnlineMetadataCandidate {
                 provider: OnlineMetadataProviderKind::MusicBrainz,
                 requires_authorization: false,
-                artwork_source: Some("TheAudioDB"),
-                attribution: "MusicBrainz; artwork on demand from TheAudioDB",
+                artwork_source: Some(FREE_ARTWORK_SOURCE),
+                attribution: FREE_ATTRIBUTION,
                 item_id: id.clone(),
                 title: title.clone(),
                 artists: artists.clone(),
@@ -372,8 +375,8 @@ pub fn map_response(response: SearchResponse) -> Vec<OnlineMetadataCandidate> {
             candidates.push(OnlineMetadataCandidate {
                 provider: OnlineMetadataProviderKind::MusicBrainz,
                 requires_authorization: false,
-                artwork_source: Some("TheAudioDB"),
-                attribution: "MusicBrainz; artwork on demand from TheAudioDB",
+                artwork_source: Some(FREE_ARTWORK_SOURCE),
+                attribution: FREE_ATTRIBUTION,
                 item_id: id,
                 title,
                 artists,

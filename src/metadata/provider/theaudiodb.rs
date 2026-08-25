@@ -9,6 +9,8 @@ use url::{Host, Url};
 pub const API_HOST: &str = "www.theaudiodb.com";
 pub const IMAGE_HOST: &str = "r2.theaudiodb.com";
 pub const PUBLIC_KEY: &str = "123";
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 const MAX_LOOKUP_SCALARS: usize = 200;
 const MAX_LOOKUP_URL_BYTES: usize = 4096;
@@ -25,8 +27,8 @@ impl TheAudioDbClient {
         Ok(Self {
             client: Client::builder()
                 .redirect(Policy::none())
-                .connect_timeout(Duration::from_secs(3))
-                .timeout(Duration::from_secs(8))
+                .connect_timeout(CONNECT_TIMEOUT)
+                .timeout(REQUEST_TIMEOUT)
                 .build()
                 .map_err(request_error)?,
             api: Url::parse(&format!("https://{API_HOST}/api/v1/json/{PUBLIC_KEY}/"))
@@ -36,7 +38,7 @@ impl TheAudioDbClient {
         })
     }
     #[cfg(test)]
-    fn with_test_api(api: Url) -> Self {
+    pub(super) fn with_test_api(api: Url) -> Self {
         Self {
             client: Client::builder()
                 .redirect(Policy::none())
@@ -48,7 +50,7 @@ impl TheAudioDbClient {
         }
     }
     #[cfg(test)]
-    fn with_test_image(image: Url) -> Self {
+    pub(super) fn with_test_image(image: Url) -> Self {
         Self::with_test_api(image)
     }
     #[cfg(test)]
@@ -76,15 +78,22 @@ impl TheAudioDbClient {
         {
             return Ok(Some(url));
         }
-        let artist = bounded_lookup_value(artist)?;
-        let album = bounded_lookup_value(album)?;
-        if artist.is_empty() || album.is_empty() {
+        let artist_query = bounded_lookup_value(artist)?;
+        let album_query = bounded_lookup_value(album)?;
+        if artist_query.is_empty() || album_query.is_empty() {
             return Ok(None);
         }
+        let artist_key = normalize(&artist_query);
+        let album_key = normalize(&album_query);
         let exact = self
-            .lookup_all("searchalbum.php", &[("s", &artist), ("a", &album)])?
+            .lookup_all(
+                "searchalbum.php",
+                &[("s", &artist_query), ("a", &album_query)],
+            )?
             .into_iter()
-            .filter(|entry| normalize(&entry.artist) == artist && normalize(&entry.album) == album)
+            .filter(|entry| {
+                normalize(&entry.artist) == artist_key && normalize(&entry.album) == album_key
+            })
             .collect::<Vec<_>>();
         Ok((exact.len() == 1)
             .then(|| exact.into_iter().next().unwrap().image())
@@ -146,7 +155,7 @@ impl TheAudioDbClient {
         match response.status() {
             StatusCode::OK => {
                 serde_json::from_slice::<Response>(&read_capped(response, MAX_RESPONSE_BYTES)?)
-                    .map(|body| body.album)
+                    .map(|body| body.album.unwrap_or_default())
                     .map_err(|_| OnlineMetadataError::MalformedResponse)
             }
             _ => Err(OnlineMetadataError::Unavailable),
@@ -156,7 +165,7 @@ impl TheAudioDbClient {
 #[derive(Deserialize)]
 struct Response {
     #[serde(default)]
-    album: Vec<Album>,
+    album: Option<Vec<Album>>,
 }
 #[derive(Deserialize)]
 struct Album {
@@ -186,10 +195,11 @@ pub fn normalize(value: &str) -> String {
         .collect()
 }
 fn bounded_lookup_value(value: &str) -> Result<String, OnlineMetadataError> {
-    if value.trim().chars().count() > MAX_LOOKUP_SCALARS {
+    let value = value.trim();
+    if value.chars().count() > MAX_LOOKUP_SCALARS {
         return Err(OnlineMetadataError::InvalidInput);
     }
-    Ok(normalize(value))
+    Ok(value.to_owned())
 }
 fn trusted(url: &Url, host: &str) -> Result<Url, OnlineMetadataError> {
     (url.scheme() == "https"
@@ -320,9 +330,9 @@ mod tests {
         );
     }
     #[test]
-    fn local_null_mbid_falls_back_only_for_one_exact_normalized_album() {
+    fn real_null_mbid_response_falls_back_to_one_exact_normalized_album() {
         let client = TheAudioDbClient::with_test_api(api_responses([
-            r#"{"album":[]}"#,
+            r#"{"album":null}"#,
             r#"{"album":[{"strArtist":"Beyoncé","strAlbum":"The Album!","strAlbumThumb":"https://r2.theaudiodb.com/a.jpg"}]}"#,
         ]));
         assert_eq!(
@@ -343,17 +353,17 @@ mod tests {
         let ambiguous = r#"{"album":[{"strArtist":"A","strAlbum":"B","strAlbumThumb":"https://r2.theaudiodb.com/1.jpg"},{"strArtist":"A","strAlbum":"B","strAlbumThumb":"https://r2.theaudiodb.com/2.jpg"}]}"#;
         let client = TheAudioDbClient::with_test_api(api_response(ambiguous));
         assert!(client.cover_url(None, "A", "B").unwrap().is_none());
-        let client = TheAudioDbClient::with_test_api(api_response(r#"{"album":[]}"#));
+        let client = TheAudioDbClient::with_test_api(api_response(r#"{"album":null}"#));
         assert!(client.cover_url(None, "A", "B").unwrap().is_none());
     }
     #[test]
-    fn fallback_bounds_scalars_and_uses_url_encoded_normalized_query_values() {
+    fn fallback_bounds_scalars_and_sends_url_encoded_original_query_values() {
         let client = TheAudioDbClient::with_test_api(Url::parse("http://127.0.0.1:9/").unwrap());
         assert!(matches!(
             client.cover_url(None, &"é".repeat(MAX_LOOKUP_SCALARS + 1), "album"),
             Err(OnlineMetadataError::InvalidInput)
         ));
-        let (endpoint, received) = api_request(r#"{"album":[]}"#);
+        let (endpoint, received) = api_request(r#"{"album":null}"#);
         let client = TheAudioDbClient::with_test_api(endpoint);
         assert!(
             client
@@ -363,8 +373,8 @@ mod tests {
         );
         let request = received.recv_timeout(Duration::from_secs(1)).unwrap();
         assert!(request.contains("searchalbum.php"));
-        assert!(request.contains("s=beyonc%C3%A9"));
-        assert!(request.contains("a=thealbum"));
+        assert!(request.contains("s=Beyonc%C3%A9"));
+        assert!(request.contains("a=The+Album%21"));
     }
     #[test]
     fn high_byte_values_within_scalar_limit_are_rejected_when_encoded_url_exceeds_cap() {
@@ -500,5 +510,11 @@ mod tests {
             Err(OnlineMetadataError::InvalidInput)
         ));
         assert!(listener.accept().is_err());
+    }
+
+    #[test]
+    fn production_timeouts_cover_observed_tls_setup() {
+        assert_eq!(CONNECT_TIMEOUT, Duration::from_secs(10));
+        assert_eq!(REQUEST_TIMEOUT, Duration::from_secs(20));
     }
 }

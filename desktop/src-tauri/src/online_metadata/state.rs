@@ -15,10 +15,14 @@ use std::{
 use unlockm::metadata::provider::spotify::{
     SpotifyClient, SpotifyConfig, SpotifySearchResult, SpotifyToken,
 };
+#[cfg(test)]
+use unlockm::metadata::provider::{FREE_ARTWORK_SOURCE, FREE_ATTRIBUTION};
 use unlockm::metadata::provider::{
     OnlineMetadataCandidate, OnlineMetadataError, OnlineMetadataProviderKind,
 };
-use unlockm::metadata::provider::{musicbrainz::MusicBrainzClient, theaudiodb::TheAudioDbClient};
+use unlockm::metadata::provider::{
+    free_artwork::FreeArtworkClient, musicbrainz::MusicBrainzClient,
+};
 use url::Url;
 
 const ACCESS_EARLY_EXPIRY: Duration = Duration::from_secs(60);
@@ -130,7 +134,7 @@ impl SpotifyService for NetworkSpotifyService {
 
 /// Keeps the no-login providers independently injectable. In particular, the
 /// state layer can prove that a MusicBrainz text search does not accidentally
-/// trigger TheAudioDB lookup or image traffic.
+/// trigger Cover Art Archive, TheAudioDB, or image traffic.
 trait FreeMetadataService: Send + Sync {
     fn search_musicbrainz(
         &self,
@@ -159,10 +163,10 @@ impl FreeMetadataService for NetworkFreeMetadataService {
         artist: &str,
         album: &str,
     ) -> Result<Option<Url>, OnlineMetadataError> {
-        TheAudioDbClient::new()?.cover_url(release_group_id, artist, album)
+        FreeArtworkClient::new()?.cover_url(release_group_id, artist, album)
     }
     fn fetch_musicbrainz_cover(&self, url: &Url) -> Result<Vec<u8>, OnlineMetadataError> {
-        TheAudioDbClient::new()?.fetch_cover(url)
+        FreeArtworkClient::new()?.fetch_cover(url)
     }
 }
 
@@ -180,7 +184,7 @@ pub struct OnlineMetadataState {
     free_service: Arc<dyn FreeMetadataService>,
     generation: Arc<AtomicU64>,
     preview_permits: Arc<(Mutex<usize>, Condvar)>,
-    /// TheAudioDB album lookup is explicitly on-demand and single-flight.
+    /// Free artwork lookup is explicitly on-demand and single-flight.
     cover_lookup_gate: Arc<Mutex<()>>,
 }
 
@@ -628,10 +632,10 @@ impl OnlineMetadataState {
         generation: u64,
     ) -> Result<Vec<u8>, OnlineMetadataError> {
         let url = {
-            // Only the TheAudioDB lookup is single-flight. Once its fixed-host
-            // URL is bound to this current handle, image downloads may use the
-            // shared two-permit preview budget rather than serializing behind
-            // a slow lookup.
+            // Only the CAA/TheAudioDB lookup is single-flight. Once its
+            // fixed-host URL is bound to this current handle, image downloads
+            // may use the shared two-permit preview budget rather than
+            // serializing behind a slow lookup.
             let _lookup = self.cover_lookup_gate.lock().expect("cover lookup gate");
             let source = self
                 .cover_bindings
@@ -658,7 +662,7 @@ impl OnlineMetadataState {
                 None => (
                     self.free_service
                         .lookup_musicbrainz_cover(source.0.as_deref(), &source.1, &source.2)?
-                        .ok_or(OnlineMetadataError::Unavailable)?,
+                        .ok_or(OnlineMetadataError::ArtworkNotFound)?,
                     true,
                 ),
             };
@@ -1041,12 +1045,32 @@ mod tests {
             Ok(vec![1])
         }
     }
+    struct MissingCoverFreeService;
+    impl FreeMetadataService for MissingCoverFreeService {
+        fn search_musicbrainz(
+            &self,
+            _: &str,
+        ) -> Result<Vec<OnlineMetadataCandidate>, OnlineMetadataError> {
+            Ok(vec![mb_candidate()])
+        }
+        fn lookup_musicbrainz_cover(
+            &self,
+            _: Option<&str>,
+            _: &str,
+            _: &str,
+        ) -> Result<Option<Url>, OnlineMetadataError> {
+            Ok(None)
+        }
+        fn fetch_musicbrainz_cover(&self, _: &Url) -> Result<Vec<u8>, OnlineMetadataError> {
+            panic!("missing artwork must not dispatch an image request")
+        }
+    }
     fn mb_candidate() -> OnlineMetadataCandidate {
         OnlineMetadataCandidate {
             provider: OnlineMetadataProviderKind::MusicBrainz,
             requires_authorization: false,
-            artwork_source: Some("TheAudioDB"),
-            attribution: "MusicBrainz; artwork on demand from TheAudioDB",
+            artwork_source: Some(FREE_ARTWORK_SOURCE),
+            attribution: FREE_ATTRIBUTION,
             item_id: "11111111-1111-1111-1111-111111111111".into(),
             title: "song".into(),
             artists: vec!["artist".into()],
@@ -1201,6 +1225,27 @@ mod tests {
         assert!(candidates[0].cover_handle.is_some());
         assert_eq!(free.lookups.load(AtomicOrdering::SeqCst), 0);
         assert_eq!(free.fetches.load(AtomicOrdering::SeqCst), 0);
+    }
+    #[test]
+    fn missing_free_artwork_has_a_distinct_error_code() {
+        let state = OnlineMetadataState::with_services(
+            None,
+            Arc::new(MemoryCredentialStore(Mutex::new(None))),
+            Arc::new(|| 100),
+            Arc::new(MockService::new(vec![])),
+            Arc::new(MissingCoverFreeService),
+        );
+        let handle = state
+            .search_for(OnlineMetadataProviderKind::MusicBrainz, "song")
+            .unwrap()
+            .remove(0)
+            .cover_handle
+            .unwrap();
+        let error = state
+            .preview_cover(OnlineMetadataProviderKind::MusicBrainz, &handle)
+            .unwrap_err();
+        assert!(matches!(error, OnlineMetadataError::ArtworkNotFound));
+        assert_eq!(error.code(), "online_artwork_not_found");
     }
     #[test]
     fn same_musicbrainz_handle_coalesces_lookup_and_respects_preview_bound() {

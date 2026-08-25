@@ -194,6 +194,7 @@ export type OnlineMetadataCommandError = {
     | "authorization_failed"
     | "credential_unavailable"
     | "provider_unavailable"
+    | "online_artwork_not_found"
     | "request_timeout"
     | "provider_malformed_response"
     | "invalid_input";

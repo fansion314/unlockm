@@ -277,9 +277,10 @@ unlockm ~/Music/Encrypted -o ~/Music/Unlocked --watch --overwrite
 
 桌面端默认使用 MusicBrainz 搜索：它面向非商业使用免费、无需账号或 API key，且只会在用户
 明确发起搜索后联网。UnlockM 会发送有意义的 User-Agent，并将 MusicBrainz 请求限制为每秒
-一次。TheAudioDB 使用公开 `123` key 查找封面，但仅在点击“使用封面”或“全部填入”后进行，
-不会自动下载。商业或高流量的 MusicBrainz 使用需要另行采用 MetaBrainz 服务或取得适当协议。
-两个免费服务均只能由 Rust 访问固定主机，使用有界、禁止重定向的请求，webview 不会收到远程 URL。
+一次。封面优先使用 MusicBrainz Cover Art Archive，并以 TheAudioDB 公开 `123` key 作为 fallback；
+仅在点击“使用封面”或“全部填入”后进行，不会自动下载。商业或高流量的 MusicBrainz 使用需要另行
+采用 MetaBrainz 服务或取得适当协议。免费服务均只能由 Rust 访问受限主机并使用有界请求；除最多
+三次、严格验证为 `archive.org` 或其子域的 CAA 存储跳转外均禁止重定向，webview 不会收到远程 URL。
 
 Spotify 是需要 Premium 的可选 secondary provider；桌面端元数据编辑器仅在用户明确点击后才搜索
 Spotify，打开应用或编辑器不会联网。配置

@@ -1,7 +1,11 @@
 use serde_json::Value;
 use std::{fs, path::Path};
 use unlockm::metadata::provider::{
-    OnlineMetadataCandidate, OnlineMetadataProviderKind,
+    FREE_ARTWORK_SOURCE, FREE_ATTRIBUTION, OnlineMetadataCandidate, OnlineMetadataProviderKind,
+    coverartarchive::{
+        API_HOST as CAA_API_HOST, ARCHIVE_HOST as CAA_ARCHIVE_HOST,
+        ARCHIVE_SUBDOMAIN_SUFFIX as CAA_ARCHIVE_SUFFIX, MAX_REDIRECTS as CAA_MAX_REDIRECTS,
+    },
     musicbrainz::{HOST as MUSICBRAINZ_HOST, ROOT as MUSICBRAINZ_ROOT, USER_AGENT},
     spotify::{
         SPOTIFY_ACCOUNTS_HOST, SPOTIFY_API_HOST, SPOTIFY_AUTHORIZE_ENDPOINT, SPOTIFY_IMAGE_HOSTS,
@@ -115,6 +119,8 @@ fn online_metadata_boundary_is_handle_only_and_release_has_no_secret_path() {
     let store = workspace_file("src/online_metadata/credential_store.rs");
     let spotify = workspace_file("../../src/metadata/provider/spotify.rs");
     let musicbrainz = workspace_file("../../src/metadata/provider/musicbrainz.rs");
+    let coverartarchive = workspace_file("../../src/metadata/provider/coverartarchive.rs");
+    let free_artwork = workspace_file("../../src/metadata/provider/free_artwork.rs");
     let theaudiodb = workspace_file("../../src/metadata/provider/theaudiodb.rs");
     let provider_contract = workspace_file("../../src/metadata/provider/mod.rs");
     let contracts = workspace_file("../src/lib/contracts.ts");
@@ -136,8 +142,8 @@ fn online_metadata_boundary_is_handle_only_and_release_has_no_secret_path() {
     let candidate = OnlineMetadataCandidate {
         provider: OnlineMetadataProviderKind::MusicBrainz,
         requires_authorization: false,
-        artwork_source: Some("TheAudioDB"),
-        attribution: "MusicBrainz; artwork on demand from TheAudioDB",
+        artwork_source: Some(FREE_ARTWORK_SOURCE),
+        attribution: FREE_ATTRIBUTION,
         item_id: "11111111-1111-1111-1111-111111111111".into(),
         title: "title".into(),
         artists: vec!["artist".into()],
@@ -198,6 +204,16 @@ fn online_metadata_boundary_is_handle_only_and_release_has_no_secret_path() {
     assert!(musicbrainz.contains("USER_AGENT"));
     assert!(musicbrainz.contains("OneRequestPerSecond"));
     assert!(musicbrainz.contains("Policy::none"));
+    assert_eq!(CAA_API_HOST, "coverartarchive.org");
+    assert_eq!(CAA_ARCHIVE_HOST, "archive.org");
+    assert_eq!(CAA_ARCHIVE_SUFFIX, ".archive.org");
+    assert_eq!(CAA_MAX_REDIRECTS, 3);
+    assert!(coverartarchive.contains("Policy::none"));
+    assert!(coverartarchive.contains("Policy::custom"));
+    assert!(coverartarchive.contains("trusted_archive_url"));
+    assert!(coverartarchive.contains("validate_cover"));
+    assert!(free_artwork.contains("cover_art_archive.cover_url"));
+    assert!(free_artwork.contains("the_audio_db.cover_url"));
     assert_eq!(THEAUDIODB_API_HOST, "www.theaudiodb.com");
     assert_eq!(THEAUDIODB_IMAGE_HOST, "r2.theaudiodb.com");
     assert_eq!(PUBLIC_KEY, "123");
