@@ -139,7 +139,7 @@ Last updated: 2026-08-26
 
 - Goal: 修复 v0.4.0 GitHub Actions 在 Windows 上的两个 provider TCP fixture 失败，使 CI 验证的是生产错误/图片边界，而不是平台相关 socket 时序。
 - Dependencies: M11/M12 已发布代码与用户提供的 Windows CI failure evidence。
-- Acceptance: malformed TheAudioDB image fixture 在完整读取 request 后回传坏 bytes，稳定到达现有 `validate_cover` 路径；MusicBrainz offline fixture 使用已释放的动态 loopback port，不依赖保留/diagnostic port 9 的主机状态；其他 fixed-host/no-redirect/timeout/body-cap 语义不变。
+- Acceptance: malformed TheAudioDB image fixture 在完整读取 request 后回传坏 bytes，稳定到达现有 `validate_cover` 路径；MusicBrainz offline fixture 使用已释放的动态 loopback port，不依赖保留/diagnostic port 9 的主机状态，并允许 OS/reqwest 把无响应 transport 稳定映射为 `Unavailable` 或 `RequestTimeout`；redirect 与 slow-response 的精确错误断言保留，其他 fixed-host/no-redirect/timeout/body-cap 语义不变。
 - Validation: targeted provider tests repeated locally, full root fmt/clippy/all-targets/all-features, desktop Rust/security tests, and a fresh Windows GitHub Actions pass on the fix commit.
 
 ### M11 — Reliable free artwork sources
@@ -385,8 +385,10 @@ Last updated: 2026-08-26
 
 ## Progress
 
-- [ ] 2026-08-26：M13 开始。v0.4.0 GitHub Actions 的 Windows root suite 中 154/156 通过，失败仅为 `musicbrainz::local_redirect_and_offline_are_rejected` 与 `theaudiodb::malformed_cover_bytes_are_rejected_by_existing_cover_validator`；macOS 同一代码通过。初步 review 确认前者硬编码 `127.0.0.1:9`，后者的 fixture 在未读 HTTP request 时立即写响应，两者都依赖平台 socket 行为。
+- [x] 2026-08-26：M13 开始。v0.4.0 GitHub Actions 的 Windows root suite 中 154/156 通过，失败仅为 `musicbrainz::local_redirect_and_offline_are_rejected` 与 `theaudiodb::malformed_cover_bytes_are_rejected_by_existing_cover_validator`；macOS 同一代码通过。初步 review 确认前者硬编码 `127.0.0.1:9`，后者的 fixture 在未读 HTTP request 时立即写响应，两者都依赖平台 socket 行为。
 - [x] 2026-08-26：T13.1 实现并通过本地 review。MusicBrainz offline fixture 现在由 OS 分配后释放的 loopback port 制造连接拒绝；TheAudioDB malformed/redirect image fixtures 先读取 client request 再回应，避免 Windows 上 request/response socket reset race；两个断言补充了实际错误输出。Targeted tests、root fmt/clippy/all-targets+features (191)、desktop clippy/all-targets (90)/security (4)/license (1)、Vite+ fmt/check 及 diff check 均通过。macOS 本地 MSVC cross-check 因缺少 Windows SDK `windows.h`/`stdlib.h` 在 `aws-lc-sys` 阶段停止，不计为代码通过；待原生 GitHub Windows runner 验证。
+- [x] 2026-08-26：commit `db0cde8` 的 fresh CI run `32919264941` 中 Ubuntu CLI、macOS CLI/desktop 与 Windows desktop 均通过；Windows CLI 的 TheAudioDB malformed-cover 已修复通过，唯一失败缩减为 MusicBrainz offline fixture，实际值为 `Err(RequestTimeout)`。这证明 Windows/reqwest 可把 closed loopback 映射为 timeout，而非 macOS 的 immediate unavailable；T13.1 重开，改为验证两种合法 network error category，同时保留 redirect/slow fixture 的精确分类。
+- [x] 2026-08-26：T13.1 follow-up ready。Offline assertion 只放宽为 `Unavailable | RequestTimeout`，redirect/slow-response 仍分别精确断言 `Unavailable`/`RequestTimeout`，production mapper 未变。Targeted MusicBrainz test、root fmt/clippy 和 all-targets+features 191 tests 重新通过；待新 commit 的原生 Windows CI。
 
 - [x] 2026-08-26：v0.4.0 release sequence complete。Implementation commit `7563634` 包含 M11 code/tests/docs 与 0.4.0 version bump；紧随其后的 release-record commit 是 annotated `v0.4.0` 指向对象。`main` 与 `refs/tags/v0.4.0` 已以非 force push 同步到 `origin`、`github`，并通过 remote refs 回读验证。（本条在 release-record snapshot 中预先描述紧接执行的外部步骤，最终远端状态由发布会话核验。）
 - [x] 2026-08-26：M11 final review **Pass**。Review follow-up 修复 clean no-source 与 network/validation failure 混淆，新增 stable `ArtworkNotFound`/`online_artwork_not_found`，后端保证无 source 不 dispatch image、前端三语明确提示。Full release validation：root fmt/clippy、all targets/features 191，watch 2+2、no-network 1、provider mock 1；desktop clippy、all-targets 90、online 29、security 4、license 1；Vite+ 19 files/125、fmt/check/build；Tauri debug no-bundle/app bundle 全部通过。无 blocker/major/minor/nit。
@@ -457,6 +459,7 @@ Last updated: 2026-08-26
 ## Discoveries
 
 - Windows runner 并不保证 `127.0.0.1:9` 表现为立即 connection-refused；保留/diagnostic port 可被过滤并最终映射成 timeout。本地 HTTP fixture 若在未消费 client request 时立即 close/write，Windows 也可能先报 socket reset，使测试无法到达原本要验证的 payload validator。
+- 即使先由 OS 分配再释放动态 loopback port，GitHub Windows runner 的 reqwest 仍在 1s client deadline 后返回 `RequestTimeout`；同一 fixture 在 macOS/Linux 返回 `Unavailable`。“无法建立连接”的 OS transport 错误类别本来就可能是 immediate refusal 或 timeout，测试不应伪造跨 OS 单一底层类别。
 
 - 用户没有 Spotify Premium；Spotify Development Mode 的 Premium owner/最多 5 用户约束使其不能作为当前用户可用的默认搜索路径。MusicBrainz + TheAudioDB 将作为无需登录的 primary 方向，具体 endpoint、rate limit、attribution、cover policy 和 license 仍待官方约束核对。
 
@@ -505,7 +508,7 @@ Last updated: 2026-08-26
 - **2026-08-26 — D19:** 本地封面候选在左 pane 使用 `repeat(auto-fill, minmax(112px, 1fr))`，典型桌面宽度形成三列；button 固定 `104px + two-line label` rows 且 `overflow:hidden`，图片使用固定 block-size/`object-fit:cover`。不再依赖 replaced image intrinsic aspect ratio 参与 outer grid row sizing。
 - **2026-08-26 — D20:** 免费封面主源改为 MusicBrainz Cover Art Archive release-group `front-500`，TheAudioDB 降为 fallback。CAA lookup 禁止自动 redirect并验证首个 storage location；image fetch 仅允许 HTTPS `coverartarchive.org`、`archive.org` 和 `*.archive.org`，最多 3 次 redirect，继续执行 bytes cap 与 `validate_cover`。不允许调用方 URL 或通用 redirect policy。
 - **2026-08-26 — D21:** TheAudioDB `album:null` 是合法 empty response；API query 发送 bounded trimmed original artist/album，NFKC/lower/alphanumeric normalize 只用于响应后的唯一 exact comparison。Production timeout 与已验证网络基线统一为 10s connect/20s total。
-- **2026-08-26 — D22:** Windows CI 的 provider regression 仅修正 test transport：offline 端口由 OS 动态分配后释放，malformed image server 在回应前先消费 request。不放宽 production `Unavailable`/`RequestTimeout` 区分，不把两种错误粗略合并，也不跳过现有 `validate_cover`。
+- **2026-08-26 — D22:** Windows CI 的 provider regression 仅修正 test transport/expectation：offline 端口由 OS 动态分配后释放，malformed image server 在回应前先消费 request。Production 仍分别映射 reqwest timeout 为 `RequestTimeout`、其他 transport failure 为 `Unavailable`；offline fixture 允许 OS 产生任一合法类别，redirect 仍精确断言 `Unavailable`、slow response 仍精确断言 `RequestTimeout`，不跳过现有 `validate_cover`。
 
 ## Review Notes
 

@@ -487,8 +487,9 @@ mod tests {
     }
     fn unused_loopback_endpoint() -> Url {
         // Ask the OS for an actually unused port instead of assuming that the
-        // diagnostic discard port is closed. In particular, Windows runners
-        // may filter or reserve port 9 and turn this fixture into a timeout.
+        // diagnostic discard port is closed. The resulting transport failure
+        // may be an immediate refusal or a timeout depending on the OS network
+        // stack, but it must never be mistaken for a successful response.
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         drop(listener);
@@ -540,7 +541,7 @@ mod tests {
         ));
     }
     #[test]
-    fn local_redirect_and_offline_are_rejected() {
+    fn local_redirect_and_offline_are_rejected_with_stable_network_errors() {
         let scheduler = Arc::new(CountingScheduler(AtomicUsize::new(0)));
         let (redirect, _) = local_response("302 Found\r\nLocation: http://127.0.0.1/next", "");
         let redirect_result = MusicBrainzClient::with_test_endpoint(redirect, scheduler.clone())
@@ -559,6 +560,7 @@ mod tests {
             matches!(
                 offline_result,
                 Err(super::super::OnlineMetadataError::Unavailable)
+                    | Err(super::super::OnlineMetadataError::RequestTimeout)
             ),
             "unexpected offline result: {offline_result:?}"
         );
