@@ -2,7 +2,7 @@
 
 ## Status
 
-In Review
+In Progress
 
 Last updated: 2026-08-26
 
@@ -135,6 +135,13 @@ Last updated: 2026-08-26
 
 > 2026-08-25 priority revision: M1–M4 record completed/reviewed Spotify-secondary foundation work. Before further implementation, define new primary-provider milestones for MusicBrainz text search and TheAudioDB artwork after official API constraints are verified. M5 native QA must test the free primary path first; Spotify QA becomes optional Premium-account coverage.
 
+### M13 — Windows-stable provider fixtures
+
+- Goal: 修复 v0.4.0 GitHub Actions 在 Windows 上的两个 provider TCP fixture 失败，使 CI 验证的是生产错误/图片边界，而不是平台相关 socket 时序。
+- Dependencies: M11/M12 已发布代码与用户提供的 Windows CI failure evidence。
+- Acceptance: malformed TheAudioDB image fixture 在完整读取 request 后回传坏 bytes，稳定到达现有 `validate_cover` 路径；MusicBrainz offline fixture 使用已释放的动态 loopback port，不依赖保留/diagnostic port 9 的主机状态；其他 fixed-host/no-redirect/timeout/body-cap 语义不变。
+- Validation: targeted provider tests repeated locally, full root fmt/clippy/all-targets/all-features, desktop Rust/security tests, and a fresh Windows GitHub Actions pass on the fix commit.
+
 ### M11 — Reliable free artwork sources
 
 - Goal: 让 MusicBrainz 候选优先从 Cover Art Archive 获取封面，并修复 TheAudioDB 真实 null/timeout/query fallback，使“未收录”和网络失败不再互相伪装。
@@ -254,6 +261,9 @@ Last updated: 2026-08-26
   - 独立 review 检查安全、政策、计划状态和验证证据。
 
 ## Task Breakdown
+
+- [x] T13.1 修正 MusicBrainz/TheAudioDB local TCP fixtures 的 Windows 可移植性，增强失败输出，并重复运行定向测试排除时序失败。
+- [ ] T13.2 执行 root/desktop 完整自动化、更新 plan evidence，提交并推送两个远端，确认新 Windows CI 运行通过。
 
 - [x] T11.1 新建 `src/metadata/provider/coverartarchive.rs`：release-group `front-500` lookup、10s/20s bounded clients、no automatic redirects for lookup、最多 3 次且仅 `archive.org`/子域的 HTTPS fetch redirects、body cap/`validate_cover` 和恶意 redirect fixtures。
 - [x] T11.2 修复 `theaudiodb.rs`：10s connect/20s total；真实 `album:null` 映射为空并继续 fallback；API 发送 trim 后原始 artist/album，normalize 只用于唯一 exact response comparison；补 raw-vs-normalized 与 null fixtures。
@@ -375,6 +385,9 @@ Last updated: 2026-08-26
 
 ## Progress
 
+- [ ] 2026-08-26：M13 开始。v0.4.0 GitHub Actions 的 Windows root suite 中 154/156 通过，失败仅为 `musicbrainz::local_redirect_and_offline_are_rejected` 与 `theaudiodb::malformed_cover_bytes_are_rejected_by_existing_cover_validator`；macOS 同一代码通过。初步 review 确认前者硬编码 `127.0.0.1:9`，后者的 fixture 在未读 HTTP request 时立即写响应，两者都依赖平台 socket 行为。
+- [x] 2026-08-26：T13.1 实现并通过本地 review。MusicBrainz offline fixture 现在由 OS 分配后释放的 loopback port 制造连接拒绝；TheAudioDB malformed/redirect image fixtures 先读取 client request 再回应，避免 Windows 上 request/response socket reset race；两个断言补充了实际错误输出。Targeted tests、root fmt/clippy/all-targets+features (191)、desktop clippy/all-targets (90)/security (4)/license (1)、Vite+ fmt/check 及 diff check 均通过。macOS 本地 MSVC cross-check 因缺少 Windows SDK `windows.h`/`stdlib.h` 在 `aws-lc-sys` 阶段停止，不计为代码通过；待原生 GitHub Windows runner 验证。
+
 - [x] 2026-08-26：v0.4.0 release sequence complete。Implementation commit `7563634` 包含 M11 code/tests/docs 与 0.4.0 version bump；紧随其后的 release-record commit 是 annotated `v0.4.0` 指向对象。`main` 与 `refs/tags/v0.4.0` 已以非 force push 同步到 `origin`、`github`，并通过 remote refs 回读验证。（本条在 release-record snapshot 中预先描述紧接执行的外部步骤，最终远端状态由发布会话核验。）
 - [x] 2026-08-26：M11 final review **Pass**。Review follow-up 修复 clean no-source 与 network/validation failure 混淆，新增 stable `ArtworkNotFound`/`online_artwork_not_found`，后端保证无 source 不 dispatch image、前端三语明确提示。Full release validation：root fmt/clippy、all targets/features 191，watch 2+2、no-network 1、provider mock 1；desktop clippy、all-targets 90、online 29、security 4、license 1；Vite+ 19 files/125、fmt/check/build；Tauri debug no-bundle/app bundle 全部通过。无 blocker/major/minor/nit。
 - [x] 2026-08-26：T12.2 release-ready。0.4.0 no-bundle 与 `.app` 构建成功；Info.plist `CFBundleShortVersionString`/`CFBundleVersion` 均 0.4.0，identifier `world.fansionia.unlockm`，arm64 executable 与 bundled `THIRD_PARTY_NOTICES.md` 存在。仅保留既存 ineffective dynamic import 与 >500 KiB chunk warnings。T8.1 完整 MP3/FLAC Save/restart 与 T5.2-T5.4 Spotify/Windows 外部门禁继续保留，不阻止本次用户明确要求的 v0.4.0 tag/push。
@@ -443,6 +456,8 @@ Last updated: 2026-08-26
 
 ## Discoveries
 
+- Windows runner 并不保证 `127.0.0.1:9` 表现为立即 connection-refused；保留/diagnostic port 可被过滤并最终映射成 timeout。本地 HTTP fixture 若在未消费 client request 时立即 close/write，Windows 也可能先报 socket reset，使测试无法到达原本要验证的 payload validator。
+
 - 用户没有 Spotify Premium；Spotify Development Mode 的 Premium owner/最多 5 用户约束使其不能作为当前用户可用的默认搜索路径。MusicBrainz + TheAudioDB 将作为无需登录的 primary 方向，具体 endpoint、rate limit、attribution、cover policy 和 license 仍待官方约束核对。
 
 - 现有编辑器已经把草稿编辑与最终文件 mutation 分开；在线候选只需进入草稿即可天然复用原子写入、播放器 release/restore 和 history reconciliation，无需新建第二条 tag pipeline。
@@ -490,6 +505,7 @@ Last updated: 2026-08-26
 - **2026-08-26 — D19:** 本地封面候选在左 pane 使用 `repeat(auto-fill, minmax(112px, 1fr))`，典型桌面宽度形成三列；button 固定 `104px + two-line label` rows 且 `overflow:hidden`，图片使用固定 block-size/`object-fit:cover`。不再依赖 replaced image intrinsic aspect ratio 参与 outer grid row sizing。
 - **2026-08-26 — D20:** 免费封面主源改为 MusicBrainz Cover Art Archive release-group `front-500`，TheAudioDB 降为 fallback。CAA lookup 禁止自动 redirect并验证首个 storage location；image fetch 仅允许 HTTPS `coverartarchive.org`、`archive.org` 和 `*.archive.org`，最多 3 次 redirect，继续执行 bytes cap 与 `validate_cover`。不允许调用方 URL 或通用 redirect policy。
 - **2026-08-26 — D21:** TheAudioDB `album:null` 是合法 empty response；API query 发送 bounded trimmed original artist/album，NFKC/lower/alphanumeric normalize 只用于响应后的唯一 exact comparison。Production timeout 与已验证网络基线统一为 10s connect/20s total。
+- **2026-08-26 — D22:** Windows CI 的 provider regression 仅修正 test transport：offline 端口由 OS 动态分配后释放，malformed image server 在回应前先消费 request。不放宽 production `Unavailable`/`RequestTimeout` 区分，不把两种错误粗略合并，也不跳过现有 `validate_cover`。
 
 ## Review Notes
 

@@ -485,6 +485,15 @@ mod tests {
         });
         Url::parse(&format!("http://{address}/")).unwrap()
     }
+    fn unused_loopback_endpoint() -> Url {
+        // Ask the OS for an actually unused port instead of assuming that the
+        // diagnostic discard port is closed. In particular, Windows runners
+        // may filter or reserve port 9 and turn this fixture into a timeout.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        Url::parse(&format!("http://{address}/")).unwrap()
+    }
     #[test]
     fn builds_bounded_plain_dismax_query() {
         assert_eq!(recording_query("  a+b  ").unwrap(), "a+b");
@@ -534,16 +543,25 @@ mod tests {
     fn local_redirect_and_offline_are_rejected() {
         let scheduler = Arc::new(CountingScheduler(AtomicUsize::new(0)));
         let (redirect, _) = local_response("302 Found\r\nLocation: http://127.0.0.1/next", "");
-        assert!(matches!(
-            MusicBrainzClient::with_test_endpoint(redirect, scheduler.clone())
-                .search_recordings("song", 1),
-            Err(super::super::OnlineMetadataError::Unavailable)
-        ));
-        let offline = Url::parse("http://127.0.0.1:9/").unwrap();
-        assert!(matches!(
-            MusicBrainzClient::with_test_endpoint(offline, scheduler).search_recordings("song", 1),
-            Err(super::super::OnlineMetadataError::Unavailable)
-        ));
+        let redirect_result = MusicBrainzClient::with_test_endpoint(redirect, scheduler.clone())
+            .search_recordings("song", 1);
+        assert!(
+            matches!(
+                redirect_result,
+                Err(super::super::OnlineMetadataError::Unavailable)
+            ),
+            "unexpected redirect result: {redirect_result:?}"
+        );
+        let offline_result =
+            MusicBrainzClient::with_test_endpoint(unused_loopback_endpoint(), scheduler)
+                .search_recordings("song", 1);
+        assert!(
+            matches!(
+                offline_result,
+                Err(super::super::OnlineMetadataError::Unavailable)
+            ),
+            "unexpected offline result: {offline_result:?}"
+        );
     }
     #[test]
     fn chunked_response_larger_than_cap_is_rejected() {

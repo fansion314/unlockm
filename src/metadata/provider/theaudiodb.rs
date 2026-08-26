@@ -429,16 +429,22 @@ mod tests {
         let address = listener.local_addr().unwrap();
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            // Consume the request before responding. Writing immediately can
+            // race the client's request body on Windows and surface a socket
+            // reset instead of exercising the cover validator below.
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request);
             let _ = write!(
                 stream,
                 "HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot-image"
             );
         });
         let url = Url::parse(&format!("http://{address}/cover.bin")).unwrap();
-        assert!(matches!(
-            TheAudioDbClient::with_test_image(url.clone()).fetch_cover(&url),
-            Err(OnlineMetadataError::MalformedResponse)
-        ));
+        let result = TheAudioDbClient::with_test_image(url.clone()).fetch_cover(&url);
+        assert!(
+            matches!(result, Err(OnlineMetadataError::MalformedResponse)),
+            "unexpected malformed-cover result: {result:?}"
+        );
     }
     #[test]
     fn chunked_cover_larger_than_cap_is_rejected_without_content_length() {
@@ -480,6 +486,8 @@ mod tests {
         let address = listener.local_addr().unwrap();
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request);
             let _ = write!(
                 stream,
                 "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1/next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
