@@ -2,7 +2,7 @@
 
 ## Status
 
-In Progress
+In Review
 
 Last updated: 2026-08-26
 
@@ -263,7 +263,7 @@ Last updated: 2026-08-26
 ## Task Breakdown
 
 - [x] T13.1 修正 MusicBrainz/TheAudioDB local TCP fixtures 的 Windows 可移植性，增强失败输出，并重复运行定向测试排除时序失败。
-- [ ] T13.2 执行 root/desktop 完整自动化、更新 plan evidence，提交并推送两个远端，确认新 Windows CI 运行通过。
+- [x] T13.2 执行 root/desktop 完整自动化、更新 plan evidence，提交并推送两个远端，确认新 Windows CI 运行通过。
 
 - [x] T11.1 新建 `src/metadata/provider/coverartarchive.rs`：release-group `front-500` lookup、10s/20s bounded clients、no automatic redirects for lookup、最多 3 次且仅 `archive.org`/子域的 HTTPS fetch redirects、body cap/`validate_cover` 和恶意 redirect fixtures。
 - [x] T11.2 修复 `theaudiodb.rs`：10s connect/20s total；真实 `album:null` 映射为空并继续 fallback；API 发送 trim 后原始 artist/album，normalize 只用于唯一 exact response comparison；补 raw-vs-normalized 与 null fixtures。
@@ -272,6 +272,7 @@ Last updated: 2026-08-26
 - [x] T12.1 将 root/desktop/Tauri 版本与 lockfile 更新为 0.4.0，核对 release docs/config/notice，无新增依赖或 secret。
 - [x] T12.2 执行完整 release validation、debug no-bundle/app bundle 和最终 plan review，记录 warnings、commit candidate 与 remaining external gaps。
 - [x] T12.3 conventional commit 全部相关变更，创建 annotated `v0.4.0`，推送 `main` 与 tag 到 `origin`、`github` 并读取远端 refs 验证。
+- [ ] T12.4 在用户明确授权改写已发布 tag 后，重建 annotated `v0.4.0` 指向通过 Windows CI 的 reviewed commit，以 lease-protected force 同步 `origin`/`github`，并确认 tag-only desktop release workflow 与四个 artifact/checksum 全部成功。
 
 - [x] T10.1 重构 `MetadataEditor.tsx` DOM 和 `history.css`：桌面 46/54 双栏、独立滚动、固定 actions、左侧字段/封面草稿、右侧搜索；<860px 显式单栏回退并保持 focus trap。
 - [x] T10.2 将 MusicBrainz/Spotify candidate 统一渲染为字段化结果列表，加入标题/歌手/专辑/时长/元数据来源/封面来源标签、结果计数、loading/empty/error 头部状态和不折行 actions。
@@ -389,6 +390,8 @@ Last updated: 2026-08-26
 - [x] 2026-08-26：T13.1 实现并通过本地 review。MusicBrainz offline fixture 现在由 OS 分配后释放的 loopback port 制造连接拒绝；TheAudioDB malformed/redirect image fixtures 先读取 client request 再回应，避免 Windows 上 request/response socket reset race；两个断言补充了实际错误输出。Targeted tests、root fmt/clippy/all-targets+features (191)、desktop clippy/all-targets (90)/security (4)/license (1)、Vite+ fmt/check 及 diff check 均通过。macOS 本地 MSVC cross-check 因缺少 Windows SDK `windows.h`/`stdlib.h` 在 `aws-lc-sys` 阶段停止，不计为代码通过；待原生 GitHub Windows runner 验证。
 - [x] 2026-08-26：commit `db0cde8` 的 fresh CI run `32919264941` 中 Ubuntu CLI、macOS CLI/desktop 与 Windows desktop 均通过；Windows CLI 的 TheAudioDB malformed-cover 已修复通过，唯一失败缩减为 MusicBrainz offline fixture，实际值为 `Err(RequestTimeout)`。这证明 Windows/reqwest 可把 closed loopback 映射为 timeout，而非 macOS 的 immediate unavailable；T13.1 重开，改为验证两种合法 network error category，同时保留 redirect/slow fixture 的精确分类。
 - [x] 2026-08-26：T13.1 follow-up ready。Offline assertion 只放宽为 `Unavailable | RequestTimeout`，redirect/slow-response 仍分别精确断言 `Unavailable`/`RequestTimeout`，production mapper 未变。Targeted MusicBrainz test、root fmt/clippy 和 all-targets+features 191 tests 重新通过；待新 commit 的原生 Windows CI。
+- [x] 2026-08-26：M13 complete。Follow-up commit `ac0aee3` 已推送 `origin/main` 与 `github/main`；GitHub CI run [`32920614739`](https://github.com/fansion314/unlockm/actions/runs/32920614739) 的 5 个 jobs 全部成功。Windows CLI 通过 fmt/clippy/workspace all-targets+features、serial watch recursive/stability 和 release build；Windows desktop 通过 Vite+ fmt/check/test/build、Rust clippy/all-targets/security/license 与 Tauri no-bundle build。Ubuntu/macOS CLI 与 macOS desktop 同时全绿；两个原始 Windows 失败均已关闭。
+- [ ] 2026-08-26：v0.4.0 release correction 等待用户对 published-tag rewrite 的明确授权。两个远端的 `main` 均为 `ac0aee3`，但 annotated tag object `238179b` 仍 peeled 到旧 commit `bb8c8e8`；该 snapshot 的 desktop release run [`32878996709`](https://github.com/fansion314/unlockm/actions/runs/32878996709) 失败，且 `gh release view v0.4.0` 确认尚未创建 GitHub release。不能用 main CI 通过代替 tag-only release workflow。
 
 - [x] 2026-08-26：v0.4.0 release sequence complete。Implementation commit `7563634` 包含 M11 code/tests/docs 与 0.4.0 version bump；紧随其后的 release-record commit 是 annotated `v0.4.0` 指向对象。`main` 与 `refs/tags/v0.4.0` 已以非 force push 同步到 `origin`、`github`，并通过 remote refs 回读验证。（本条在 release-record snapshot 中预先描述紧接执行的外部步骤，最终远端状态由发布会话核验。）
 - [x] 2026-08-26：M11 final review **Pass**。Review follow-up 修复 clean no-source 与 network/validation failure 混淆，新增 stable `ArtworkNotFound`/`online_artwork_not_found`，后端保证无 source 不 dispatch image、前端三语明确提示。Full release validation：root fmt/clippy、all targets/features 191，watch 2+2、no-network 1、provider mock 1；desktop clippy、all-targets 90、online 29、security 4、license 1；Vite+ 19 files/125、fmt/check/build；Tauri debug no-bundle/app bundle 全部通过。无 blocker/major/minor/nit。
@@ -512,12 +515,15 @@ Last updated: 2026-08-26
 
 ## Review Notes
 
+- [ ] **Blocker — v0.4.0 published tag still targets the failed snapshot:** both remotes still expose tag object `238179b` peeled to `bb8c8e8`, while the reviewed Windows-green source is `ac0aee3`; release run `32878996709` failed and no GitHub v0.4.0 release exists. Resolving this requires an explicit user-authorized published-tag rewrite (or a separately approved version bump), followed by full tag workflow/artifact verification.
+- [x] **2026-08-26 — M13 review Pass:** 变更只位于 `#[cfg(test)]` loopback fixtures/断言与 plan evidence，未改 production client、timeout、fixed-host、redirect、body cap 或 image validation。TheAudioDB bad bytes 在 Windows 稳定到达 `validate_cover`；MusicBrainz redirect/slow response 仍保持精确错误，offline 只接受 OS 可能产生的两个现有 network error code。Local full gates 与 native Windows CI run `32920614739` 全通过，无 M13 finding 遗留。
 - [x] **2026-08-26 — M11/M12 release review Pass:** CAA lookup 只由 MBID 构造，首个 storage location 必须是 HTTPS `archive.org`/子域；fetch custom policy 同一 allowlist且最多 3 redirects，所有 bytes cap/validate。Composite tests prove CAA hit zero TADB dispatch、CAA 404→TADB null→raw multiword exact fallback、clean none 与 host-dispatched fetch。Native TENT CAA preview/Cancel passed。Version/lock/config/bundle audit is consistent at 0.4.0. No code or plan finding remains for M11/M12；tag/push task T12.3 is the only release action pending.
 - [x] **2026-08-26 — Pass with Notes after theme merge `6b8a248`:** 当前 HEAD `6b8a248` 位于 M9/M10 commit `5123c6c` 之后。主题提交保留 split workspace/cover draft/result semantics，并新增 rate-limit deadline 自动清除与 `applyTheme("nord")` 时 open editor/unsaved title 保持测试。独立复验：Vite+ fmt/check/build 通过，19 files/124 tests 通过；root provider 32、desktop online 28、desktop all-targets 89、security 4、license 1、desktop clippy 和 debug `.app` bundle build 通过。`theme-contract.test.ts` 覆盖全部 9 preset 的完整 semantic tokens、action/state/focus contrast；原生 Rosé Pine Dawn 与 Tokyo Night 抽样确认 dialog、双栏、错误 alert、本地封面三列/两行 label、固定 actions 和焦点对比度正常，QA 草稿 Cancel 后将主题恢复为原 Rosé Pine Dawn 并退出。实时 MusicBrainz 在 Tokyo Night 下连续两次返回真实 `provider_unavailable`，因此本轮未宣称新主题下 live populated result-card pass；现有 M10 live result evidence与确定性 result DOM/theme contract 仍有效。无代码 finding，既有 T8.1/T5.2–T5.4 外部缺口不变。
 
 ## Completion Evidence
 
-- v0.4.0 release: implementation commit `7563634` plus the final release-record commit are reachable from `main`; annotated tag `v0.4.0` resolves to the release-record commit. Both `origin` (`gitea:fansion/unlockm`) and `github` (`git@github.com:fansion314/unlockm.git`) expose the same `main` and peeled `v0.4.0^{}` commit after non-force pushes. No signing/OAuth/client secret was added.
+- M13 Windows CI recovery (2026-08-26): `db0cde8` fixed TheAudioDB request/response ordering and removed fixed port 9, after which native Windows proved closed loopback may classify as `RequestTimeout`; `ac0aee3` retained exact redirect/slow classifications while accepting either existing offline network category. Local root fmt/clippy/all-targets+features (191) passed. GitHub CI run [`32920614739`](https://github.com/fansion314/unlockm/actions/runs/32920614739) passed all five Ubuntu/macOS/Windows CLI+desktop jobs, including Windows release and Tauri no-bundle builds. No production code or dependency changed.
+- v0.4.0 initial tag/push (historical, not release-complete): implementation commit `7563634` and release-record commit `bb8c8e8` are reachable from `main`; both remotes expose annotated tag object `238179b` peeled to `bb8c8e8`. The tag-only desktop release run `32878996709` failed its Windows tests and did not create a GitHub release. M13 subsequently produced Windows-green main commit `ac0aee3`; the published tag remains unchanged pending explicit rewrite authorization. No signing/OAuth/client secret was added.
 - M11/M12 release candidate (2026-08-26): CAA 6, TheAudioDB 13, composite free artwork 4, full provider 43; desktop online 29, all-targets 90, security 4, license 1; root all targets/features 191 plus serial watch/no-network/provider mock; Vite+ 19 files/125 plus fmt/check/build; debug no-bundle and `.app` 0.4.0 builds passed. Native `Jackie / toconoma / TENT` retrieved a real CAA front image through validated archive redirects, displayed it only in the draft, then Cancel/reopen proved no persistence. No dependency was added. Existing Vite warnings are unchanged. Implementation commit/tag/remote evidence is recorded by T12.3 after release actions.
 
 - M10 desktop workspace (2026-08-26): targeted `rtk vp -C desktop test --run MetadataEditor.test.tsx` passed (34); full Vite+ test passed (17 files/102); Vite+ fmt/check/build passed; root provider subset passed (32), desktop online metadata (28), security policy (4), and diff check passed. Native debug `.app` light/dark wide-layout QA showed 46/54 independent panes, fixed actions, labeled 10-result list, and corrected three-column local artwork cards with contained 104px images and two-line labels. A real TheAudioDB timeout rendered the visible cover-service failure above results and inside the candidate; deterministic tests prove successful bytes create/revoke the left draft preview and remain draft-only until Save. Narrow fallback is source-locked at 860px/560px; native resize was unavailable through Computer Use and is not claimed.
